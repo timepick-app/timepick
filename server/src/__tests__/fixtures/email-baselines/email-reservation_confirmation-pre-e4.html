@@ -1,0 +1,50 @@
+<!--
+  Baseline pre-E4 — sendReservationEmail
+  Source: server/src/services/email.service.ts:759-813 (HTML literal lines 787-809)
+  Test inputs:
+    userEmail: user@example.com
+    userName: "Jean Dupont"
+    eventName: "Soirée Annuelle 2026"
+    slotDate: "15 juin 2026"
+    slotTime: "14h00 - 15h00"
+  Subject: "Confirmation de réservation - Soirée Annuelle 2026"
+  Captured: 2026-05-02 (audit story 25-0/T3, AC3)
+-->
+<!-- TEXT-PART (sendReservationEmail line 775):
+Bonjour Jean Dupont,
+
+Votre réservation a été confirmée pour :
+
+Événement : Soirée Annuelle 2026
+Date : 15 juin 2026
+Horaires : 14h00 - 15h00
+
+Merci pour votre engagement ! Vous pourrez annuler cette réservation depuis le calendrier si nécessaire.
+
+Cordialement,
+L'équipe d'organisation
+-->
+
+<div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+<p>Bonjour <strong>Jean Dupont</strong>,</p>
+<p>Votre réservation a été <strong>confirmée</strong> pour :</p>
+<table style="border-collapse: collapse; margin: 20px 0;">
+  <tr>
+    <td style="padding: 8px; font-weight: bold; border: 1px solid #ddd;">Événement :</td>
+    <td style="padding: 8px; border: 1px solid #ddd;">Soirée Annuelle 2026</td>
+  </tr>
+  <tr>
+    <td style="padding: 8px; font-weight: bold; border: 1px solid #ddd;">Date :</td>
+    <td style="padding: 8px; border: 1px solid #ddd;">15 juin 2026</td>
+  </tr>
+  <tr>
+    <td style="padding: 8px; font-weight: bold; border: 1px solid #ddd;">Horaires :</td>
+    <td style="padding: 8px; border: 1px solid #ddd;">14h00 - 15h00</td>
+  </tr>
+</table>
+<div style="background-color: #ecfdf5; border-left: 4px solid #10b981; padding: 12px; margin: 20px 0;">
+  <p style="margin: 0; color: #065f46; font-weight: bold;">✓ Réservation confirmée</p>
+</div>
+<p>Merci pour votre engagement ! Vous pourrez annuler cette réservation depuis le calendrier si nécessaire.</p>
+<p style="margin-top: 20px;">Cordialement,<br><strong>L'équipe d'organisation</strong></p>
+</div>

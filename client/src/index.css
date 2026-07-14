@@ -1,0 +1,919 @@
+@import '@fontsource-variable/inter';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 4.8% 70%;
+    --radius: 0.5rem;
+
+    /* Slot status colors for calendar - uniform with admin */
+    /* Light mode: muted pastel backgrounds, white text (product decision 2026-05-30) */
+    --slot-available: 157.3 31.7% 59.2%;   /* sage */
+    --slot-available-foreground: 0 0% 100%;
+    --slot-partial: 289.4 16.2% 58.8%;     /* lavender */
+    --slot-partial-foreground: 0 0% 100%;
+    --slot-full: 9.2 17.3% 55.9%;          /* terracotta */
+    --slot-full-foreground: 0 0% 100%;
+
+    /* ==========================================================================
+     * TYPOGRAPHY SCALE - Fluid using clamp()
+     * ==========================================================================
+     *
+     * Viewport range: 640px (sm breakpoint) to 1536px (2xl breakpoint)
+     * Range difference: 896px
+     *
+     * FORMULA EXPLANATION:
+     * --------------------
+     * clamp(min, preferred, max)
+     *
+     * preferred = base + vw-multiplier
+     *
+     * For a given font size going from MIN_PX to MAX_PX across 640px-1536px viewport:
+     *
+     *   vw-multiplier = (MAX_PX - MIN_PX) * 100 / 896
+     *   base (in px)  = MIN_PX - (vw-multiplier * 640 / 100)
+     *   base (in rem) = base_px / 16
+     *
+     * EXAMPLE for h1 (30px to 48px):
+     *   vw-multiplier = (48 - 30) * 100 / 896 = 1800 / 896 = 2.0089
+     *   base_px       = 30 - (2.0089 * 640 / 100) = 30 - 12.857 = 17.143
+     *   base_rem      = 17.143 / 16 = 1.0714
+     *   Result: clamp(1.875rem, 1.0714rem + 2.0089vw, 3rem)
+     *
+     * VERIFICATION:
+     *   At 640px:  1.0714rem + 2.0089 * 6.4vw  = 17.14px + 12.86px = 30px ✓
+     *   At 1536px: 1.0714rem + 2.0089 * 15.36vw = 17.14px + 30.86px = 48px ✓
+     *
+     * ⚠️ WARNING: Do NOT use small vw values like 0.1256vw - they are 16x too small!
+     * ⚠️ The vw multiplier should typically be between 0.1 and 3 for this viewport range.
+     *
+     * When adding new font sizes, update these files:
+     * - index.css (CSS variables here)
+     * - tailwind.config.js (theme.fontSize)
+     * - typography.tsx (typographyVariants, elementMap, defaultWeightMap)
+     * - utils.ts (customTwMerge classGroups.font-size)
+     * - DesignSystem.tsx (documentation - optional)
+     * ==========================================================================
+     */
+
+    --font-family-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-family-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+
+    /* Headings - fluid scaling (640px to 1536px viewport range) */
+    /* Formula: clamp(min_rem, base_rem + vw-multiplier, max_rem) */
+    --font-size-h1: clamp(2.25rem, 1.7143rem + 1.3393vw, 3rem);         /* 36px → 48px (diff: 12px, vw: 1.3393) */
+    --font-size-h2: clamp(1.5rem, 1.2321rem + 0.6696vw, 1.875rem);      /* 24px → 30px (diff: 6px,  vw: 0.6696) */
+    --font-size-h3: clamp(1.25rem, 1.0714rem + 0.4464vw, 1.5rem);       /* 20px → 24px (diff: 4px,  vw: 0.4464) */
+    --font-size-h4: clamp(1.125rem, 1.0357rem + 0.2232vw, 1.25rem);     /* 18px → 20px (diff: 2px,  vw: 0.2232) */
+    --font-size-h5: clamp(1rem, 0.9107rem + 0.2232vw, 1.125rem);        /* 16px → 18px (diff: 2px,  vw: 0.2232) */
+    --font-size-h6: clamp(0.875rem, 0.7857rem + 0.2232vw, 1rem);        /* 14px → 16px (diff: 2px,  vw: 0.2232) */
+
+    /* Body text */
+    --font-size-body-lg: clamp(1.125rem, 1.0357rem + 0.2232vw, 1.25rem); /* 18px → 20px (diff: 2px, vw: 0.2232) */
+    --font-size-body: 1rem;                                              /* 16px fixed */
+    --font-size-body-sm: 0.875rem;                                       /* 14px fixed */
+    --font-size-body-xs: 0.75rem;                                        /* 12px fixed */
+    --font-size-field: 1rem;                                             /* 16px mobile — prévient le zoom auto iOS Safari (seuil: font-size < 16px) */
+
+    /* Line heights */
+    --line-height-tight: 1.25;
+    --line-height-snug: 1.375;
+    --line-height-normal: 1.5;
+    --line-height-relaxed: 1.625;
+    --line-height-loose: 1.75;
+
+    /* Font weights */
+    --font-weight-normal: 400;
+    --font-weight-medium: 500;
+    --font-weight-semibold: 600;
+    --font-weight-bold: 700;
+
+    /* Letter spacing */
+    --letter-spacing-tight: -0.025em;
+    --letter-spacing-normal: 0;
+    --letter-spacing-wide: 0.025em;
+  }
+
+  .dark {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 240 5.9% 10%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 240 4.9% 83.9%;
+
+    /* Slot status colors for calendar - dark mode (muted backgrounds, white text) */
+    --slot-available: 157 28% 30%;
+    --slot-available-foreground: 0 0% 100%;
+    --slot-partial: 289 18% 34%;
+    --slot-partial-foreground: 0 0% 100%;
+    --slot-full: 9 32% 34%;
+    --slot-full-foreground: 0 0% 100%;
+  }
+}
+
+@media (min-width: 768px) and (pointer: fine) {
+  :root {
+    --font-size-field: 0.875rem; /* 14px desktop — aligné sur text-sm */
+  }
+}
+
+@layer base {
+  html {
+    scrollbar-gutter: stable;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* FullCalendar Compact Styling
+ * Reduces visual weight of calendars with smaller fonts, lighter borders, and tighter spacing
+ * Applies to all FullCalendar views: year, month, week, list
+ */
+
+/* Font size reduction (25-30% from default 1rem) */
+.fc {
+  --fc-font-size: 0.75rem;      /* Down from 1rem (25% reduction) */
+  --fc-small-font-size: 0.7rem; /* Down from 0.85rem (~18% reduction) */
+  --fc-daygrid-event-dot-width: 5px;
+
+  /* Lighter borders */
+  --fc-border-color: hsl(var(--border) / 0.3);
+  --fc-page-border-color: transparent;
+}
+
+/* Remove FC default bottom margin on day events — universal fix */
+.fc .fc-daygrid-body-natural .fc-daygrid-day-events {
+  margin-bottom: 0;
+}
+
+/* Equalize week rows in month view — scoped to calendars that set --fc-week-rows via JS */
+.fc-public-calendar .fc-scrollgrid-sync-table tr,
+.fc .fc-scrollgrid-sync-table tr {
+  height: calc(100% / var(--fc-week-rows, 5));
+}
+
+/* Cell padding reduction */
+.fc .fc-daygrid-day {
+  padding: 2px 3px; /* Reduced from default 8px+ */
+}
+
+.fc .fc-daygrid-day-frame {
+  padding: 2px;
+  border-width: 1px;
+}
+
+/* Fix double borders caused by universal border selector */
+.fc .fc-daygrid-day-frame {
+  border: none !important;
+}
+
+/* Header cell padding */
+.fc .fc-col-header-cell-cushion {
+  padding: 4px 6px; /* Reduced from default */
+  font-size: 0.75rem;
+}
+
+/* Day number styling */
+.fc .fc-daygrid-day-number {
+  font-size: 0.75rem;
+  padding: 2px 4px;
+}
+
+/* Event styling — coins arrondis alignés sur la barre multi-jours et le
+ * calendrier public (0.25rem). La base couvrait historiquement 2px, ce qui
+ * laissait les créneaux mono-jour admin (list-item) moins arrondis que les
+ * barres multi-jours et que le public. Les segments de continuité multi-jours
+ * restent droits via `.tp-calendar .fc-event--multiday` (spécificité supérieure). */
+.fc .fc-event {
+  font-size: 0.7rem;
+  padding: 1px 4px;
+  border-radius: 0.25rem;
+  cursor: pointer;
+}
+
+/* Today highlight - red pill around day number */
+.fc .fc-daygrid-day.fc-day-today {
+  background-color: transparent; /* Remove grey background */
+}
+
+/* Today red pill — shared by Month view (day number) AND Week view header
+   (day number span). Grouped = source unique, rendu identique. */
+.fc .fc-daygrid-day.fc-day-today .fc-daygrid-day-number,
+.fc .fc-col-header-cell.fc-day-today .tp-week-daynum {
+  background-color: hsl(var(--destructive)); /* Red circle */
+  color: white;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  padding: 2px;
+  font-weight: 600;
+  font-size: 0.75rem;
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+/* Week header: weekday label + day-number pill, inline */
+.fc .tp-week-dayheader {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* Admin calendar popover - cap z-index below portal tooltips (z-50) */
+.slot-calendar-container .fc-popover {
+  z-index: 40 !important;
+}
+
+/* Past dates (clear visual distinction) */
+.fc .fc-daygrid-day.fc-day-past {
+  opacity: 0.5;
+  background-color: hsl(var(--muted) / 0.3);
+}
+
+.fc .fc-daygrid-day.fc-day-past .fc-daygrid-day-number {
+  color: hsl(var(--muted-foreground));
+}
+
+/* Future dates - white background */
+.fc .fc-daygrid-day:not(.fc-day-past):not(.fc-day-today) {
+  background-color: white;
+}
+
+/* List view compact styling */
+.fc .fc-list-day {
+  font-size: 0.75rem;
+  padding: 4px 8px;
+}
+
+.fc .fc-list-event {
+  font-size: 0.75rem;
+  padding: 3px 8px;
+}
+
+.fc .fc-list-event-title {
+  font-size: 0.7rem;
+}
+
+/* MultiMonth view (year view) compact styling */
+.fc .fc-multimonth-header {
+  font-size: 0.75rem;
+}
+
+.fc-multimonth .fc-daygrid-day {
+  padding: 1px 2px;
+}
+
+.fc-multimonth .fc-daygrid-day-number {
+  font-size: 0.7rem;
+  padding: 1px 3px;
+}
+
+/* Time grid (week view) row height — admin only
+ * FullCalendar uses TWO synchronized tables (axis + slots). Both rows reference
+ * the SAME custom property --fc-hour-height, so they resolve to identical pixels
+ * and stay in sync (unlike per-element em which would compute differently).
+ * D2/D3 (plan 2026-06-11) : slotDuration 1h → 24 rows ; responsive row height via
+ * clamp(min, (viewport − chrome)/24h, max). height:'auto' is kept on the calendar
+ * → overflow becomes a normal PAGE scroll, never an inner vertical scroll.
+ * Scoped to admin via :not(.fc-public-calendar) — public has its own slot heights.
+ */
+.slot-calendar-container {
+  /* CHROME ≈ 18rem (toolbar + header + all-day row + page chrome). Ajustable (R1). */
+  --fc-hour-height: clamp(1.5rem, (100svh - 18rem) / 24, 2.75rem);
+}
+
+:not(.fc-public-calendar) > .fc .fc-timegrid-slot {
+  height: var(--fc-hour-height) !important; /* slots table */
+  line-height: 1 !important;
+}
+
+:not(.fc-public-calendar) > .fc .fc-timegrid-slot-label {
+  height: var(--fc-hour-height) !important; /* axis table - MUST match slot height */
+  line-height: 1 !important;
+}
+
+/* Force row height on timegrid slot ROWS (not just cells) — admin only */
+:not(.fc-public-calendar) .fc-timegrid-slots tr {
+  height: var(--fc-hour-height) !important;
+}
+
+/* Override FullCalendar's table layout that forces row expansion — admin only */
+:not(.fc-public-calendar) .fc-timegrid-slots tbody {
+  height: auto !important;
+}
+
+/* Allow slots table to size based on content, not container — admin only */
+:not(.fc-public-calendar) .fc-timegrid-slots table {
+  height: auto !important;
+  table-layout: fixed !important;
+}
+
+/* Force axis frame to match slot height (not expand to fill container) — admin only */
+:not(.fc-public-calendar) > .fc .fc-timegrid-axis-frame-liquid {
+  height: auto !important;
+}
+
+/* Phase 3 (plan 2026-06-11) — Scroll horizontal responsive sous le seuil sm (D6–D8).
+ * CSS PUR (pas de dayMinWidth : le plugin premium @fullcalendar/scrollgrid est absent
+ * → lèverait "No ScrollGrid implementation"). Sous 640px, SEULE la grille
+ * (.fc-view-harness) défile horizontalement ; la toolbar (.fc-header-toolbar, sœur du
+ * harness) reste fixe et complète — elle n'est plus tronquée (#59). La vue garde une
+ * largeur minimale → colonnes ≥ 5rem (D7). height:'auto' → harness « passive » → la
+ * min-width de la vue (en flux normal) élargit le harness, qui défile. Vue Année exclue
+ * (.fc-multiMonthYear-view se replie déjà). Activé UNIQUEMENT < sm → desktop intact. */
+@media (max-width: 639.98px) {
+  /* Scroll confiné à la grille, pas à la toolbar (#59) */
+  .slot-calendar-container .fc-view-harness,
+  .fc-public-calendar .fc-view-harness {
+    overflow-x: auto;
+  }
+
+  /* Semaine : axe (~3.5rem) + 7 colonnes × 5rem (D7) ≈ 38rem */
+  .slot-calendar-container .fc-timeGridWeek-view,
+  .fc-public-calendar .fc-timeGridWeek-view {
+    min-width: 38rem;
+  }
+
+  /* Mois : 7 colonnes × 5rem (D7) ≈ 35rem */
+  .slot-calendar-container .fc-dayGridMonth-view,
+  .fc-public-calendar .fc-dayGridMonth-view {
+    min-width: 35rem;
+  }
+
+  /* Axe horaire figé à gauche — vue Semaine < sm. .fc-scroller-harness (overflow:hidden via
+   * classe FC) et .fc-scroller (overflow posé inline par FC, d'où !important) capturent le
+   * contexte sticky : on les passe `visible` pour que .fc-view-harness (seul scrollport,
+   * overflow-x:auto ci-dessus) ancre les cellules d'axe. `left:0` (LTR, .fc-direction-ltr).
+   * z:10 > events (z:3), < popover. :not(.fc-timegrid-col) exclut le spacer du calque events
+   * (même classe) dont le fond opaque masquerait les labels d'heures. */
+  .slot-calendar-container .fc-timeGridWeek-view .fc-scroller-harness {
+    overflow: visible;
+  }
+  .slot-calendar-container .fc-timeGridWeek-view .fc-scroller {
+    overflow: visible !important;
+  }
+  .slot-calendar-container .fc-timeGridWeek-view .fc-timegrid-axis:not(.fc-timegrid-col),
+  .slot-calendar-container .fc-timeGridWeek-view .fc-timegrid-slot-label {
+    position: sticky;
+    left: 0;
+    z-index: 10;
+    background: hsl(var(--background));
+    /* FC peint les bordures G/D de l'axe via la table → elles défilent et disparaissent au
+     * scroll. On les masque (border-*-style:hidden) et on les redessine en box-shadow avec la
+     * cellule sticky → visibles à tout scroll. /0.5 pour matcher les filets FC. */
+    box-shadow: inset 1px 0 0 hsl(var(--border) / 0.5), inset -1px 0 0 hsl(var(--border) / 0.5);
+    border-left-style: hidden;
+    border-right-style: hidden;
+  }
+  /* .fc-scrollgrid (border-collapse:separate) a une bordure externe gauche hors portée des
+   * border-*-style ci-dessus → elle jouxte le box-shadow gauche à scroll=0 → double filet. On
+   * la retire : le box-shadow de l'axe reste l'unique filet gauche. */
+  .slot-calendar-container .fc-timeGridWeek-view .fc-scrollgrid {
+    border-left: 0;
+  }
+  /* Double filet à droite à scroll=0 : le calque events (.fc-timegrid-cols, table absolue) a
+   * un spacer d'axe EXCLU de la règle sticky dont la bordure jouxte le border-left de la 1ère
+   * colonne-jour. Au scroll ce calque glisse sous l'axe (z:10) → déjà masqué. On retire ce seul
+   * border-left ; les séparations inter-jours restent intactes. */
+  .slot-calendar-container .fc-timeGridWeek-view .fc-timegrid-col.fc-timegrid-axis + .fc-timegrid-col {
+    border-left-style: hidden;
+  }
+  /* .fc-timegrid-slots (relative + z-index:1) crée un contexte d'empilement qui plafonne les
+   * labels d'axe (z:10) sous .fc-timegrid-col-events (z:3) → un event qui défile masquait les
+   * heures. z-index:auto le supprime (ordre lanes/events inchangé). */
+  .slot-calendar-container .fc-timeGridWeek-view .fc-timegrid-slots {
+    z-index: auto;
+  }
+  /* En border-collapse, la ligne d'heure (1px de la table) est peinte sous le slot (z:3), non
+   * couverte par le fond opaque → elle transparaissait. Pseudo peint avec la cellule sticky
+   * (z:10) : redessine la ligne (/0.5, comme les filets FC). */
+  .slot-calendar-container .fc-timeGridWeek-view .fc-timegrid-slot-label::after {
+    content: '';
+    position: absolute;
+    inset: -1px 0 auto 0;
+    height: 1px;
+    background: hsl(var(--border) / 0.5);
+    pointer-events: none;
+  }
+}
+
+.fc .fc-timegrid-slot-label {
+  font-size: 0.7rem;
+}
+
+.fc .fc-timegrid-slot-label-cushion {
+  padding: 1px 2px;
+  font-size: 0.7rem;
+}
+
+/* All-day row compact styling */
+.fc .fc-timegrid-all-day {
+  padding: 2px 4px;
+  min-height: 20px;
+}
+
+.fc .fc-timegrid-all-day .fc-event {
+  font-size: 0.65rem;
+  padding: 0 3px;
+}
+
+/* All-day label text (left column showing "Journée") */
+.fc .fc-timegrid-axis-cushion {
+  font-size: 0.7rem; /* x-small font for compact all-day label */
+}
+
+.fc .fc-timegrid-all-day .fc-daygrid-event {
+  font-size: 0.65rem;
+  padding: 1px 3px;
+}
+
+/* Hide or style empty all-day slots */
+.fc .fc-timegrid-all-day-table {
+  border-collapse: collapse;
+}
+
+.fc .fc-timegrid-all-day td {
+  border: 1px solid hsl(var(--border) / 0.2);
+  vertical-align: middle;
+}
+
+/* "Toutes la journée" label - make it smaller or hide if empty */
+.fc .fc-timegrid-all-day-label {
+  font-size: 0.65rem;
+  padding: 2px;
+  opacity: 0.7;
+}
+
+/* Week view event compact styling */
+.fc .fc-timegrid-event {
+  font-size: 0.7rem;
+}
+
+/* FullCalendar pose par défaut un padding interne sur .fc-event-main des
+ * événements timegrid — il s'empile aux paddings du bloc et rogne la hauteur
+ * utile des créneaux courts. On le neutralise pour TOUS les calendriers
+ * (public ET admin, le sélecteur `.fc` couvrant les deux conteneurs) et on
+ * pose un léger retrait horizontal (margin) pour aérer le texte des côtés. */
+.fc .fc-timegrid-event .fc-event-main {
+  padding: 0;
+  margin: 0 3px;
+}
+
+.fc-timegrid .fc-event-title {
+  font-size: 0.7rem;
+}
+
+/* Today (week view): no column/slot highlight — marqué par la pastille rouge de
+   l'en-tête. `transparent` neutralise le jaune par défaut de FullCalendar. */
+.fc .fc-timegrid-col.fc-day-today {
+  background-color: transparent;
+}
+
+/* Toolbar compact styling */
+.fc .fc-toolbar {
+  font-size: 0.8rem;
+}
+
+.fc .fc-toolbar-title {
+  font-size: 0.9rem;
+}
+
+/* ============================================================================
+   FullCalendar Toolbar Buttons - shadcn Button Styling
+   Apply neutral shadcn styling to FullCalendar's native toolbar buttons
+   ============================================================================ */
+
+/* Base button styles - matching shadcn Button (outline variant by default) */
+.fc .fc-button {
+  /* shadcn base: inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  border-radius: var(--radius);
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 6px 12px;
+  /* CRITICAL: box-sizing: border-box ensures borders don't affect element size */
+  box-sizing: border-box;
+  /* Only transition background and color, NOT border or box-shadow to prevent layout shift */
+  transition: background-color 150ms ease-in-out, color 150ms ease-in-out;
+  cursor: pointer;
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--background)) !important;
+  color: hsl(var(--foreground)) !important;
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05) !important;
+}
+
+/* CRITICAL: Hover ONLY changes background-color and color - nothing else */
+/* NOTE: This does NOT apply to nav buttons, today button, or button group - those have specific hover rules below */
+.fc .fc-button:not(.fc-prev-button):not(.fc-next-button):not(.fc-today-button):not(.fc-button-group .fc-button):hover {
+  background-color: hsl(var(--accent)) !important;
+  color: hsl(var(--accent-foreground)) !important;
+  /* Explicitly keep same border to prevent any border color change */
+  border: 1px solid hsl(var(--border)) !important;
+  /* Explicitly keep same box-shadow */
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05) !important;
+}
+
+/* Focus-visible - shadcn ring style (applies to all buttons) */
+.fc .fc-button:focus-visible {
+  outline: none !important;
+  /* Use outline instead of box-shadow to prevent layout shift */
+  box-shadow: 0 0 0 1px hsl(var(--background)), 0 0 0 3px hsl(var(--ring)) !important;
+}
+
+.fc .fc-button:disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* Active/primary button state (active view button) - shadcn "default" variant */
+/* NOTE: Button group active buttons have their own styling below */
+.fc .fc-button.fc-button-active:not(.fc-button-group .fc-button),
+.fc .fc-button:not(.fc-button-primary):active {
+  background-color: hsl(var(--primary)) !important;
+  color: hsl(var(--primary-foreground)) !important;
+  border-color: hsl(var(--primary)) !important;
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05) !important;
+}
+
+.fc .fc-button.fc-button-active:not(.fc-button-group .fc-button):hover,
+.fc .fc-button:not(.fc-button-primary):active:hover {
+  background-color: hsl(var(--primary) / 0.9) !important;
+  /* border and box-shadow inherited to prevent layout shift */
+}
+
+/* Active button with focus-visible - keep ring on primary bg */
+.fc .fc-button.fc-button-active:focus-visible,
+.fc .fc-button:not(.fc-button-primary):active:focus-visible {
+  box-shadow: 0 0 0 1px hsl(var(--primary-foreground)), 0 0 0 3px hsl(var(--ring)) !important;
+}
+
+/* Navigation icon buttons - shadcn "ghost" variant */
+.fc .fc-prev-button,
+.fc .fc-next-button {
+  padding: 6px;
+  box-sizing: border-box;
+  background-color: transparent !important;
+  /* CRITICAL: Use transparent border to prevent layout shift on hover */
+  border: 1px solid transparent !important;
+  box-shadow: none !important;
+  color: hsl(var(--foreground)) !important;
+}
+
+/* CRITICAL: Nav button hover ONLY changes background-color and color - nothing else */
+.fc .fc-prev-button:hover,
+.fc .fc-next-button:hover {
+  background-color: hsl(var(--accent)) !important;
+  color: hsl(var(--accent-foreground)) !important;
+  /* Explicitly keep transparent border - no gray border should appear */
+  border: 1px solid transparent !important;
+  /* Keep no box-shadow */
+  box-shadow: none !important;
+}
+
+.fc .fc-prev-button:focus-visible,
+.fc .fc-next-button:focus-visible {
+  box-shadow: 0 0 0 1px hsl(var(--background)), 0 0 0 3px hsl(var(--ring)) !important;
+}
+
+/* Today button - shadcn "outline" variant */
+.fc .fc-today-button {
+  box-sizing: border-box;
+  border: 1px solid hsl(var(--input)) !important;
+  background-color: hsl(var(--background)) !important;
+  color: hsl(var(--foreground)) !important;
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05) !important;
+}
+
+/* CRITICAL: Today button hover ONLY changes background-color and color - nothing else */
+.fc .fc-today-button:hover {
+  background-color: hsl(var(--accent)) !important;
+  color: hsl(var(--accent-foreground)) !important;
+  /* Explicitly keep same border color to prevent gray border appearing */
+  border: 1px solid hsl(var(--input)) !important;
+  /* Explicitly keep same box-shadow */
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05) !important;
+}
+
+.fc .fc-today-button:focus-visible {
+  box-shadow: 0 0 0 1px hsl(var(--background)), 0 0 0 3px hsl(var(--ring)) !important;
+}
+
+/* Button group (view switcher) - remove FullCalendar's default grouping */
+.fc .fc-button-group {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius);
+}
+
+/* View switcher buttons - grouped with squared inner edges */
+.fc .fc-button-group .fc-button {
+  box-sizing: border-box;
+  border-radius: 0;
+  /* Use same border for all buttons, with right-border removal handled via specific rules */
+  border: 1px solid hsl(var(--border)) !important;
+  border-right-width: 0 !important;
+  padding: 6px 12px;
+}
+
+.fc .fc-button-group .fc-button:first-child {
+  border-top-left-radius: var(--radius);
+  border-bottom-left-radius: var(--radius);
+}
+
+.fc .fc-button-group .fc-button:last-child {
+  border-top-right-radius: var(--radius);
+  border-bottom-right-radius: var(--radius);
+  border-right-width: 1px !important;
+}
+
+/* CRITICAL: Button group hover ONLY changes background-color and color - nothing else */
+.fc .fc-button-group .fc-button:not(.fc-button-active):hover {
+  background-color: hsl(var(--accent)) !important;
+  color: hsl(var(--accent-foreground)) !important;
+  /* Keep same border - only background changes */
+  border: 1px solid hsl(var(--border)) !important;
+  border-right-width: 0 !important;
+}
+
+/* Last button hover needs special handling for right border */
+.fc .fc-button-group .fc-button:last-child:not(.fc-button-active):hover {
+  background-color: hsl(var(--accent)) !important;
+  color: hsl(var(--accent-foreground)) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  border-right-width: 1px !important;
+}
+
+/* Active view in button group - shadcn "default" variant */
+.fc .fc-button-group .fc-button.fc-button-active {
+  background-color: hsl(var(--primary)) !important;
+  color: hsl(var(--primary-foreground)) !important;
+  border: 1px solid hsl(var(--primary)) !important;
+  border-right-width: 0 !important;
+  z-index: 1;
+}
+
+.fc .fc-button-group .fc-button.fc-button-active:last-child {
+  border-right-width: 1px !important;
+}
+
+/* Active button hover - only darken background */
+.fc .fc-button-group .fc-button.fc-button-active:hover {
+  background-color: hsl(var(--primary) / 0.9) !important;
+  /* Keep border solid */
+  border: 1px solid hsl(var(--primary)) !important;
+}
+
+.fc .fc-button-group .fc-button.fc-button-active:last-child:hover {
+  border: 1px solid hsl(var(--primary)) !important;
+  border-right-width: 1px !important;
+}
+
+/* Button after active button gets primary-colored left border */
+.fc .fc-button-group .fc-button.fc-button-active + .fc-button {
+  border-left-color: hsl(var(--primary)) !important;
+}
+
+/* Event title truncation - prevents overflow in year/month/week views */
+.fc-event-title-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+/* Past Slot Visual Treatment (commun public ↔ admin, daygrid ET timegrid) */
+.slot-past {
+  opacity: 0.45;
+  transition: opacity 0.2s ease-in-out;
+}
+
+/* Toolbar partagée public ↔ admin : .tp-calendar (commun aux deux calendriers).
+   Ne porte que les écarts au calque global `.fc` ; placé après lui pour gagner
+   (spécificité 0,2,0 égale). Promu depuis le <style> de CalendarView. */
+.tp-calendar .fc-toolbar {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.tp-calendar .fc-toolbar-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+.tp-calendar .fc-button {
+  font-size: 0.875rem;
+}
+/* hover indispensable : le global `.fc` exclut prev/next/today du hover accent. */
+.tp-calendar .fc-button:hover {
+  background-color: hsl(var(--accent));
+}
+@media (max-width: 768px) {
+  .tp-calendar .fc-toolbar {
+    justify-content: center;
+  }
+  .tp-calendar .fc-toolbar-title {
+    font-size: 1rem;
+  }
+}
+
+/* ============================================================================
+   Calque partagé des « types de bloc » de créneau — public ↔ admin
+   ----------------------------------------------------------------------------
+   Source UNIQUE du rendu transverse d'un type de créneau, appliquée aux deux
+   conteneurs calendrier via la classe commune `.tp-calendar` :
+     • public : .fc-public-calendar.tp-calendar       (CalendarView)
+     • admin  : .slot-calendar-container.tp-calendar  (SlotCalendar)
+   Couvre le daygrid (.fc-h-event — vues Mois/Année) ET le timegrid
+   (.fc-v-event / .fc-timegrid-event — vue Semaine), thèmes clair et sombre.
+
+   Le fond/bordure/texte des statuts (disponible/partiel/complet) et le gris des
+   annulés viennent des utilitaires bg-slot* / text-gray-* posés sur l'ancre
+   (source : lib/slotClassNames.ts). Ce calque ne porte QUE le rendu commun :
+   grisé + barré + couleur de texte des annulés, et le badge « Annulé ».
+   L'atténuation du passé est portée par `.slot-past` ci-dessus ; le badge ✓
+   « réservé » reste spécifique au public (cf. CalendarView). La bordure
+   pointillée des annulés est spécifique à l'admin (cf. SlotCalendar).
+   Jetons (design tokens) définis hors composants — cf. section design system « Jetons hors composants ».
+   ============================================================================ */
+
+/* Créneau annulé (soft-delete) : atténué, prioritaire sur le statut. */
+.tp-calendar .fc-event.slot-cancelled {
+  opacity: 0.7;
+}
+
+/* FullCalendar force le texte d'événement en blanc (--fc-event-text-color sur
+ * .fc-event-main), ce qui écrase le gris (text-gray-500) de l'ancre d'un créneau
+ * annulé et le rend illisible sur le fond gris clair. On rétablit l'héritage —
+ * pour le daygrid (.fc-h-event) ET le timegrid (.fc-v-event / .fc-timegrid-event),
+ * donc y compris en vue Semaine où le texte restait blanc (bug déclencheur). */
+.tp-calendar .fc-event.slot-cancelled .fc-event-main {
+  color: inherit !important;
+}
+
+/* Libellé barré des créneaux annulés — un seul libellé partagé `.tp-event-label`
+ * (public ET admin sont tous deux sous `.tp-calendar`). */
+.tp-calendar .fc-event.slot-cancelled .tp-event-label {
+  text-decoration: line-through;
+}
+
+/* Badge « Annulé » épinglé (couleurs alignées sur le jeton rouge unifié de
+ * SlotStatusBadge : red-50 / red-200 / red-800).
+ * L'espacement à gauche est porté par le conteneur : flex gap côté public,
+ * margin-left côté admin (markup inline). */
+.tp-calendar .tp-slot-cancelled-badge {
+  font-size: 0.5rem;
+  font-weight: 600;
+  padding: 0.0625rem 0.25rem;
+  border-radius: 0.25rem;
+  background-color: #fef2f2; /* red-50 */
+  border: 1px solid #fecaca; /* red-200 */
+  color: #991b1b; /* red-800 */
+  display: inline-block;
+}
+
+/* ----------------------------------------------------------------------------
+   Barre multi-jours (Story 1.2) — géométrie des coins, public ↔ admin.
+   FullCalendar pose `.fc-event-start` / `.fc-event-end` sur les segments situés
+   aux extrémités RÉELLES de l'événement ; un segment de continuité (wrap en fin
+   de semaine) n'a ni l'un ni l'autre. On arrondit donc les coins aux seules
+   extrémités réelles et on les laisse droits sur les segments de continuité
+   (façon Apple Calendar). La couleur de statut du fond/bordure est ré-affirmée
+   juste en dessous (l'admin neutralise sinon `.fc-h-event`). Couvre la barre
+   daygrid (vue Mois) ET le bandeau all-day du timegrid (vue Semaine).
+   ---------------------------------------------------------------------------- */
+.tp-calendar .fc-event.fc-event--multiday {
+  border-radius: 0;
+}
+.tp-calendar .fc-event.fc-event--multiday.fc-event-start {
+  border-top-left-radius: 0.25rem;
+  border-bottom-left-radius: 0.25rem;
+}
+.tp-calendar .fc-event.fc-event--multiday.fc-event-end {
+  border-top-right-radius: 0.25rem;
+  border-bottom-right-radius: 0.25rem;
+}
+
+/* Couleur de statut de la barre multi-jours. Les utilitaires bg-slot* / border-slot*
+   sont déjà posés sur l'ancre par getSlotClassNames (source unique), mais chaque
+   calendrier peut les écraser : l'admin force `.fc-h-event` en transparent
+   !important (intention vue Année). On ré-affirme donc la couleur — à partir des
+   MÊMES jetons canoniques `--slot-*` (aucune nouvelle palette, UX-DR6) — avec une
+   spécificité/priorité supérieure, pour les deux calendriers et les deux vues. */
+.tp-calendar .fc-event.fc-event--multiday.bg-slotAvailable {
+  background-color: hsl(var(--slot-available)) !important;
+  border-color: hsl(var(--slot-available)) !important;
+}
+.tp-calendar .fc-event.fc-event--multiday.bg-slotPartial {
+  background-color: hsl(var(--slot-partial)) !important;
+  border-color: hsl(var(--slot-partial)) !important;
+}
+.tp-calendar .fc-event.fc-event--multiday.bg-slotFull {
+  background-color: hsl(var(--slot-full)) !important;
+  border-color: hsl(var(--slot-full)) !important;
+}
+/* Annulé (soft-delete) : gris figés, prioritaire sur le statut (cf. slotClassNames
+   CANCELLED_CLASS_NAMES bg-gray-100 / border-gray-300). Le barré + l'opacité sont
+   portés par le calque `.slot-cancelled` ci-dessus. */
+.tp-calendar .fc-event.fc-event--multiday.slot-cancelled {
+  background-color: #f3f4f6 !important; /* gray-100 */
+  border-color: #d1d5db !important; /* gray-300 */
+}
+
+/* Email POC — variable chip styling (TipTap Mention extension) */
+.email-token {
+  @apply inline-flex items-center px-1.5 rounded bg-blue-100 text-blue-900 text-sm font-medium;
+}
+/* En-tete page edition evenement admin — eyebrow + titre dynamique + actions.
+   Mobile : empile (eyebrow -> titre -> actions).
+   >=sm (640px) : ligne 1 = [eyebrow | actions], ligne 2 = titre pleine largeur
+   pour qu'un nom long dispose de toute la largeur du contenu. */
+.event-header {
+  display: grid;
+  gap: 0.5rem 1rem;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "eyebrow"
+    "title"
+    "actions";
+}
+.event-header__eyebrow { grid-area: eyebrow; min-width: 0; }
+.event-header__title   { grid-area: title; min-width: 0; }
+.event-header__actions { grid-area: actions; }
+@media (min-width: 640px) {
+  .event-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "eyebrow actions"
+      "title   title";
+    align-items: start;
+  }
+  .event-header__actions { justify-self: end; }
+}
+
+/* Éditeur de description riche (Tiptap) — placeholder affiché UNIQUEMENT quand
+   l'éditeur est entièrement vide (jamais sur un paragraphe vide en milieu de texte). */
+.tiptap p.is-editor-empty:first-child::before {
+  color: hsl(var(--muted-foreground));
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+/* POC graphique « pics » : AUCUN focus visible dans le SVG du graphe principal
+   (barres, surface — recharts les rend focusables via tabIndex). Règle large
+   volontaire (pas de ciblage au cas par cas). Les boutons (presets / vue), hors
+   .recharts-wrapper, gardent leur focus clavier (a11y). */
+.peaks-chart .recharts-wrapper:focus,
+.peaks-chart .recharts-wrapper :focus,
+.peaks-chart .recharts-wrapper:focus-visible,
+.peaks-chart .recharts-wrapper :focus-visible {
+  outline: none !important;
+}
+
+/* POC graphique « pics » : curseur de déplacement latéral sur TOUTE la zone
+   principale (les éléments SVG recharts imposent sinon leur propre curseur). */
+.peaks-chart .peaks-main-plot,
+.peaks-chart .peaks-main-plot * { cursor: grab; }
+.peaks-chart .peaks-main-plot.is-dragging,
+.peaks-chart .peaks-main-plot.is-dragging * { cursor: grabbing; }

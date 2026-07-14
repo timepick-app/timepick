@@ -1,0 +1,79 @@
+/* MjmlEditorOverlay — scoped GrapesJS theme overrides.
+ *
+ * Scoped under `.timepick-email-editor` so they cannot leak to any other
+ * GrapesJS instance in the app. We disable the grapesjs-mjml plugin's
+ * built-in theme (`useCustomTheme: false` in grapesConfig.ts), which lets
+ * GrapesJS' default rule
+ *
+ *   .gjs-four-color { color: var(--gjs-quaternary-color) }
+ *
+ * apply again. Then we just retarget the variable here.
+ */
+
+.timepick-email-editor {
+  --gjs-quaternary-color: #ffffff;
+}
+
+/* Dirty indicator on the Save button: subtle dot before the label. */
+.timepick-email-editor .save-button[data-dirty='true']::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background-color: currentColor;
+  vertical-align: middle;
+}
+
+/* Hide shadcn Dialog's default close button — the toolbar already provides
+ * a labelled "Fermer" button that runs the dirty-check confirmation flow. */
+.timepick-email-editor > button.absolute.right-4.top-4 {
+  display: none;
+}
+
+/* Locked-shell "En-tête" / "Pied" labels (Story 26-2 / AC6) live inside the
+ * canvas iframe and are declared via `canvas.frameStyle` in `grapesConfig.ts`
+ * — host CSS does not reach the iframe content, so duplicating the rule here
+ * had no effect. Kept this note as a guard against re-introducing dead CSS. */
+
+/* Radix Dialog centers content with `position: fixed; left: 50%; top: 50%;
+ * transform: translate(-50%, -50%)`. Spectrum (the color picker bundled with
+ * GrapesJS) positions its popup using the swatch's `offsetLeft/offsetTop`
+ * chain, which returns layout (pre-transform) coordinates and therefore
+ * places the popup off-screen by ~+750px on the X axis. Override to an
+ * `inset`-based positioning (no transform) so layout and visual coordinates
+ * match. The editor occupies the full viewport (no top/bottom margin). */
+.timepick-email-editor[data-state] {
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: auto !important;
+  transform: none !important;
+  max-width: 100% !important;
+  width: auto !important;
+}
+
+/* Companion fix: even with correct positioning, the spectrum popup is
+ * attached to `document.body` (outside the DialogContent), so it inherits
+ * Radix's `body { pointer-events: none }` and stays inert. Re-enable
+ * pointer-events on the popup. The Radix callbacks in MjmlEditorOverlay.tsx
+ * (onInteractOutside/onPointerDownOutside/onFocusOutside) prevent the
+ * Dialog from closing when the user clicks into the picker. */
+.sp-container,
+.sp-container * {
+  pointer-events: auto !important;
+}
+
+/* Le popup Spectrum est attaché à <body> en `position: absolute` (coordonnées
+ * document). L'éditeur étant un overlay `position: fixed` plein écran, Spectrum
+ * calcule le `top`/`left` du popup en coordonnées VIEWPORT (le swatch vit dans
+ * le dialog fixed). En `position: absolute` ce `top` est réinterprété en
+ * coordonnées document → le popup est décalé du scroll du document, ce qui le
+ * pousse hors viewport / trop haut dès que la page sous-jacente est scrollée
+ * (ex. mode non-modal Drawbridge, qui n'a pas le scroll-lock de Radix).
+ * `position: fixed` fait coïncider le `top` calculé avec le viewport. Au
+ * scroll=0 (production modale) `fixed` ≡ `absolute` → zéro régression. */
+.sp-container {
+  position: fixed !important;
+}

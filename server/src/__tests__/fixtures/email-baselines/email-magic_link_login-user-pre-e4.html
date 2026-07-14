@@ -1,0 +1,31 @@
+<!--
+  Baseline pre-E4 — sendUserMagicLinkEmail
+  Source: server/src/services/email.service.ts:371-409 (HTML literal lines 392-405)
+  Test inputs:
+    email: user@example.com
+    link: https://timepick.example.com/auth/verify?token=user789xyz
+    expirationDate: 2026-12-31T18:00:00Z
+  Subject: "Connexion à TimePick"
+  Captured: 2026-05-02 (audit story 25-0/T3, AC3)
+-->
+<!-- TEXT-PART (sendUserMagicLinkEmail line 391):
+Bonjour,
+
+Voici votre lien de connexion pour réserver vos créneaux :
+https://timepick.example.com/auth/verify?token=user789xyz
+
+Ce lien expire le 31 décembre 2026 a 18h00.
+-->
+
+<div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+  <p>Bonjour,</p>
+  <p>Voici votre lien de connexion pour réserver vos créneaux :</p>
+  <p style="text-align: center; margin: 20px 0;">
+    <a href="https://timepick.example.com/auth/verify?token=user789xyz" style="background-color: #18181b; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
+      Réserver mes créneaux
+    </a>
+  </p>
+  <p style="color: #999; font-size: 13px; text-align: center; margin-top: 8px;">
+    Ce lien expire le 31 décembre 2026 a 18h00.
+  </p>
+</div>

@@ -1,0 +1,74 @@
+node_modules
+.DS_Store
+.env
+**/.env.test
+**/.env.test.*
+**/.env.local
+dist
+build
+coverage
+.vscode
+
+# Auto Claude data directory
+.auto-claude/
+
+# Auto Claude generated files
+.auto-claude-security.json
+.auto-claude-status
+.claude_settings.json
+.worktrees/
+.security-key
+logs/security/
+
+# E2E Playwright
+playwright-report/
+test-results/
+
+# Vite cache
+client/.vite/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+# Playwright MCP screenshots
+.playwright-mcp/
+
+# RSL files (removed symlinks)
+*.rsls
+*.rslsc
+
+# CLAUDE.md files — agent context, never published
+**/CLAUDE.md
+
+# Moat task system
+.moat/
+
+# Email POC v2 — runtime-uploaded images (never committed)
+server/uploads/
+
+# Harness session exports (large per-run HTML dumps — never committed)
+omp-session-*.html
+
+# Windsurf configuration
+.windsurf/
+
+# Codex CLI configuration
+.codex/
+
+# Oh My Pi harness state
+.omp/
+
+# Sauvegardes DB provisoires (dumps pg_dump — jamais versionnés)
+.db-backups/
+
+
+# --- Fichiers de build perso / IA — jamais publiés ---
+.claude/
+_bmad
+_bmad-output/
+_pocs/
+.spike-multiday-bug/
+snapshot.md
+.mcp.json
+docs/
+docs-public/

@@ -1,0 +1,122 @@
+import type { ComponentMeta } from './_meta/types'
+
+export const buttonMeta: ComponentMeta = {
+  name: 'Button',
+  importPath: '@/components/ui/button',
+  summary: 'Bouton d\'action principal de l\'application. 10 variantes pour couvrir tous les types d\'actions.',
+  variants: [
+    {
+      name: 'default',
+      description: 'Action principale — publier, confirmer, créer',
+      whenToUse: 'Action principale d\'un écran ou d\'un dialog, généralement unique par contexte (publier un événement, confirmer une opération, créer une ressource). Si tu hésites entre default et secondary, c\'est probablement default.',
+    },
+    {
+      name: 'outline',
+      description: 'Action secondaire — annuler, retour, filtrer',
+      whenToUse: 'Action secondaire qui accompagne une action principale (Annuler dans un dialog, Retour, Filtrer). Privilégier outline plutôt que secondary pour les paires Confirmer/Annuler — c\'est le pattern dominant du codebase.',
+    },
+    {
+      name: 'destructive',
+      description: 'Action dangereuse — supprimer, révoquer',
+      whenToUse: 'Confirmation d\'une action irréversible et fortement destructrice (suppression définitive d\'un événement, révocation d\'accès, reset de configuration). Toujours combiner avec un AlertDialog de confirmation — ne jamais déclencher l\'action au premier clic.',
+    },
+    {
+      name: 'outline-destructive',
+      description: 'Action dangereuse douce — confirmation suppression, annulation',
+      whenToUse: 'Action destructrice à faible engagement ou réversible (annuler une réservation, retirer un participant, ouvrir un dialog de suppression). Préférer outline-destructive à destructive quand l\'action ouvre simplement un flow de confirmation, ou quand elle est listée parmi d\'autres actions sans devoir dominer visuellement.',
+    },
+    {
+      name: 'outline-info',
+      description: 'Action sur bannière info — bordure/texte bleus',
+      whenToUse: 'Action secondaire posée DANS un Banner variant="info" (fond blue-50). Bordure/texte bleus, survol blue-100 (et non blue-50, pour rester visible sur le fond de la bannière). Ne pas utiliser hors d\'une surface bleue — préférer outline neutre ailleurs.',
+    },
+    {
+      name: 'outline-warning',
+      description: 'Action sur bannière warning — bordure/texte ambre',
+      whenToUse: 'Action secondaire posée DANS un Banner variant="warning" (fond amber-50). Survol amber-100. Pendant ambre du outline-destructive (rouge).',
+    },
+    {
+      name: 'outline-success',
+      description: 'Action sur bannière success — bordure/texte verts',
+      whenToUse: 'Action secondaire posée DANS un Banner variant="success" (fond green-50). Survol green-100.',
+    },
+    {
+      name: 'ghost',
+      description: 'Action discrète — boutons icônes, menus',
+      whenToUse: 'Action accessoire qui ne doit pas attirer l\'attention (boutons icône-seule dans un tableau ou un en-tête, fermeture d\'un panneau, élément de menu). Combiner avec size="icon" dès qu\'il n\'y a pas de label texte.',
+    },
+    {
+      name: 'secondary',
+      description: 'Alternative au outline pour variété visuelle',
+      whenToUse: 'Alternative remplie au outline quand tu as besoin de hiérarchiser deux actions secondaires entre elles, ou de différencier visuellement des groupes de boutons. À utiliser avec parcimonie — outline reste le défaut pour les actions secondaires.',
+    },
+    {
+      name: 'link',
+      description: 'Navigation inline, style lien hypertexte',
+      whenToUse: 'Action textuelle embarquée dans une liste, une carte ou un tableau (Modifier, Supprimer, Voir détails dans une ligne d\'utilisateur), ou navigation inline qui doit ressembler à un lien. Privilégier link à ghost quand l\'action est rendue à côté de texte de contenu et doit s\'y intégrer typographiquement.',
+    },
+  ],
+  sizes: [
+    { name: 'default', description: 'Taille par défaut', cssHint: 'h-9 px-4 py-2' },
+    { name: 'sm', description: 'Compact (tier h-8) — contrôle utilitaire (toolbar de data-table, pagination) ou action secondaire/répétée ; police inchangée (text-sm)', cssHint: 'h-8 px-3' },
+    { name: 'lg', description: 'Grand, pour CTAs proéminents', cssHint: 'h-10 px-8' },
+    { name: 'icon', description: 'Carré, pour boutons icône-seule', cssHint: 'h-9 w-9' },
+    { name: 'icon-sm', description: 'Carré compact 32px — bouton icône-seule dans une data-table (ligne, pagination)', cssHint: 'h-8 w-8' },
+  ],
+  guidelines: [
+    {
+      rule: 'La taille encode le RÔLE : `default` (h-9) pour une action primaire ET les boutons qui l\'accompagnent dans une barre d\'actions/footer (Annuler, Réinitialiser, boutons de DialogFooter/SheetFooter) — ils partagent la MÊME hauteur ; `sm` (h-8) pour un contrôle utilitaire (toolbar de data-table, pagination) ou une action secondaire répétée/inline (« Ajouter un item », action par carte) ; `icon`/`icon-sm` pour les boutons icône-seule',
+      correct: '<Button>Créer l\'événement</Button> {/* action primaire : h-9 */}\n<Button variant="outline" size="sm">Filtrer</Button> {/* contrôle de toolbar de table : h-8 */}',
+      wrong: '<Button size="sm">Créer l\'événement</Button> {/* action primaire en compact : rompt la hiérarchie */}',
+    },
+    {
+      rule: 'Toujours utiliser le composant Button, jamais de <button> HTML brut',
+      correct: '<Button variant="outline" onClick={onCancel}>Annuler</Button>',
+      wrong: '<button className="border px-4 py-2 rounded" onClick={onCancel}>Annuler</button>',
+    },
+    {
+      rule: 'Utiliser size="icon" pour les boutons sans texte ; dans une data-table, utiliser size="icon-sm" (carré 32px) pour rester à fleur de la rangée compacte',
+      correct: '<Button variant="ghost" size="icon"><Pencil /></Button>\n<Button variant="ghost" size="icon-sm"><Pencil /></Button> {/* action de ligne de table */}',
+      wrong: '<Button variant="ghost" className="h-9 w-9 p-0"><Pencil /></Button>',
+    },
+    {
+      rule: 'Utiliser les icônes Lucide avec le composant, pas de caractères spéciaux',
+      correct: '<Button><Plus /> Nouvel Événement</Button>',
+      wrong: '<Button>+ Nouvel Événement</Button>',
+    },
+    {
+      rule: 'Utiliser outline-destructive pour les actions destructives douces, pas des overrides manuels',
+      correct: '<Button variant="outline-destructive">Supprimer</Button>',
+      wrong: '<Button variant="outline" className="text-red-600 border-red-300">Supprimer</Button>',
+    },
+    {
+      rule: 'Dans tout groupe de ≥2 boutons (footers `Dialog`/`Sheet`/`Card`/`AlertDialog`, barres d\'actions de page/section/formulaire), le CTA principal se place à DROITE (dernière position en lecture LTR) ; les actions secondaires (Annuler, Réinitialiser, bascule Publier/Dépublier) à sa gauche. La barre est `flex flex-wrap justify-end gap-2` — elle empile sans déborder sur mobile, où les primaires s\'étirent (`max-sm:[&>button]:flex-1`). Règle de référence : section « Conventions transverses » (R1–R4) du Design System.',
+      correct: '<div className="flex flex-wrap gap-2 justify-end"><Button variant="outline">Dépublier</Button><Button>Enregistrer</Button></div>',
+      wrong: '<div className="flex gap-2"><Button>Enregistrer</Button><Button variant="outline">Dépublier</Button></div>',
+    },
+  ],
+  antiPatterns: [
+    {
+      title: 'size="sm" sur une action primaire',
+      description: 'Une action primaire (submit, CTA principal, boutons de DialogFooter/SheetFooter) reste en taille `default` (h-9), où qu\'elle soit — y compris au-dessus d\'une table ou dans une bannière d\'actions. `size="sm"` est réservé aux contrôles utilitaires (toolbars de data-table, pagination) et aux actions secondaires répétées/inline (« Ajouter un item », action par carte), JAMAIS au bouton Annuler/Réinitialiser apparié à un primaire.',
+    },
+    {
+      title: 'Ajouter min-h-[44px] sur un bouton',
+      description: 'La cible tactile 44px a été évacuée (admin desktop-first). La hauteur de référence d\'une action est h-9 (`default`) ; ne pas forcer `min-h-[44px]`, qui désaligne le bouton de ses voisins et fige une hauteur hors échelle.',
+    },
+    {
+      title: 'size="icon" (36px) pour une action de ligne de data-table',
+      description: 'Dans une data-table, un bouton icône-seule doit rester à fleur de la rangée compacte h-8. Utiliser `size="icon-sm"` (carré 32px), pas `size="icon"` (36px) ni un override `className="h-8 w-8"`.',
+    },
+    {
+      title: 'Hauteurs mixtes dans une paire d\'actions (footer / barre d\'actions)',
+      description: 'Dans une barre d\'actions ou un footer, tous les boutons appariés (Annuler + Valider ; Réinitialiser + Sauvegarder + Publier) partagent la même hauteur `default` (h-9). Mettre l\'action secondaire en `size="sm"` à côté d\'un primaire `default` produit deux hauteurs différentes côte à côte (régression EventPublishBanner). `sm` ne s\'applique qu\'aux toolbars de data-table et aux utilitaires répétés/inline.',
+    },
+  ],
+  examples: [
+    { label: 'Import', code: 'import { Button } from "@/components/ui/button"' },
+    { label: 'Variante simple', code: '<Button variant="default">Confirmer</Button>' },
+    { label: 'Avec icône', code: '<Button><Plus /> Nouvel Événement</Button>' },
+    { label: 'Bouton icône-seule', code: '<Button variant="ghost" size="icon"><Pencil /></Button>' },
+  ],
+}

@@ -1,0 +1,80 @@
+-- ============================================
+-- TimePick - Shell Parts: seed brand factory row for 'content-wrapper'
+-- ============================================
+-- Created: 2026-05-26
+-- Purpose: insère la row factory au niveau marque qui active la cascade γ
+--          du content-wrapper en l'absence de toute customisation admin.
+--          Cette row matérialise la décision produit 2026-05-26 : encadrement
+--          gris-clair partagé entre l'invitation (qui contient déjà
+--          <mj-section background-color="#f9f9f9"> dans son body_mjml) et
+--          les 3 modèles système (magic_link_login, magic_link_recovery,
+--          reservation_confirmation) qui en manquaient jusqu'ici. Le choix
+--          #f9f9f9 reproduit la couleur exacte de la section interne de
+--          l'invitation, ce qui rend le wrap visuellement transparent pour
+--          ce modèle (le wrap gris-clair se confond avec la section
+--          gris-clair existante), tandis que les 3 modèles système gagnent
+--          l'encadrement gris-clair sur le mj-body brand blanc (#ffffff
+--          par défaut, cf. email_brand_settings.background_color).
+--
+--          Sans cette row :
+--          - L3-render (commit b1201d06) reste no-op (resolved.contentWrapper
+--            est null partout).
+--          - Les 3 modèles système restent perçus comme « plus nus » que
+--            l'invitation (defer plan-5b-defer-A).
+--
+--          Avec cette row :
+--          - L'invitation reste visuellement quasi-stable (le wrap brand
+--            gris-clair #f9f9f9 se fond avec la section interne gris-clair
+--            #f9f9f9 du body_mjml ; le delta réel correspond aux 20 px de
+--            padding-top/bottom par défaut de <mj-wrapper> appliqués autour
+--            du body content, documentés en Spec Change Log).
+--          - Les 3 modèles système gagnent un encadrement <mj-wrapper>
+--            extérieur portant background-color="#f9f9f9".
+--
+-- Reversibility: rollback script retiré — politique forward-only.
+--                Urgence : git revert du SQL + correctif SQL manuel / restauration backup.
+--
+-- Idempotence: INSERT ... ON CONFLICT (owner_kind, owner_id, part_kind) DO
+--              NOTHING. Une seconde exécution est strictement no-op. Surtout,
+--              si l'admin a déjà customisé la row brand via le PUT endpoint
+--              L2 (cas réaliste depuis le 2026-05-25), le seed factory
+--              N'ÉCRASE PAS sa valeur — first-write-wins.
+--
+-- Backfill: aucun déplacement du <mj-section background-color="#f9f9f9">
+--           interne du default_body_mjml invitation (migration 006). Le wrap
+--           brand l'encadre proprement (blanc sur blanc = parité visuelle
+--           exacte côté utilisateur). Le gel 26-1 Q2 reste préservé.
+-- ============================================
+-- Maintenance notes (READ before editing):
+--
+--   1. Le tuple unique (owner_kind, owner_id, part_kind) est garanti par
+--      le UNIQUE INDEX shell_parts_owner_part_unique (cf. 009). Le ON
+--      CONFLICT cible explicitement ces 3 colonnes pour rester explicite ;
+--      ne pas remplacer par un ON CONFLICT DO NOTHING bare (porterait sur
+--      n'importe quelle contrainte unique, potentiellement future).
+--
+--   2. Toute évolution de la valeur factory (changement de couleur,
+--      ajout d'attributs comme padding/border-radius) DOIT passer par
+--      une nouvelle migration dédiée (013+). Ne PAS éditer cette
+--      migration en place — le rollback dépend du match exact pour
+--      préserver les customisations admin.
+--
+--   3. La couleur #f9f9f9 est strictement lowercase. Le validator côté
+--      écriture (HexColor regex) est case-insensitive sur l'entrée mais
+--      n'applique pas de normalisation au stockage ; le render-time
+--      normalise via normalizeContentWrapperBackgroundColor mais sans
+--      forcer la casse. Conserver lowercase ici pour parité avec le
+--      validator et les snapshots tests.
+--
+--   4. SSOT — La valeur factory ci-dessous est dupliquée dans la constante
+--      TS `BRAND_FACTORY_CONTENT_WRAPPER_MJML` exportée par
+--      `server/src/services/shell-parts.service.ts`. Toute évolution doit
+--      mettre à jour LES DEUX endroits en synchro byte-exact (le rollback
+--      012 et les tests beforeEach/beforeAll consomment la constante TS).
+--      Le SQL ne peut pas importer le module TS au runtime du runner de
+--      migrations ; la duplication est volontaire et tracée.
+-- ============================================
+
+INSERT INTO shell_parts (owner_kind, owner_id, part_kind, content_mjml)
+VALUES ('brand', '1', 'content-wrapper', '<mj-section background-color="#f9f9f9"></mj-section>')
+ON CONFLICT (owner_kind, owner_id, part_kind) DO NOTHING;

@@ -1,0 +1,67 @@
+<!--
+  Baseline pre-E4 — sendEventInvitation (default template path)
+  Source: server/src/services/email.service.ts:574-643 (uses DEFAULT_INVITATION_TEMPLATE at 254-291)
+  Test inputs:
+    email: invitee@example.com
+    eventData: { name: "Soirée Annuelle 2026", description: "Notre événement phare" }
+    magicLink: "https://timepick.example.com/event/abc?token=invite789"
+    customTemplate: undefined → uses DEFAULT_INVITATION_TEMPLATE
+    expirationDate: 2026-12-31T18:00:00Z
+  Subject: "Inscription participation - Soirée Annuelle 2026"
+  Captured: 2026-05-02 (audit story 25-0/T3, AC3)
+  Note: per-event custom template path (events.invitation_template) produces alternative HTML when set.
+        That path is consumed by the DEFAULT_INVITATION_TEMPLATE-shaped template stored in the column —
+        both legacy paths share the same DOCTYPE shell, only the body markup differs.
+-->
+<!-- TEXT-PART (sendEventInvitation line 615):
+Bonjour,
+
+Vous êtes invité à vous inscrire pour les créneaux de participation de l'événement : Soirée Annuelle 2026
+
+Description: Notre événement phare
+
+Pour accéder au calendrier et réserver votre créneau, utilisez le lien suivant :
+
+https://timepick.example.com/event/abc?token=invite789
+
+Ce lien expire le 31 décembre 2026 a 18h00.
+
+Ce lien est personnel et ne doit pas être partagé.
+-->
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background: #18181b; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+    .content { background: #f9f9f9; padding: 20px; border-radius: 0 0 8px 8px; }
+    .button { display: inline-block; background: #18181b; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 20px 0; }
+    .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd; color: #999; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Inscription Participation</h1>
+    </div>
+    <div class="content">
+      <h2>Invitation à Soirée Annuelle 2026</h2>
+      <p>Bonjour,</p>
+      <p>Vous êtes invité à vous inscrire pour les créneaux de participation.</p>
+      <p>Pour accéder au calendrier et réserver votre créneau, cliquez sur le bouton ci-dessous :</p>
+      <p style="text-align: center;">
+        <a href="https://timepick.example.com/event/abc?token=invite789" class="button">Réserver mon créneau</a>
+      </p>
+      <p style="color: #999; font-size: 13px; text-align: center; margin-top: 8px;">
+        Ce lien expire le 31 décembre 2026 a 18h00.
+      </p>
+    </div>
+    <div class="footer">
+      <p>Ce lien est personnel et ne doit pas être partagé.</p>
+    </div>
+  </div>
+</body>
+</html>

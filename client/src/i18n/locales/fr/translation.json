@@ -1,0 +1,59 @@
+{
+  "errors": {
+    "eventNotFound": "Événement non trouvé ou accès refusé"
+  },
+  "tabs": {
+    "details": "Détails",
+    "slots": "Créneaux",
+    "users": "Invités",
+    "template": "Template",
+    "stats": "Statistiques",
+    "settings": "Paramètres"
+  },
+  "calendar": {
+    "year": "Année",
+    "month": "Mois",
+    "week": "Semaine",
+    "day": "Journée",
+    "list": "Liste",
+    "today": "Aujourd'hui"
+  },
+  "eventForm": {
+    "defaultName": "Nouvel événement",
+    "errorTitle": "Erreur de création",
+    "networkError": "Erreur réseau. Vérifiez votre connexion.",
+    "timeoutError": "Délai d'attente dépassé. Vérifiez votre connexion.",
+    "serverError": "Erreur serveur. Veuillez réessayer.",
+    "unknownError": "Une erreur inattendue s'est produite.",
+    "draftNotFoundError": "Le brouillon n'existe plus. Il a peut-être été supprimé.",
+    "draftNotFoundTitle": "Brouillon introuvable",
+    "createNewDraft": "Créer un nouveau brouillon",
+    "draftError": "Impossible de créer l'événement. Veuillez réessayer.",
+    "maxRetriesError": "Impossible de créer l'événement après plusieurs tentatives. Veuillez contacter le support.",
+    "maxRetriesReached": "Nombre maximum de tentatives atteint.",
+    "retry": "Réessayer",
+    "contactSupport": "Contacter le support",
+    "cancelConfirm": "Voulez-vous vraiment annuler ? Toutes vos modifications seront perdues.",
+    "creating": "Création en cours...",
+    "nameRequired": "Le nom de l'événement est requis"
+  },
+  "eventPublishBanner": {
+    "draft": "Brouillon",
+    "draftHelp": "Cet événement n'est pas encore visible publiquement. Publiez-le pour permettre aux utilisateurs d'y accéder.",
+    "draftAriaLabel": "Publier l'événement",
+    "published": "Publié",
+    "publishedHelp": "Cet événement est visible publiquement. Les utilisateurs peuvent y accéder via le lien de l'événement.",
+    "publishedAriaLabel": "Dépublier l'événement",
+    "publish": "Publier",
+    "unpublish": "Dépublier",
+    "cancel": "Annuler",
+    "create": "Créer l'événement",
+    "creating": "Création...",
+    "createHelp": "Remplissez les détails, ajoutez des créneaux et invités, puis créez l'événement.",
+    "createdHelp": "Configurez vos créneaux et invités, puis créez l'événement.",
+    "loadError": "Impossible de charger les détails de l'événement",
+    "save": "Enregistrer",
+    "saving": "Enregistrement...",
+    "resetChanges": "Annuler les modifications"
+  }
+}

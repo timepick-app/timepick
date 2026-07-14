@@ -1,0 +1,57 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/*.js"],
+      "project": ["scripts/**/*.js"]
+    },
+    "client": {
+      "project": ["src/**/*.{ts,tsx}"],
+      "ignoreDependencies": ["@vitest/coverage-v8"],
+      // Primitives shadcn (scaffoldées via `npx shadcn add`, jamais éditées) :
+      //   chaque fichier ré-exporte l'API Radix complète (DialogClose,
+      //   PopoverAnchor, SheetClose…) dont on ne consomme qu'un sous-ensemble.
+      //   Les « unused export » résiduels y sont du bruit de vendoring. On
+      //   exclut donc les .tsx de ui/ de l'analyse (les .meta.ts voisins,
+      //   eux, restent analysés).
+      "ignore": ["src/components/ui/*.tsx", "src/components/public/index.ts"]
+    },
+    "server": {
+      "entry": ["src/index.ts", "src/scripts/**/*.ts"],
+      "project": ["src/**/*.ts"]
+    },
+    "shared": {
+      "project": ["src/**/*.ts"]
+    }
+  },
+  // file-type : importé dynamiquement (server/src/services/email-upload.service.ts),
+  //   non détectable statiquement par knip.
+  // shadcn : CLI de scaffolding des composants ui (`npx shadcn add`), jamais importé.
+  // @vitest/coverage-v8 : fournisseur de couverture consommé via le flag CLI `--coverage`
+  //   (scripts test:coverage / run-vitest-single.js --coverage), pas d'import statique.
+  // k6 : outil de test de charge (binaire externe, `scripts/k6-member-endpoints.js`),
+  //   importé via `k6/http` — non listé dans package.json car installé via Homebrew/binaire.
+  // zod : déclaré à la racine uniquement pour forcer npm workspace à ne pas marquer
+  //   node_modules/zod comme dev:true dans le lock (sinon exclu par --omit=dev en Docker).
+  //   L'usage réel est dans server/. C'est un workaround de hoisting, pas un import direct.
+  "ignoreDependencies": ["file-type", "shadcn", "@vitest/coverage-v8", "k6", "zod"],
+  // RAISON des faux positifs "unused export" : un symbole consommé DANS son propre
+  // fichier est un helper module-interne ou un seam de test (constantes de seuil,
+  // types d'annotation de retour, drift-guards, error classes levées sur place...).
+  // Son mot-clé `export` est intentionnel (encapsulation testable), ce n'est pas une
+  // API morte. knip ne le signale donc plus dès lors qu'il a un usage in-file.
+  "ignoreExportsUsedInFile": true,
+  "rules": {
+    "files": "error",
+    "dependencies": "error",
+    "unlisted": "error",
+    "binaries": "error",
+    "unresolved": "error",
+    "exports": "warn",
+    "types": "warn",
+    "nsExports": "warn",
+    "nsTypes": "warn",
+    "duplicates": "warn",
+    "enumMembers": "warn"
+  }
+}

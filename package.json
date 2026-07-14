@@ -1,0 +1,57 @@
+{
+  "name": "timepick",
+  "version": "0.24.0",
+  "license": "FSL-1.1-MIT",
+  "type": "module",
+  "workspaces": [
+    "client",
+    "server",
+    "shared"
+  ],
+  "overrides": {
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "@types/express-serve-static-core": "5.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.58.2",
+    "concurrently": "9.2.3",
+    "husky": "9.1.7",
+    "knip": "6.16.1",
+    "lint-staged": "17.0.2",
+    "shadcn": "3.7.0",
+    "tsx": "4.21.0"
+  },
+  "scripts": {
+    "cleanup": "node scripts/cleanup-processes.js",
+    "dev": "npm run build:shared && concurrently \"npm run dev:shared\" \"npm run dev:client\" \"npm run dev:server\" --names \"SHARED,CLIENT,SERVER\" --prefix-colors \"yellow,blue,green\"",
+    "dev:client": "cd client && npm run dev",
+    "dev:server": "cd server && npm run dev",
+    "build": "npm run build:shared && npm run build:client && npm run build:server",
+    "build:shared": "cd shared && npm run build",
+    "dev:shared": "cd shared && npm run build:watch",
+    "build:client": "cd client && npm run build",
+    "build:server": "cd server && npm run build",
+    "pretest": "npm run cleanup",
+    "test": "npm run test:client && npm run test:server",
+    "test:client": "node scripts/run-vitest-single.js --client",
+    "test:server": "npm run cleanup && cd server && npm run test",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report",
+    "changelog": "node scripts/generate-changelog.js --output docs/CHANGELOG.md",
+    "generate:ds": "tsx scripts/generate-ds-manifest.js",
+    "verify:mjml-strict": "cd server && npm run verify:mjml-strict --",
+    "knip": "knip",
+    "prepare": "husky || true"
+  },
+  "lint-staged": {
+    "client/src/components/ui/**/*.meta.ts": "npm run generate:ds",
+    "server/src/services/render-email.service.ts": "npm run verify:mjml-strict --",
+    "server/src/migrations/*.sql": "npm run verify:mjml-strict --",
+    "**/*.mjml": "npm run verify:mjml-strict --"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  }
+}

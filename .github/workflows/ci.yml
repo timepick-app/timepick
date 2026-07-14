@@ -1,0 +1,138 @@
+name: CI
+
+# Pipeline d'intégration continue (aucune autre CI dans le repo).
+# Jobs parallèles : détection de code mort (knip), typecheck, tests client
+# (vitest) et tests serveur (jest + PostgreSQL).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  # Empêche husky d'installer les hooks git pendant `npm ci` en CI.
+  HUSKY: "0"
+
+jobs:
+  knip:
+    name: Dead code (knip)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - name: Build @timepick/shared
+        run: npm run build:shared
+      - run: npm run knip
+
+  lint:
+    name: Lint (eslint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install deps
+        run: npm ci
+      - name: Run eslint
+        run: npm run lint
+        working-directory: client
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install deps
+        run: npm ci
+      - name: Build @timepick/shared
+        run: npm run build:shared
+      - name: Typecheck client
+        run: npx tsc -b
+        working-directory: client
+      - name: Typecheck server
+        run: npx tsc --noEmit
+        working-directory: server
+
+  test-client:
+    name: Tests client (vitest)
+    runs-on: ubuntu-latest
+    env:
+      TZ: Europe/Paris
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install deps
+        run: npm ci
+      - name: Build @timepick/shared
+        run: npm run build:shared
+      - name: Run vitest
+        run: npx vitest run
+        working-directory: client
+
+  test-server:
+    name: Tests server (jest + postgres)
+    runs-on: ubuntu-latest
+    env:
+      # Jest charge 99 suites + tests d'intégration PG en parallèle ;
+      # le heap Node par défaut (~1,5 GB) est insuffisant sur ce runner.
+      # Le runner GitHub Actions dispose de 7 GB RAM → 4 GB est sûr.
+      NODE_OPTIONS: --max-old-space-size=4096
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install deps
+        run: npm ci
+      - name: Build @timepick/shared
+        run: npm run build:shared
+      - name: Create server/.env.test
+        run: |
+          cat > server/.env.test <<'EOF'
+          DATABASE_URL=postgresql://postgres:postgres@localhost:5432/timepick_test
+          JWT_SECRET=test_jwt_secret_not_for_production
+          ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          EMAIL_FROM=noreply@test.local
+          EMAIL_HOST=127.0.0.1
+          EMAIL_PORT=1025
+          ALLOW_TEST_ROUTES=true
+          EOF
+      - name: Run jest
+        run: npm test
+        working-directory: server
