@@ -635,7 +635,7 @@ describe('PUT /api/admin/shell-parts/:ownerKind/:ownerId/:partKind', () => {
   // Plan-5b-defer-A L2 (2026-05-25) — PUT shell-parts content-wrapper.
   // Slot d'attributs hors-bloc, whitelist Outlook-safe (background-color,
   // padding*, border-radius). Pattern miroir mj-body : pas de data-part-kind
-  // requis, pas d'enfants. Cf. docs/EMAIL_SHELL_POLICY.md § content-wrapper.
+  // requis, pas d'enfants (politique de personnalisation des enveloppes email — content-wrapper).
   // ---------------------------------------------------------------------------
 
   describe('PUT content-wrapper (Plan-5b-defer-A L2)', () => {

@@ -7,17 +7,17 @@ import { resolve } from 'node:path'
 // import.meta.dirname → client/src/__tests__/integration
 // Walk up 4 levels to reach the repo root.
 const ROOT = resolve(import.meta.dirname, '..', '..', '..', '..')
-const MANIFEST = resolve(ROOT, 'docs', 'DESIGN_SYSTEM.md')
+const MANIFEST = resolve(ROOT, 'test-results', 'ds-manifest', 'DESIGN_SYSTEM.md')
 
 describe('generate-ds-manifest', () => {
   let manifestContent: string
 
   beforeAll(() => {
-    execSync('npm run generate:ds', { cwd: ROOT, stdio: 'pipe' })
+    execSync('npm run generate:ds -- --output ' + MANIFEST, { cwd: ROOT, stdio: 'pipe' })
     manifestContent = readFileSync(MANIFEST, 'utf8')
   })
 
-  it('produces docs/DESIGN_SYSTEM.md when run', () => {
+  it('produit le manifest DESIGN_SYSTEM.md', () => {
     expect(existsSync(MANIFEST)).toBe(true)
   })
 

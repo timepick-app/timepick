@@ -7,15 +7,21 @@
  * the design system.
  *
  * Run via: `npm run generate:ds` (uses tsx to load `.meta.ts` at runtime).
+ * Un chemin de sortie alternatif peut être fourni via `--output <chemin>`
+ * (résolu depuis le cwd si relatif) ; par défaut : `docs/DESIGN_SYSTEM.md`.
  */
 import { readdirSync, writeFileSync, mkdirSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const UI_DIR = join(ROOT, 'client/src/components/ui')
-const OUT_DIR = join(ROOT, 'docs')
-const OUT_FILE = join(OUT_DIR, 'DESIGN_SYSTEM.md')
+const outputFlagIndex = process.argv.indexOf('--output')
+const OUT_FILE =
+  outputFlagIndex !== -1 && process.argv[outputFlagIndex + 1]
+    ? resolve(process.cwd(), process.argv[outputFlagIndex + 1])
+    : join(ROOT, 'docs', 'DESIGN_SYSTEM.md')
+const OUT_DIR = dirname(OUT_FILE)
 
 async function loadAllMetas() {
   const files = readdirSync(UI_DIR).filter((f) => f.endsWith('.meta.ts') && !f.startsWith('_'))
