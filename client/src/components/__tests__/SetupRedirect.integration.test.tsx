@@ -1,4 +1,4 @@
-import { render, screen, act } from '@testing-library/react';
+import { render, screen, act, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
@@ -109,7 +109,8 @@ describe('SetupRedirect — intégration : race de redirection setup', () => {
     renderApp('/setup', queryClient);
 
     // Étape 1 — SMTP : saisir un hôte minimal et continuer
-    await user.type(await screen.findByTestId('smtp-host'), 'smtp.test.com');
+    await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeEnabled());
+    await user.type(screen.getByTestId('smtp-host'), 'smtp.test.com');
     await user.click(screen.getByTestId('smtp-continue-btn'));
 
     // Étape 2 — admin : saisir l'email et soumettre
@@ -136,7 +137,8 @@ describe('SetupRedirect — intégration : race de redirection setup', () => {
     renderApp('/setup', queryClient);
 
     // Étape 1 (SMTP) → étape 2 (admin)
-    await user.type(await screen.findByTestId('smtp-host'), 'smtp.test.com');
+    await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeEnabled());
+    await user.type(screen.getByTestId('smtp-host'), 'smtp.test.com');
     await user.click(screen.getByTestId('smtp-continue-btn'));
     expect(await screen.findByRole('button', { name: 'Devenir administrateur' })).toBeInTheDocument();
 

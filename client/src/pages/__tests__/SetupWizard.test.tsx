@@ -123,7 +123,7 @@ describe('SetupWizard — source env (flux à 2 étapes, inchangé)', () => {
     renderWizard();
 
     // Remplir le champ requis (host)
-    await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeEnabled());
     await user.type(screen.getByTestId('smtp-host'), 'smtp.exemple.com');
     await user.click(screen.getByTestId('smtp-continue-btn'));
 
@@ -148,7 +148,7 @@ describe('SetupWizard — source env (flux à 2 étapes, inchangé)', () => {
     const { queryClient } = renderWizard();
 
     // Passer à l'étape admin via "Continuer" SMTP
-    await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeEnabled());
     await user.type(screen.getByTestId('smtp-host'), 'smtp.exemple.com');
     await user.click(screen.getByTestId('smtp-continue-btn'));
     await waitFor(() => expect(screen.getByLabelText('Email')).toBeInTheDocument());
@@ -179,7 +179,7 @@ describe('SetupWizard — source env (flux à 2 étapes, inchangé)', () => {
     renderWizard();
 
     // Passer à l'étape admin
-    await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeEnabled());
     await user.type(screen.getByTestId('smtp-host'), 'smtp.exemple.com');
     await user.click(screen.getByTestId('smtp-continue-btn'));
     await waitFor(() => expect(screen.getByLabelText('Email')).toBeInTheDocument());
@@ -203,7 +203,7 @@ describe('SetupWizard — source env (flux à 2 étapes, inchangé)', () => {
     mockedTestSetupSmtp.mockResolvedValue({ success: true, message: 'Email envoyé avec succès' });
     renderWizard();
 
-    await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeEnabled());
     await user.type(screen.getByTestId('smtp-host'), 'smtp.exemple.com');
     // Remplir un recipient valide
     await user.clear(screen.getByTestId('smtp-recipient'));
@@ -231,7 +231,7 @@ describe('SetupWizard — source env (flux à 2 étapes, inchangé)', () => {
     mockedTestSetupSmtp.mockRejectedValue(axiosError);
     renderWizard();
 
-    await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeEnabled());
     await user.type(screen.getByTestId('smtp-host'), 'smtp.exemple.com');
     await user.clear(screen.getByTestId('smtp-recipient'));
     await user.type(screen.getByTestId('smtp-recipient'), 'test@exemple.com');
@@ -250,7 +250,7 @@ describe('SetupWizard — source env (flux à 2 étapes, inchangé)', () => {
     mockedSaveSetupSmtp.mockRejectedValue(axiosError);
     renderWizard();
 
-    await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeEnabled());
     await user.type(screen.getByTestId('smtp-host'), 'smtp.exemple.com');
     await user.click(screen.getByTestId('smtp-continue-btn'));
 
@@ -335,7 +335,7 @@ describe('SetupWizard — SMTP sautable (emailDeliverable=true)', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeEnabled());
     await user.click(screen.getByTestId('smtp-continue-btn'));
 
     await waitFor(() => {
@@ -348,7 +348,7 @@ describe('SetupWizard — SMTP sautable (emailDeliverable=true)', () => {
     const user = userEvent.setup();
     renderWizard();
 
-    await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeEnabled());
     await user.type(screen.getByTestId('smtp-host'), 'smtp.exemple.com');
     // Dès qu'un hôte est saisi, le bouton redevient "Continuer" (plus "Passer").
     expect(screen.getByTestId('smtp-continue-btn')).toHaveTextContent('Continuer');

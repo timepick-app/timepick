@@ -1,5 +1,13 @@
 import '@testing-library/jest-dom'
+import { configure } from '@testing-library/react'
 import { vi, beforeEach } from 'vitest'
+
+// Runners CI / charge locale : le défaut de 1 s de waitFor/findBy est trop juste
+// pour les tests d'intégration wizard (rendu React + user-event + requêtes
+// mockées enchaînés), d'où des faux échecs intermittents. 3 s supprime le flake
+// sans masquer de vraie régression — un composant réellement cassé ne met pas
+// 3 s à ne pas s'afficher, il ne s'affiche jamais.
+configure({ asyncUtilTimeout: 3000 })
 
 // Mock Vite global constants for tests
 declare global {
