@@ -12,7 +12,7 @@ import app from '../../app'
  *
  * IN-PROCESS (non négociable) : le serveur tourne dans le process de test, donc les
  * jest.spyOn/jest.mock (notamment les mocks email) continuent d'intercepter. Un serveur dans
- * un process séparé contournerait les mocks → vrais envois vers MailHog.
+ * un process séparé contournerait les mocks → vrais envois vers Mailpit.
  *
  * Jest réinitialise le module registry entre fichiers : `server`, `closed` et le hook afterAll
  * sont réinitialisés par fichier (≤ 32 serveurs sur la suite, au lieu de ~680).

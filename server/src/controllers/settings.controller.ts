@@ -86,7 +86,7 @@ export const testSmtpConnectionHandler = async (req: Request, res: Response): Pr
 
 /**
  * DELETE /api/admin/settings/smtp
- * Clears all SMTP settings from the DB, reverting to env/MailHog fallback.
+ * Clears all SMTP settings from the DB, reverting to the env/local-interceptor fallback.
  */
 export const deleteSmtpSettingsHandler = async (_req: Request, res: Response): Promise<void> => {
   try {

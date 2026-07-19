@@ -3,6 +3,7 @@ import rateLimit from 'express-rate-limit';
 import { getSetupStatus, createFirstAdmin, checkSetupNotDone } from '../controllers/setup.controller';
 import { saveSmtpSettingsHandler } from '../controllers/settings.controller';
 import { getSetupSmtpConfigHandler, testSetupSmtpHandler } from '../controllers/setup-smtp.controller';
+import { getSetupEncryptionKeyStatus } from '../controllers/setup-encryption-key.controller';
 
 const router = Router();
 
@@ -17,6 +18,17 @@ const setupSmtpLimiter = rateLimit({
 const setupSmtpTestLimiter = rateLimit({
   windowMs: 60_000,
   limit: 5,
+  skip: () => process.env.NODE_ENV === 'test',
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: { code: 'RATE_LIMITED', message: 'Trop de requêtes.' } },
+})
+
+// Status GET is a cheap read consumed by the wizard; its own limiter skips in
+// test so the shared single-worker MemoryStore can't accumulate spurious 429s.
+const setupEncryptionKeyLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 30,
   skip: () => process.env.NODE_ENV === 'test',
   standardHeaders: true,
   legacyHeaders: false,
@@ -50,5 +62,7 @@ router.post('/create-admin', checkSetupNotDone, createFirstAdmin);
 router.get('/smtp', checkSetupNotDone, setupSmtpLimiter, getSetupSmtpConfigHandler);
 router.put('/smtp', checkSetupNotDone, setupSmtpLimiter, saveSmtpSettingsHandler);
 router.post('/smtp/test', checkSetupNotDone, setupSmtpTestLimiter, testSetupSmtpHandler);
+
+router.get('/encryption-key', checkSetupNotDone, setupEncryptionKeyLimiter, getSetupEncryptionKeyStatus);
 
 export default router;

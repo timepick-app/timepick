@@ -6,14 +6,14 @@
 
 ---
 
-## Why direct extraction (not MailHog roundtrip)
+## Why direct extraction (not Mailpit roundtrip)
 
 Two methods were considered:
 
-1. **Live MailHog roundtrip** — start dev server + MailHog, trigger each flow, scrape API. Faithful to runtime delivery (transport-level mutations included), but operationally heavy (requires admin login, event setup, booking flow) and non-reproducible without the same DB state.
+1. **Live Mailpit roundtrip** — start dev server + Mailpit, trigger each flow, scrape API. Faithful to runtime delivery (transport-level mutations included), but operationally heavy (requires admin login, event setup, booking flow) and non-reproducible without the same DB state.
 2. **Direct extraction from source (chosen)** — read the HTML literal in `email.service.ts`, substitute variables with deterministic sample values, write to file. Bit-perfect reproducibility ; the HTML produced is **identical** to what nodemailer would receive as `mailOptions.html` because the inline literal is the email body.
 
-The legacy code path constructs HTML inline (no compilation, no sanitization, no shell injection). The "transport" only adds RFC 2822 headers — irrelevant for visual diff. **Direct extraction is the canonical baseline** ; MailHog would only add noise.
+The legacy code path constructs HTML inline (no compilation, no sanitization, no shell injection). The "transport" only adds RFC 2822 headers — irrelevant for visual diff. **Direct extraction is the canonical baseline** ; Mailpit would only add noise.
 
 ## File inventory (4 baselines)
 
@@ -73,7 +73,7 @@ These remain inline post-E4 with JSDoc tag `// hors scope E4 — voir 25-0/AC5`.
 
 Per 25-0/AC3 Dev Notes T3 + the E4.S4 story scope (`prd.md`):
 
-1. **Capture method** for post-E4 baselines: same direct extraction OR MailHog roundtrip (E4.S4 author's call). The post-E4 HTML is the output of `renderEmail({ templateKey, eventId?, variables })`.
+1. **Capture method** for post-E4 baselines: same direct extraction OR Mailpit roundtrip (E4.S4 author's call). The post-E4 HTML is the output of `renderEmail({ templateKey, eventId?, variables })`.
 2. **Comparison surface**:
    - **Body-level diff** (CTA, event_name, magic_link, expiration_date placement + encoding) → **must remain semantically equivalent**
    - **Brand chrome** (header logo + footer mentions + brand-token color/font) → **expected to diverge** (the legacy templates have NO shell ; post-E4 wraps in the global brand-tokenized shell)
@@ -91,18 +91,20 @@ To regenerate a baseline post-E4 wiring:
 # Then writes html to server/src/__tests__/fixtures/email-baselines/post-e4/email-{templateKey}-post-e4.html
 ```
 
-**Method B — MailHog roundtrip** (faithful to runtime delivery):
+**Method B — Mailpit roundtrip** (faithful to runtime delivery):
 ```bash
-# Terminal 1 — start MailHog
-mailhog
-# (or via docker: docker run -d --name mailhog -p 1025:1025 -p 8025:8025 mailhog/mailhog)
+# Terminal 1 — start Mailpit
+mailpit
+# (or as a service: brew services start mailpit
+#  or via docker: docker run -d --name mailpit -p 1025:1025 -p 8025:8025 axllent/mailpit)
 
-# Terminal 2 — start dev server (uses 127.0.0.1:1025 fallback per email.service.ts:107-112)
+# Terminal 2 — start dev server (uses the 127.0.0.1:1025 fallback of buildTransport() in email-transport.service.ts)
 npm run dev
 
 # Terminal 3 — trigger flows via admin UI or curl
-# Then fetch:
-curl http://localhost:8025/api/v2/messages | jq '.items[].Content.Body' -r > captured.html
+# Then fetch the latest message's HTML part (Mailpit REST API v1 serves it already decoded):
+MSG_ID=$(curl -s http://localhost:8025/api/v1/messages | jq -r '.messages[0].ID')
+curl -s "http://localhost:8025/api/v1/message/$MSG_ID" | jq -r '.HTML' > captured.html
 ```
 
 ## References

@@ -5,6 +5,7 @@ export { MagicLinkTTLCard } from './MagicLinkTTLCard'
 export { SessionTTLCard } from './SessionTTLCard'
 export { SmtpConfigPanel } from './SmtpConfigPanel'
 export { SecurityPanel } from './SecurityPanel'
+export { EncryptionKeyPanel } from './EncryptionKeyPanel'
 export { EmailSettingsSubtabs } from './EmailSettingsSubtabs'
 export {
   VALID_EMAIL_SUBTABS,

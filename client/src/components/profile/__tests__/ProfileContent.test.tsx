@@ -49,6 +49,7 @@ vi.mock('@/hooks/useSessionTimeout', () => ({
 // Mock via le barrel admin pour correspondre à l'import du composant.
 vi.mock('@/components/admin', () => ({
   SecurityPanel: () => <div data-testid="security-panel" />,
+  EncryptionKeyPanel: () => <div data-testid="encryption-key-panel" />,
 }))
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────

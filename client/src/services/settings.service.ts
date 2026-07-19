@@ -68,7 +68,7 @@ export const testSmtpConnection = async (payload: SmtpSettingsPayload): Promise<
 
 /**
  * Clear all SMTP settings (DELETE /api/admin/settings/smtp).
- * Reverts the server to env/MailHog fallback.
+ * Reverts the server to the env/local-interceptor fallback.
  */
 export const clearSmtpSettings = async (): Promise<void> => {
   await api.delete('/admin/settings/smtp')

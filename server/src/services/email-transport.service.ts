@@ -30,36 +30,86 @@ export function withAdminCtx(link: string): string {
 let cachedTransporter: Transporter | null = null;
 let cachedFromAddress: string | null = null;
 let transportHealthy: boolean | null = null;
+let encryptionKeyMismatch = false;
+
+/** Étiquette de la source du dernier transport construit par buildTransport(). */
+export type EmailTransportSource = 'db' | 'env' | 'fallback';
+let transportSource: EmailTransportSource | null = null;
 
 /**
- * Active probe of the current transport. Races verify() against a 10s timeout.
+ * True when the last SMTP settings read failed to decrypt the stored password
+ * with the current `ENCRYPTION_KEY` (GCM auth failure) — distinct from "no SMTP
+ * config at all". Cleared on the next successful `getSmtpSettings()` read.
+ */
+export function getEncryptionKeyMismatch(): boolean {
+  return encryptionKeyMismatch
+}
+
+/**
+ * Active probe of the current transport. Races verify() against a timeout
+ * (default 10s for admin/status callers; the setup wizard passes a shorter one).
  * Updates transportHealthy cache. Returns false if no transport can be built.
  */
-export async function checkSmtpConnection(): Promise<boolean> {
+export async function checkSmtpConnection(timeoutMs = 10_000): Promise<boolean> {
   const transporter = cachedTransporter ?? await buildTransport()
   if (!transporter) {
     transportHealthy = false
     return false
   }
   const check = transporter.verify().then(() => true).catch(() => false)
-  const timeout = new Promise<false>(resolve => setTimeout(() => resolve(false), 10_000))
+  const timeout = new Promise<false>(resolve => setTimeout(() => resolve(false), timeoutMs))
   const result = await Promise.race([check, timeout])
   transportHealthy = result
   return result
 }
 
 /**
+ * Setup-wizard delivery signal: can the server actually send email right now?
+ * Thin wrapper over checkSmtpConnection() with a short probe timeout — the
+ * wizard is interactive, so we don't block it on the 10s admin/status deadline.
+ * buildTransport() already encodes both regimes: production without DB SMTP →
+ * null → false; dev/test → effective transport (DB/env/local interceptor) → real
+ * reachability probe. NB: inherits checkSmtpConnection's transportHealthy
+ * side-effect, benign at setup time (no admin UI reads it yet).
+ */
+export async function isEmailDeliverable(): Promise<boolean> {
+  return checkSmtpConnection(2_500)
+}
+
+/**
+ * Source du dernier transport construit — 'db' (app_config), 'env' (SMTP_* du
+ * .env, dev/test) ou 'fallback' (127.0.0.1:1025, dev/test). null si aucun
+ * transport (prod sans config) ou cache invalidé sans rebuild. Best-effort :
+ * rafraîchie à chaque buildTransport(). Consommée par le wizard pour préciser
+ * POURQUOI l'étape SMTP est sautable.
+ */
+export function getEmailTransportSource(): EmailTransportSource | null {
+  return transportSource
+}
+
+/**
+ * Heuristic: does this error look like an AES-GCM decrypt/auth failure (wrong
+ * `ENCRYPTION_KEY`) rather than some other SMTP-settings read failure? Matches
+ * Node's `crypto` error messages for a bad auth tag / corrupt ciphertext.
+ */
+function looksLikeDecryptFailure(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err)
+  return /unable to authenticate|bad decrypt|Unsupported state|wrong final block length/i.test(message)
+}
+
+/**
  * Build a fresh nodemailer transport using cascade resolution:
  * 1. DB (app_config) → highest priority
  * 2. .env (SMTP_*) → fallback
- * 3. Legacy .env (EMAIL_HOST) → backward compat
- * 4. Env-aware fallback: null in production, MailHog in dev/test
+ * 3. Env-aware fallback: null in production, local SMTP interceptor (127.0.0.1:1025) in dev/test
  */
 async function buildTransport(): Promise<Transporter | null> {
   try {
     const dbSettings = await getSmtpSettings();
+    encryptionKeyMismatch = false;
 
     if (dbSettings.smtpHost) {
+      transportSource = 'db';
       return nodemailer.createTransport({
         host: dbSettings.smtpHost,
         port: parseInt(dbSettings.smtpPort, 10) || 587,
@@ -70,17 +120,27 @@ async function buildTransport(): Promise<Transporter | null> {
       });
     }
   } catch (error) {
-    console.error('[EmailService] Failed to read SMTP settings:', error);
+    if (looksLikeDecryptFailure(error)) {
+      encryptionKeyMismatch = true;
+      console.error(
+        '[EmailService] ENCRYPTION_KEY mismatch — the stored SMTP password cannot be decrypted with the current key. ' +
+          'Restore your backed-up encryption key (env var or server/data/encryption.key) or re-enter the SMTP password in Settings → Email.',
+      );
+    } else {
+      console.error('[EmailService] Failed to read SMTP settings:', error);
+    }
   }
 
   // Production : la DB est la source unique. Pas de fallback env/legacy.
   if (process.env.NODE_ENV === 'production') {
     console.error('[EmailService] No SMTP config found in production. Emails will not be sent.')
+    transportSource = null
     return null
   }
 
-  // Dev/test uniquement : fallback env puis legacy puis MailHog.
+  // Dev/test uniquement : fallback env (SMTP_*) puis intercepteur SMTP local (127.0.0.1:1025).
   if (process.env.SMTP_HOST) {
+    transportSource = 'env';
     return nodemailer.createTransport({
       host: process.env.SMTP_HOST,
       port: parseInt(process.env.SMTP_PORT || '587', 10),
@@ -91,18 +151,8 @@ async function buildTransport(): Promise<Transporter | null> {
     });
   }
 
-  if (process.env.EMAIL_HOST) {
-    return nodemailer.createTransport({
-      host: process.env.EMAIL_HOST,
-      port: parseInt(process.env.EMAIL_PORT || '1025', 10),
-      secure: false,
-      pool: true,
-      socketTimeout: 300_000,
-      ignoreTLS: true,
-    });
-  }
-
-  // Dev/test: MailHog fallback
+  // Dev/test: fallback to a local SMTP interceptor (e.g. Mailpit) on 127.0.0.1:1025
+  transportSource = 'fallback';
   return nodemailer.createTransport({
     host: '127.0.0.1',
     port: 1025,
@@ -171,6 +221,7 @@ export function invalidateTransportCache(): void {
   cachedTransporter = null;
   cachedFromAddress = null;
   transportHealthy = null;
+  transportSource = null;
 }
 
 /**

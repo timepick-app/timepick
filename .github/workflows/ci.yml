@@ -122,17 +122,6 @@ jobs:
         run: npm ci
       - name: Build @timepick/shared
         run: npm run build:shared
-      - name: Create server/.env.test
-        run: |
-          cat > server/.env.test <<'EOF'
-          DATABASE_URL=postgresql://postgres:postgres@localhost:5432/timepick_test
-          JWT_SECRET=test_jwt_secret_not_for_production
-          ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-          EMAIL_FROM=noreply@test.local
-          EMAIL_HOST=127.0.0.1
-          EMAIL_PORT=1025
-          ALLOW_TEST_ROUTES=true
-          EOF
       - name: Run jest
         run: npm test
         working-directory: server

@@ -14,14 +14,12 @@
  * REPLACE, et `runMigrations` ne rejoue que les migrations en attente. Sûr à
  * relancer à chaque déploiement.
  */
+import './bootstrap-env';
 import fs from 'node:fs';
 import path from 'node:path';
-import dotenv from 'dotenv';
 import pool from './db/pool';
 import { runMigrations } from './migrate';
 import { provisionSmtpFromEnv } from './services/smtp-provisioning.service';
-
-dotenv.config();
 
 // dist/bootstrap.sql en production (copié par le Dockerfile), ou
 // src/__tests__/bootstrap.sql en dev (exécution ts-node depuis src/).

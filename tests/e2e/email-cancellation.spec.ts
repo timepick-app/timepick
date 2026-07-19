@@ -7,7 +7,8 @@
  * brand, content-wrapper, footer) ET le motif HTML escapé saisi par l'admin.
  *
  * Prérequis :
- * - Mailpit lancé : `docker run -d --name mailpit -p 1025:1025 -p 8025:8025 axllent/mailpit`
+ * - Mailpit lancé : `brew services start mailpit`
+ *   (ou `docker run -d --name mailpit -p 1025:1025 -p 8025:8025 axllent/mailpit`)
  * - Serveur dev démarré (auto via Playwright webServer)
  * - ALLOW_TEST_ROUTES=true dans server/.env
  *
@@ -17,7 +18,7 @@
 import { test, expect, type APIRequestContext } from '@playwright/test'
 
 const SERVER_BASE = 'http://localhost:3000'
-const MAILPIT_API = 'http://localhost:8025/api/v2'
+const MAILPIT_API = 'http://localhost:8025/api/v1'
 
 const TEST_ADMIN = {
   email: 'e2e-cancellation-admin@test.local',
@@ -33,85 +34,13 @@ const TEST_USER = {
 
 // --- Helpers (mirrors email-pipeline.spec.ts conventions) -------------------
 
-function decodeQP(str: string): string {
-  // 1) Soft line breaks (=\r\n ou =\n) supprimés
-  // 2) Toute séquence =XX (hex) décodée — utf-8 multibyte décodé via TextDecoder
-  //    pour gérer correctement les accents (=C3=A9 → é). Pattern miroir des
-  //    décodeurs MIME standard ; un caractère UTF-8 peut prendre 1-4 octets.
-  const noSoftBreaks = str.replace(/=\r?\n/g, '')
-  const matches = noSoftBreaks.match(/(?:=[0-9A-Fa-f]{2})+/g)
-  if (!matches) return noSoftBreaks
-
-  let result = noSoftBreaks
-  for (const seq of matches) {
-    const bytes = new Uint8Array(seq.length / 3)
-    for (let i = 0; i < seq.length; i += 3) {
-      bytes[i / 3] = parseInt(seq.slice(i + 1, i + 3), 16)
-    }
-    const decoded = new TextDecoder('utf-8').decode(bytes)
-    result = result.split(seq).join(decoded)
-  }
-  return result
-}
-
 /**
- * Décode les « encoded-words » RFC 2047 (`=?charset?Q|B?texte?=`) tels que stockés
- * par MailHog dans `Content.Headers.Subject`. Un sujet contenant des accents
- * (« Créneau annulé ») est émis par nodemailer sous forme encodée — le matcher
- * naïf `.includes('Créneau annulé')` échouait donc sur le sujet brut. On reconstitue
- * ici le texte lisible pour que le filtre de polling ET les assertions de sujet
- * (eventName) opèrent sur la chaîne décodée. Les encoded-words adjacents séparés
- * par du blanc sont concaténés (le blanc est ignoré, cf. RFC 2047 §6.2).
+ * Poll l'API REST Mailpit (v1) jusqu'à trouver un email correspondant aux filtres.
+ * Mailpit parse le MIME côté serveur : `Subject` (encoded-words RFC 2047), `Text`
+ * et `HTML` (quoted-printable + charset) arrivent déjà décodés — aucun décodage
+ * manuel n'est nécessaire (l'ancien intercepteur stockait le corps multipart
+ * brut, d'où les décodeurs QP/RFC 2047 supprimés depuis).
  */
-function decodeMimeEncodedWords(input: string): string {
-  const collapsed = input.replace(/\?=\s+=\?/g, '?==?')
-  return collapsed.replace(
-    /=\?([^?]+)\?([QqBb])\?([^?]*)\?=/g,
-    (_full, charset: string, enc: string, text: string) => {
-      if (enc.toUpperCase() === 'B') {
-        return new TextDecoder(charset).decode(Buffer.from(text, 'base64'))
-      }
-      // Q-encoding : `_` → espace, `=XX` → octet hexadécimal.
-      const bytes: number[] = []
-      for (let i = 0; i < text.length; i += 1) {
-        const ch = text[i]
-        if (ch === '_') {
-          bytes.push(0x20)
-        } else if (ch === '=' && /^[0-9A-Fa-f]{2}$/.test(text.slice(i + 1, i + 3))) {
-          bytes.push(parseInt(text.slice(i + 1, i + 3), 16))
-          i += 2
-        } else {
-          bytes.push(ch.charCodeAt(0))
-        }
-      }
-      return new TextDecoder(charset).decode(new Uint8Array(bytes))
-    },
-  )
-}
-
-/**
- * Isole la partie `text/html` d'un corps `multipart/alternative` tel que MailHog
- * le stocke dans `Content.Body` (parties brutes séparées par la frontière MIME).
- * Sans cela, le repli « corps entier » mélangeait la partie texte (motif brut,
- * `<urgent>`) et la partie HTML (motif échappé, `&lt;urgent&gt;`), faisant échouer
- * `not.toContain('<urgent>')` alors que l'email HTML est correctement échappé. Le
- * template MJML rendu n'ayant pas de balise `<html>` racine, l'ancienne extraction
- * `<html>…</html>` ne matchait jamais et renvoyait tout le corps.
- */
-function extractHtmlPart(rawBody: string, topContentType: string): string {
-  const boundary = topContentType.match(/boundary="?([^";\r\n]+)"?/i)?.[1]
-  if (!boundary) return decodeQP(rawBody)
-
-  for (const segment of rawBody.split(`--${boundary}`)) {
-    if (!/Content-Type:\s*text\/html/i.test(segment)) continue
-    // Le contenu de la partie commence après la ligne vide séparant ses en-têtes.
-    const sepIndex = segment.search(/\r?\n\r?\n/)
-    const content = sepIndex >= 0 ? segment.slice(sepIndex).replace(/^\r?\n\r?\n/, '') : segment
-    return decodeQP(content)
-  }
-  return decodeQP(rawBody)
-}
-
 async function waitForMailpitEmail(
   request: APIRequestContext,
   options: { subject?: string; recipient?: string; timeout?: number } = {},
@@ -122,25 +51,28 @@ async function waitForMailpitEmail(
   while (Date.now() < deadline) {
     const res = await request.get(`${MAILPIT_API}/messages`)
     if (!res.ok()) throw new Error(`Mailpit API returned ${res.status()}`)
-    const data = await res.json()
-    const items: Array<{
-      Content?: { Headers?: { Subject?: string[]; 'Content-Type'?: string[] }; Body?: string }
-      Raw?: { From?: string; To?: string[] }
-    }> = data.items ?? []
-
-    for (const item of items) {
-      const mailSubject = decodeMimeEncodedWords(item.Content?.Headers?.Subject?.[0] ?? '')
-      const recipients = item.Raw?.To ?? []
-      const rawBody = item.Content?.Body ?? ''
-      const body = decodeQP(rawBody)
-      const html = extractHtmlPart(rawBody, item.Content?.Headers?.['Content-Type']?.[0] ?? '')
-
-      const subjectMatch = !subject || mailSubject.includes(subject)
-      const recipientMatch = !recipient || recipients.some((r) => r.includes(recipient))
-      if (subjectMatch && recipientMatch) return { subject: mailSubject, body, html }
+    const data = (await res.json()) as {
+      messages?: Array<{ ID: string; Subject: string; To?: Array<{ Address: string }> }>
     }
 
-    await new Promise((r) => setTimeout(r, 1000))
+    for (const summary of data.messages ?? []) {
+      const subjectMatch = !subject || summary.Subject.includes(subject)
+      const recipientMatch =
+        !recipient || (summary.To ?? []).some((to) => to.Address.includes(recipient))
+      if (!subjectMatch || !recipientMatch) continue
+
+      const detailRes = await request.get(`${MAILPIT_API}/message/${summary.ID}`)
+      if (!detailRes.ok()) throw new Error(`Mailpit API returned ${detailRes.status()}`)
+      const detail = (await detailRes.json()) as { Subject: string; Text?: string; HTML?: string }
+      const text = detail.Text ?? ''
+      const html = detail.HTML ?? ''
+      // `body` couvre les deux parties MIME (équivalent de l'ancien corps brut).
+      return { subject: detail.Subject, body: `${text}\n${html}`, html }
+    }
+
+    const { promise: tick, resolve: wake } = Promise.withResolvers<void>()
+    setTimeout(wake, 1000)
+    await tick
   }
 
   throw new Error(
@@ -282,9 +214,10 @@ test.describe('Slot cancellation email pipeline via Mailpit @slow', () => {
     // Subject
     expect(email.subject).toContain(eventName)
 
-    // Shell standard présent (header TimePick + content-wrapper #f9f9f9 brand factory)
+    // Shell standard présent (header TimePick + fond mj-body #fafafa, repeint par
+    // la migration 038_repaint_mjbody_fafafa — l'assertion historique #f9f9f9 datait d'avant)
     expect(email.html).toContain('TimePick')
-    expect(email.html.toLowerCase()).toContain('#f9f9f9')
+    expect(email.html.toLowerCase()).toContain('#fafafa')
 
     // Motif présent et HTML-escapé (< et > échappés en entités)
     expect(email.html).toContain('Motif')
@@ -344,7 +277,7 @@ test.describe('Slot cancellation email pipeline via Mailpit @slow', () => {
 
     // Shell standard toujours présent
     expect(email.html).toContain('TimePick')
-    expect(email.html.toLowerCase()).toContain('#f9f9f9')
+    expect(email.html.toLowerCase()).toContain('#fafafa')
 
     // Pas de bloc motif visible
     expect(email.html).not.toContain('Motif :')

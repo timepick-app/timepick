@@ -45,6 +45,7 @@ client/.vite/
 
 # Email POC v2 — runtime-uploaded images (never committed)
 server/uploads/
+server/data/
 
 # Harness session exports (large per-run HTML dumps — never committed)
 omp-session-*.html

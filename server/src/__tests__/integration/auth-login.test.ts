@@ -47,7 +47,7 @@ const ensureNoPublishedEvents = async () => {
 };
 
 describe('POST /api/auth/login - Public Magic Link Request', () => {
-  // Stub l'envoi de magic-link pour éviter de vrais emails vers MailHog.
+  // Stub l'envoi de magic-link pour éviter de vrais emails vers Mailpit.
   // beforeEach/afterEach (et NON beforeAll) : le test « Échec du service email » fait un
   // mockRestore() local qui restaurerait l'implémentation réelle pour les tests suivants ;
   // ré-armer le spy à chaque test neutralise ce risque (et son mockResolvedValueOnce(false)

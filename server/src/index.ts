@@ -1,8 +1,6 @@
+import './bootstrap-env';
 import app from './app';
-import dotenv from 'dotenv';
 import { runRenderEmailHealthcheck, TEMPLATE_KEYS } from './services/render-email.service';
-
-dotenv.config();
 
 const PORT = process.env.PORT || 3000;
 

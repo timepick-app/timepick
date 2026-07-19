@@ -3,10 +3,11 @@
  *
  * Exercises the 3 mandatory email flows through the real SMTP transport
  * (Mailpit at 127.0.0.1:1025) and verifies email content via the Mailpit
- * REST API (http://localhost:8025/api/v2/messages).
+ * REST API (http://localhost:8025/api/v1/messages).
  *
  * Prerequisites:
- * - Mailpit running: `docker run -d --name mailpit -p 1025:1025 -p 8025:8025 axllent/mailpit`
+ * - Mailpit running: `brew services start mailpit`
+ *   (or `docker run -d --name mailpit -p 1025:1025 -p 8025:8025 axllent/mailpit`)
  * - Server + client dev servers running (or let Playwright webServer start them)
  * - ALLOW_TEST_ROUTES=true in server .env
  *
@@ -17,7 +18,7 @@
 import { test, expect, type APIRequestContext } from '@playwright/test'
 
 const SERVER_BASE = 'http://localhost:3000'
-const MAILPIT_API = 'http://localhost:8025/api/v2'
+const MAILPIT_API = 'http://localhost:8025/api/v1'
 
 const TEST_ADMIN = {
   email: 'e2e-test-admin@test.local',
@@ -35,32 +36,7 @@ const TEST_USER = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Decode quoted-printable encoding (MIME). Covers full French diacritics. */
-function decodeQP(str: string): string {
-  const QP_MAP: Record<string, string> = {
-    '=C3=A0': 'à', '=C3=A2': 'â', '=C3=A4': 'ä',
-    '=C3=A9': 'é', '=C3=A8': 'è', '=C3=AA': 'ê', '=C3=AB': 'ë',
-    '=C3=AF': 'ï', '=C3=AE': 'î',
-    '=C3=B4': 'ô',
-    '=C3=B9': 'ù', '=C3=BB': 'û', '=C3=BC': 'ü', '=C3=BF': 'ÿ',
-    '=C3=A7': 'ç',
-    '=C5=93': 'œ', '=C3=A6': 'æ',
-    '=C3=80': 'À', '=C3=82': 'Â', '=C3=84': 'Ä',
-    '=C3=89': 'É', '=C3=88': 'È', '=C3=8A': 'Ê', '=C3=8B': 'Ë',
-    '=C3=8F': 'Ï', '=C3=8E': 'Î',
-    '=C3=94': 'Ô',
-    '=C3=99': 'Ù', '=C3=9B': 'Û', '=C3=9C': 'Ü', '=C5=B8': 'Ÿ',
-    '=C3=87': 'Ç',
-    '=C5=92': 'Œ', '=C3=86': 'Æ',
-  }
-  let result = str.replace(/=3D/gi, '=')
-  for (const [qp, char] of Object.entries(QP_MAP)) {
-    result = result.replace(new RegExp(qp, 'g'), char)
-  }
-  return result.replace(/=\r?\n/g, '').replace(/=20/g, ' ')
-}
-
-/** Poll Mailpit REST API until an email matching the subject is found. */
+/** Poll the Mailpit REST API until an email matching the filters is found. */
 async function waitForMailpitEmail(
   request: APIRequestContext,
   options: {
@@ -77,29 +53,34 @@ async function waitForMailpitEmail(
     if (!res.ok()) {
       throw new Error(`Mailpit API returned ${res.status()}`)
     }
-    const data = await res.json()
-    const items: Array<{
-      Content?: { Headers?: { Subject?: string[] }; Body?: string }
-      Raw?: { From?: string; To?: string[] }
-    }> = data.items ?? []
-
-    for (const item of items) {
-      const mailSubject = item.Content?.Headers?.Subject?.[0] ?? ''
-      const recipients = item.Raw?.To ?? []
-      const rawBody = item.Content?.Body ?? ''
-      const body = decodeQP(rawBody)
-      const htmlMatch = body.match(/<html[\s\S]*<\/html>/i)
-      const html = htmlMatch ? htmlMatch[0] : body
-
-      const subjectMatch = !subject || mailSubject.includes(subject)
-      const recipientMatch = !recipient || recipients.some((r) => r.includes(recipient))
-
-      if (subjectMatch && recipientMatch) {
-        return { subject: mailSubject, body, html }
-      }
+    const data = (await res.json()) as {
+      messages?: Array<{ ID: string; Subject: string; To?: Array<{ Address: string }> }>
     }
 
-    await new Promise((r) => setTimeout(r, 1000))
+    for (const summary of data.messages ?? []) {
+      // Summary fields arrive fully MIME-decoded (RFC 2047 subjects included).
+      const subjectMatch = !subject || summary.Subject.includes(subject)
+      const recipientMatch =
+        !recipient || (summary.To ?? []).some((to) => to.Address.includes(recipient))
+      if (!subjectMatch || !recipientMatch) continue
+
+      // Fetch the parsed message: Text/HTML parts are already decoded
+      // (quoted-printable + charset) by Mailpit — no manual MIME handling.
+      const detailRes = await request.get(`${MAILPIT_API}/message/${summary.ID}`)
+      if (!detailRes.ok()) {
+        throw new Error(`Mailpit API returned ${detailRes.status()}`)
+      }
+      const detail = (await detailRes.json()) as { Subject: string; Text?: string; HTML?: string }
+      const text = detail.Text ?? ''
+      const html = detail.HTML ?? ''
+      // `body` spans both MIME parts — equivalent of the raw multipart body
+      // the previous implementation exposed.
+      return { subject: detail.Subject, body: `${text}\n${html}`, html }
+    }
+
+    const { promise: tick, resolve: wake } = Promise.withResolvers<void>()
+    setTimeout(wake, 1000)
+    await tick
   }
 
   throw new Error(

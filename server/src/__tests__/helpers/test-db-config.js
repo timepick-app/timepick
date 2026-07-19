@@ -12,8 +12,27 @@ const MIGRATIONS_DB_NAME = 'timepick_test_migrations'
 const ALLOWED_TEST_DBS = [TEST_DB_NAME, MIGRATIONS_DB_NAME]
 const ENV_TEST_PATH = path.resolve(__dirname, '../../../.env.test')
 
+// Défauts sûrs appliqués quand server/.env.test est absent : `npm test` fonctionne
+// dès le clone + une instance PostgreSQL locale, sans configuration manuelle.
+// Pour surcharger (identifiants PostgreSQL non standard), créer server/.env.test avec
+// uniquement les clés à changer. Le nom de base par défaut porte le suffixe `_test`
+// donc il passe toujours assertTestDbUrl (jamais la base de dev/prod).
+const TEST_ENV_DEFAULTS = {
+  DATABASE_URL: `postgresql://postgres:postgres@localhost:5432/${TEST_DB_NAME}`,
+  JWT_SECRET: 'test_jwt_secret_not_for_production',
+  ENCRYPTION_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+  EMAIL_FROM: 'noreply@test.local',
+  ALLOW_TEST_ROUTES: 'true',
+}
+
 function loadEnvTest(options = {}) {
-  return dotenv.config({ path: ENV_TEST_PATH, override: options.override !== false })
+  const result = dotenv.config({ path: ENV_TEST_PATH, override: options.override !== false })
+  // server/.env.test est un OVERRIDE optionnel : on ne remplace jamais une valeur déjà
+  // présente (fichier chargé ci-dessus, ou déjà positionnée dans l'environnement).
+  for (const [key, value] of Object.entries(TEST_ENV_DEFAULTS)) {
+    if (!process.env[key]) process.env[key] = value
+  }
+  return result
 }
 
 function parseDbUrl(urlString) {

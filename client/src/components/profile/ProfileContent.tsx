@@ -21,7 +21,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { formatFullName } from '@/lib/formatFullName'
 import { getInitials } from '@/lib/getInitials'
 import { extractErrorMessage } from '@/lib/extractErrorMessage'
-import { SecurityPanel } from '@/components/admin'
+import { SecurityPanel, EncryptionKeyPanel } from '@/components/admin'
 
 // Aligné sur patchMeProfileSchema / updateUserSchema (server/src/validators/user.validator.ts)
 const PHONE_REGEX = /^\+?[0-9\s-]{10,20}$/
@@ -315,6 +315,7 @@ export function ProfileContent() {
         </Card>
 
         {isAdmin && <SecurityPanel />}
+        {isAdmin && <EncryptionKeyPanel />}
       </div>
     </div>
   )

@@ -28,7 +28,8 @@ import {
   getTransporter,
   invalidateTransportCache,
   getFromAddress,
-  sendAdminMagicLinkEmail
+  sendAdminMagicLinkEmail,
+  getEmailTransportSource
 } from '../../services/email.service'
 
 // ---------------------------------------------------------------------------
@@ -84,6 +85,7 @@ describe('email transport factory', () => {
           secure: true,
         })
       )
+      expect(getEmailTransportSource()).toBe('db')
     })
 
     it('T6.2: falls back to .env SMTP_* when DB is empty', async () => {
@@ -104,12 +106,12 @@ describe('email transport factory', () => {
           auth: { user: 'envuser@test.com', pass: 'envpass' }
         })
       )
+      expect(getEmailTransportSource()).toBe('env')
     })
 
-    it('T6.3: falls back to Mailhog when both DB and .env are empty', async () => {
+    it('T6.3: falls back to Mailpit when both DB and .env are empty', async () => {
       mockGetSmtpSettings.mockResolvedValue(DB_SETTINGS_EMPTY)
       delete process.env.SMTP_HOST
-      delete process.env.EMAIL_HOST
       delete process.env.EMAIL_FROM
 
       await getTransporter()
@@ -120,12 +122,12 @@ describe('email transport factory', () => {
         secure: false,
         ignoreTLS: true
       })
+      expect(getEmailTransportSource()).toBe('fallback')
     })
 
-    it('falls back to Mailhog when getSmtpSettings throws and no env SMTP config', async () => {
+    it('falls back to Mailpit when getSmtpSettings throws and no env SMTP config', async () => {
       mockGetSmtpSettings.mockRejectedValue(new Error('DB down'))
       delete process.env.SMTP_HOST
-      delete process.env.EMAIL_HOST
 
       await getTransporter()
 
@@ -135,25 +137,6 @@ describe('email transport factory', () => {
         secure: false,
         ignoreTLS: true
       })
-    })
-
-    it('falls back to legacy EMAIL_* env when SMTP_* not set', async () => {
-      mockGetSmtpSettings.mockResolvedValue(DB_SETTINGS_EMPTY)
-      delete process.env.SMTP_HOST
-      process.env.EMAIL_HOST = 'legacy.mail.server'
-      process.env.EMAIL_PORT = '2525'
-      delete process.env.EMAIL_FROM
-
-      await getTransporter()
-
-      expect(mockCreateTransport).toHaveBeenCalledWith(
-        expect.objectContaining({
-          host: 'legacy.mail.server',
-          port: 2525,
-          secure: false,
-          ignoreTLS: true,
-        })
-      )
     })
   })
 

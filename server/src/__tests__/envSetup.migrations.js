@@ -6,6 +6,9 @@
  * Dérive l'URL depuis .env.test en réécrivant uniquement le nom de base.
  */
 
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
 const {
   loadEnvTest,
   withDbName,
@@ -16,4 +19,9 @@ const {
 
 loadEnvTest({ override: true })
 process.env.DATABASE_URL = withDbName(process.env.DATABASE_URL, MIGRATIONS_DB_NAME)
+
+if (!process.env.DATA_DIR) {
+  process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'timepick-data-'))
+}
+
 assertTestDbUrl(process.env.DATABASE_URL, 'envSetup.migrations', ALLOWED_TEST_DBS)

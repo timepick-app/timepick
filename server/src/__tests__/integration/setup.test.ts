@@ -10,7 +10,7 @@ import {
 import * as emailService from '../../services/email-send.service'
 
 // POST /api/setup crée le premier admin → sendAdminMagicLinkEmail. Sans mock, un vrai email
-// (magic-link admin) part vers MailHog. On stub au niveau fichier — aucun test n'assert l'envoi.
+// (magic-link admin) part vers Mailpit. On stub au niveau fichier — aucun test n'assert l'envoi.
 beforeAll(() => {
   jest.spyOn(emailService, 'sendAdminMagicLinkEmail').mockResolvedValue(true)
 })

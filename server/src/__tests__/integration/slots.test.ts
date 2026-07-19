@@ -488,7 +488,7 @@ describe('Slots API - Integration Tests', () => {
     it('préserve les réservations associées (soft-delete, pas de cascade) — AC1', async () => {
       // L'objet de ce test est la préservation des réservations + cancelled_at/motif,
       // PAS la livraison email (couverte par le voisin « envoie des emails »). On mocke
-      // comme les 4 tests voisins, sinon `cancelSlot` enverrait 2 vrais emails vers MailHog.
+      // comme les 4 tests voisins, sinon `cancelSlot` enverrait 2 vrais emails vers Mailpit.
       const sendEmailSpy = jest.spyOn(emailService, 'sendSlotCancellationEmail').mockResolvedValue(true)
 
       // Créer des utilisateurs et des réservations pour ce créneau

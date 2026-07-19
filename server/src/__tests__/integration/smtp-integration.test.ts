@@ -69,14 +69,14 @@ describe('SMTP integration — inter-component failure modes', () => {
   // T1.1: Decrypt failure cascade
   // -----------------------------------------------------------------------
 
-  it('T1.1a: falls back to Mailhog in dev/test when decrypt fails', async () => {
+  it('T1.1a: falls back to Mailpit in dev/test when decrypt fails', async () => {
     const origEnv = process.env.NODE_ENV
     process.env.NODE_ENV = 'test'
     mockGetSmtpSettings.mockRejectedValueOnce(
       new Error('Unsupported state or unable to authenticate data')
     )
-    // Ensure no env fallbacks exist so Mailhog is the only option after DB failure
-    process.env = { ...process.env, NODE_ENV: 'test', SMTP_HOST: '', EMAIL_HOST: '' }
+    // Ensure no env fallbacks exist so Mailpit is the only option after DB failure
+    process.env = { ...process.env, NODE_ENV: 'test', SMTP_HOST: '' }
 
     await createSmtpTransport()
 
@@ -86,9 +86,10 @@ describe('SMTP integration — inter-component failure modes', () => {
       secure: false,
       ignoreTLS: true
     })
+    // Le chemin decrypt-failure logge un message unique (guidage ENCRYPTION_KEY),
+    // sans second argument Error — contrairement au chemin d'échec générique.
     expect(consoleErrorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('[EmailService]'),
-      expect.any(Error)
+      expect.stringContaining('[EmailService] ENCRYPTION_KEY mismatch')
     )
     process.env.NODE_ENV = origEnv
   })
@@ -97,7 +98,7 @@ describe('SMTP integration — inter-component failure modes', () => {
     const origEnv = process.env.NODE_ENV
     process.env.NODE_ENV = 'production'
     mockGetSmtpSettings.mockRejectedValueOnce(new Error('Decryption failed'))
-    process.env = { ...process.env, NODE_ENV: 'production', SMTP_HOST: '', EMAIL_HOST: '' }
+    process.env = { ...process.env, NODE_ENV: 'production', SMTP_HOST: '' }
 
     await expect(createSmtpTransport()).rejects.toThrow('No SMTP transport available')
 

@@ -9,7 +9,7 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals'
  *  - annulation admin d'un créneau (`slotService.cancelSlot`, chemin d'envoi
  *    d'origine qui notifie tous les inscrits — AC3 / UX-DR3).
  *
- * Email TOUJOURS mocké (aucun envoi MailHog) et DB mockée → test pur, non flaky.
+ * Email TOUJOURS mocké (aucun envoi Mailpit) et DB mockée → test pur, non flaky.
  */
 type QueryResult = { rows: Record<string, unknown>[]; rowCount?: number }
 const mockQuery = jest.fn() as jest.MockedFunction<(query: string, params?: unknown[]) => Promise<QueryResult>>

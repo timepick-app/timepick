@@ -17,9 +17,13 @@ type FormValues = SmtpFieldsValues
 
 interface Props {
   onDone: () => void
+  /** A1 : true quand le serveur a détecté qu'il peut déjà délivrer des emails
+   *  (`emailDeliverable`) — autorise « Continuer » sans hôte/port renseignés.
+   *  L'étape reste toujours affichée et reste configurable. */
+  skippable?: boolean
 }
 
-export function SetupSmtpStep({ onDone }: Props) {
+export function SetupSmtpStep({ onDone, skippable = false }: Props) {
   const [formValues, setFormValues] = useState<FormValues>({
     smtpHost: '',
     smtpPort: String(DEFAULT_PORT),
@@ -60,6 +64,13 @@ export function SetupSmtpStep({ onDone }: Props) {
       })
     return () => { cancelled = true }
   }, [])
+
+  // A1 : SMTP sautable-mais-visible — tant qu'aucun hôte n'a été saisi et que
+  // le serveur autorise le saut (`skippable`), « Continuer » n'exige rien et
+  // n'enregistre rien. Dès qu'un hôte est renseigné, la validation classique
+  // reprend la main (host+port requis) : l'utilisateur peut toujours choisir
+  // de configurer un vrai fournisseur SMTP à cette étape.
+  const wantsToSkip = skippable && !formValues.smtpHost.trim()
 
   const updateField = <K extends keyof FormValues>(field: K, value: FormValues[K]) => {
     setFormValues(prev => ({ ...prev, [field]: value }))
@@ -123,6 +134,11 @@ export function SetupSmtpStep({ onDone }: Props) {
   }
 
   const handleContinue = async () => {
+    if (wantsToSkip) {
+      setValidationErrors({})
+      onDone()
+      return
+    }
     if (!validate()) return
     setIsSaving(true)
     try {
@@ -192,7 +208,7 @@ export function SetupSmtpStep({ onDone }: Props) {
           disabled={isBusy}
           data-testid="smtp-continue-btn"
         >
-          {isSaving ? 'Sauvegarde...' : 'Continuer'}
+          {isSaving ? 'Sauvegarde...' : wantsToSkip ? 'Passer cette étape' : 'Continuer'}
         </Button>
       </div>
     </div>

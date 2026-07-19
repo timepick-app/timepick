@@ -256,7 +256,7 @@ describe('Setup SMTP API', () => {
       }
     })
 
-    it('autorise une IP privée en développement (MailHog)', async () => {
+    it('autorise une IP privée en développement (Mailpit)', async () => {
       mockVerify.mockResolvedValue(undefined)
       mockSendMail.mockResolvedValue({ messageId: '<test@example.com>' })
 

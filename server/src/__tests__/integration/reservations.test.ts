@@ -9,7 +9,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret'
 // Mocke les emails transactionnels au niveau fichier : les routes /api/public/reservations
 // passent par reservation.service, qui émet sendReservationEmail (création) et
 // sendUnregistrationEmail (désinscription) en fire-and-forget. Sans mock, ces envois
-// atteindraient le vrai MailHog dev (127.0.0.1:1025) par intermittence. Ces tests valident
+// atteindraient le vrai Mailpit dev (127.0.0.1:1025) par intermittence. Ces tests valident
 // la logique de réservation / anti-surbooking, pas la livraison email.
 // beforeAll/afterAll au niveau fichier → couvre tous les describe (POST, GET, DELETE, race…).
 beforeAll(() => {

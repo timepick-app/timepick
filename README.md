@@ -54,7 +54,7 @@ Points forts : gestion **multi-événements** avec workflow brouillon → publi�
 | Éditeur de texte riche | TipTap 3 |
 | Backend | Express 5 · TypeScript 5.9 (Node.js 22) |
 | Base de données | PostgreSQL 16+ (17 en production) |
-| Emails | Nodemailer 7 · MJML 5 (MailHog en développement) |
+| Emails | Nodemailer 7 · MJML 5 (intercepteur SMTP local en dev) |
 | Validation | Zod 4 |
 | Images | Sharp (traitement du logo) |
 | Tests | Vitest · Jest · Playwright |
@@ -104,7 +104,7 @@ timepick/
 
 - **Node.js** ≥ 20.19 ou ≥ 22.12 (22.x LTS recommandé, version de production)
 - **PostgreSQL** 16+
-- **MailHog** *(optionnel)* — pour intercepter les emails en développement
+- **Un intercepteur SMTP local** *(optionnel)* — Mailpit par exemple, pour consulter les emails en développement
 
 ### 1. Cloner & installer
 
@@ -122,10 +122,10 @@ Copier le fichier d'exemple et le renseigner :
 
 ```bash
 cp server/.env.example server/.env
-# Éditer server/.env : DATABASE_URL, JWT_SECRET, ENCRYPTION_KEY…
+# Éditer server/.env : DATABASE_URL (obligatoire) ; JWT_SECRET, ENCRYPTION_KEY (optionnels — voir ci-dessous)…
 ```
 
-Générer des secrets forts (chaînes hexadécimales de 64 caractères) :
+> ℹ️ `JWT_SECRET` et `ENCRYPTION_KEY` sont **optionnels** : absents, ils sont générés automatiquement au premier démarrage du serveur et stockés dans `server/data/` ; **recommandés en variables d'environnement en production** (une variable d'environnement valide a toujours priorité sur le fichier généré). Pour les gérer soi-même dès le départ (optionnel), générer des secrets forts (chaînes hexadécimales de 64 caractères) :
 
 ```bash
 openssl rand -hex 32   # → JWT_SECRET
@@ -160,21 +160,21 @@ Démarre **3 processus** en parallèle :
 
 Pour démarrer un processus individuellement : `npm run dev:client` ou `npm run dev:server` (sur un clone neuf, compiler d'abord le package partagé une fois avec `npm run build:shared` — `npm run dev` le fait automatiquement).
 
-### 4. (Optionnel) MailHog
+### 4. (Optionnel) Un intercepteur SMTP local
 
-MailHog intercepte les emails en développement et les expose dans une interface web.
+En développement, quand aucun SMTP n'est configuré, TimePick envoie les emails sur `127.0.0.1:1025`. Tout intercepteur SMTP écoutant sur ce port convient (Mailpit, MailCatcher, MailDev…) ; les exemples ci-dessous utilisent **Mailpit**, l'outil exercé sur l'instance de référence.
 
 **Via Homebrew :**
 
 ```bash
-brew install mailhog
-mailhog
+brew install mailpit
+brew services start mailpit
 ```
 
 **Via Docker :**
 
 ```bash
-docker run -p 1025:1025 -p 8025:8025 mailhog/mailhog
+docker run -p 1025:1025 -p 8025:8025 axllent/mailpit
 ```
 
 Interface web : http://localhost:8025
@@ -343,8 +343,8 @@ Pour le détail des migrations (DDL, ordre, historique), voir [`https://timepick
 | Variable | Description | Requis | Défaut |
 |---|---|---|---|
 | `DATABASE_URL` | Chaîne de connexion PostgreSQL | **Oui** | — |
-| `JWT_SECRET` | Secret de signature JWT | **Oui** \* | — |
-| `ENCRYPTION_KEY` | Clé de chiffrement AES (32 octets = 64 caractères hex) pour le mot de passe SMTP stocké en base | **Oui** \* | — |
+| `JWT_SECRET` | Secret de signature JWT | Non \* | *(auto-généré)* |
+| `ENCRYPTION_KEY` | Clé de chiffrement AES (32 octets = 64 caractères hex) pour le mot de passe SMTP stocké en base | Non \* | *(auto-généré)* |
 | `PORT` | Port d'écoute du serveur Express | Non | `3000` |
 | `APP_URL` | URL de base du frontend — utilisée pour construire les magic links et les CTA dans les emails ⚠️ variable **serveur** | Non | `http://localhost:5173` |
 | `EMAIL_FROM` | Adresse d'expéditeur par défaut | Non | `noreply@example.com` |
@@ -358,9 +358,9 @@ Pour le détail des migrations (DDL, ordre, historique), voir [`https://timepick
 | `PUBLIC_BASE_URL` | URL publique de base pour les liens absolus des images d'email (derrière un reverse proxy / CDN) | Non | *(déduit de la requête)* |
 | `ALLOW_TEST_ROUTES` | Active les routes de test E2E (`/api/test/*`) — **hors production uniquement** | Non | `false` |
 
-> \* `JWT_SECRET` et `ENCRYPTION_KEY` sont requis dans **tous** les environnements (le serveur échoue au démarrage sans eux) ; la valeur d'exemple de `.env.example` suffit en développement — ne pas supprimer ces lignes.
+> \* `JWT_SECRET` et `ENCRYPTION_KEY` sont **optionnels** : absents au premier démarrage, ils sont générés automatiquement (32 octets aléatoires, 64 caractères hex) et stockés dans `server/data/` (`jwt.secret`, `encryption.key`, permissions `0600`). **Recommandé de les définir en variables d'environnement en production** — une variable d'environnement valide a toujours priorité sur le fichier généré (avertissement loggé si les deux existent). `server/data/` doit alors être un **volume persistant** en production (comme `server/uploads`) : sans cela, les clés sont régénérées à chaque recréation du conteneur, ce qui invalide les sessions actives et rend le mot de passe SMTP stocké en base indéchiffrable. La variable `DATA_DIR` permet de changer ce répertoire (défaut `<server>/data`, soit `/app/server/data` sous Docker).
 
-> **Note SMTP — provisionnement initial :** les variables `SMTP_*` ne servent qu'au **démarrage initial**. Au premier lancement, `prepare-db` les copie en base de données ; ensuite, la configuration SMTP se gère **dans l'application** (Paramètres → Serveur d'email) et le runtime lit directement la base. En développement, si aucun SMTP n'est configuré, le système bascule automatiquement sur **MailHog** (`127.0.0.1:1025`).
+> **Note SMTP — provisionnement initial :** les variables `SMTP_*` ne servent qu'au **démarrage initial**. Au premier lancement, `prepare-db` les copie en base de données ; ensuite, la configuration SMTP se gère **dans l'application** (Paramètres → Serveur d'email) et le runtime lit directement la base. En développement, si aucun SMTP n'est configuré, le système bascule automatiquement sur **un intercepteur SMTP local** (`127.0.0.1:1025`, ex. Mailpit).
 
 > ⚠️ **Sécurité — `ALLOW_TEST_ROUTES`** : cette variable expose des endpoints destructeurs utilisés uniquement par les tests E2E (réinitialisation de base, création de données fictives, etc.). Ne **jamais** la passer à `true` en production.
 
@@ -479,10 +479,12 @@ Au démarrage du conteneur, `prepare-db` est exécuté (bootstrap idempotent : m
 docker build -t timepick .
 
 # Lancer le conteneur
-docker run -p 3000:3000 --env-file server/.env timepick
+docker run -p 3000:3000 --env-file server/.env -v timepick-data:/app/server/data -v timepick-uploads:/app/server/uploads timepick
 ```
 
 > ⚠️ Dans le conteneur, `localhost` désigne le conteneur lui-même : `DATABASE_URL` doit pointer vers un PostgreSQL joignable. Sur macOS/Windows, utiliser `host.docker.internal` ; sur Linux, l'IP de l'hôte ou un réseau Docker partagé. En production, la base est fournie par Coolify.
+
+> ⚠️ **Volume persistant `server/data/`** — indispensable en production, au même titre que `server/uploads` : c'est là que `JWT_SECRET`/`ENCRYPTION_KEY` sont écrits s'ils sont auto-générés (absents de l'environnement). Sans volume persistant, ces clés sont régénérées à chaque recréation du conteneur (ex. redeploy Coolify) → mot de passe SMTP stocké en base indéchiffrable et sessions/magic-links invalidés.
 
 ### Coolify
 

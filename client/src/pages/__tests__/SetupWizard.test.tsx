@@ -13,6 +13,11 @@ vi.mock('../../services/setup.service', () => ({
   createFirstAdmin: vi.fn(),
 }));
 
+// Mock du service clé de chiffrement — AVANT tout import du composant.
+vi.mock('../../services/encryption-key.service', () => ({
+  getSetupEncryptionKey: vi.fn(),
+}));
+
 // Mock sonner pour capturer les toasts d'erreur (vi.hoisted évite le problème de TDZ).
 const { mockToastError } = vi.hoisted(() => ({ mockToastError: vi.fn() }));
 vi.mock('sonner', () => ({ toast: { error: mockToastError, success: vi.fn() } }));
@@ -31,11 +36,13 @@ import {
   testSetupSmtp,
   createFirstAdmin,
 } from '../../services/setup.service';
+import { getSetupEncryptionKey } from '../../services/encryption-key.service';
 
 const mockedGetSetupSmtp = vi.mocked(getSetupSmtp);
 const mockedSaveSetupSmtp = vi.mocked(saveSetupSmtp);
 const mockedTestSetupSmtp = vi.mocked(testSetupSmtp);
 const mockedCreateFirstAdmin = vi.mocked(createFirstAdmin);
+const mockedGetSetupEncryptionKey = vi.mocked(getSetupEncryptionKey);
 
 const emptySmtp: SmtpSettings = {
   smtpHost: '',
@@ -65,24 +72,34 @@ const renderWizard = () => {
   };
 };
 
-describe('SetupWizard — multi-étapes', () => {
+describe('SetupWizard — source env (flux à 2 étapes, inchangé)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockedGetSetupSmtp.mockResolvedValue(emptySmtp);
     mockedSaveSetupSmtp.mockResolvedValue(undefined);
     mockedCreateFirstAdmin.mockResolvedValue(undefined);
+    mockedGetSetupEncryptionKey.mockResolvedValue({
+      configured: true,
+      source: 'env',
+      fingerprint: 'abc123def456',
+      emailDeliverable: false,
+      emailTransportSource: null,
+    });
   });
 
   // ── Étape 1 : SMTP ──────────────────────────────────────────────────────────
 
-  it('affiche l\'étape SMTP au montage et appelle getSetupSmtp', async () => {
+  it('affiche l\'étape SMTP au montage (pas d\'étape clé) et appelle getSetupSmtp', async () => {
     renderWizard();
-    // L'étape SMTP doit être visible
-    expect(screen.getByTestId('smtp-host')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId('smtp-host')).toBeInTheDocument();
+    });
     // getSetupSmtp appelé au montage du SetupSmtpStep
     await waitFor(() => {
       expect(mockedGetSetupSmtp).toHaveBeenCalledTimes(1);
     });
+    // Pas d'étape "Clé de chiffrement" quand source==='env'
+    expect(screen.queryByText('Clé de chiffrement')).not.toBeInTheDocument();
     // L'étape admin n'est pas encore visible
     expect(screen.queryByLabelText('Email')).not.toBeInTheDocument();
   });
@@ -240,5 +257,126 @@ describe('SetupWizard — multi-étapes', () => {
     await waitFor(() => {
       expect(mockToastError).toHaveBeenCalledWith('Limite de requêtes atteinte');
     });
+  });
+});
+
+describe('SetupWizard — source file (étape clé de chiffrement conditionnelle)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedGetSetupSmtp.mockResolvedValue(emptySmtp);
+    mockedSaveSetupSmtp.mockResolvedValue(undefined);
+    mockedCreateFirstAdmin.mockResolvedValue(undefined);
+    mockedGetSetupEncryptionKey.mockResolvedValue({
+      configured: true,
+      source: 'file',
+      fingerprint: 'fedcba987654',
+      emailDeliverable: false,
+      emailTransportSource: null,
+    });
+  });
+
+  it("affiche l'étape clé en premier avec l'empreinte, sans jamais afficher une clé hex 64 caractères", async () => {
+    renderWizard();
+
+    await waitFor(() => {
+      expect(screen.getByText('fedcba987654')).toBeInTheDocument();
+    });
+    // Pas de champ SMTP tant que l'étape clé n'est pas passée
+    expect(screen.queryByTestId('smtp-host')).not.toBeInTheDocument();
+
+    const hex64 = /\b[0-9a-f]{64}\b/i;
+    expect(document.body.textContent ?? '').not.toMatch(hex64);
+  });
+
+  it('cliquer "Continuer" sur l\'étape clé avance vers SMTP', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('encryption-key-continue-btn')).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId('encryption-key-continue-btn'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('smtp-host')).toBeInTheDocument();
+    });
+  });
+});
+
+describe('SetupWizard — SMTP sautable (emailDeliverable=true)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedGetSetupSmtp.mockResolvedValue(emptySmtp);
+    mockedSaveSetupSmtp.mockResolvedValue(undefined);
+    mockedCreateFirstAdmin.mockResolvedValue(undefined);
+    mockedGetSetupEncryptionKey.mockResolvedValue({
+      configured: true,
+      source: 'env',
+      fingerprint: 'abc123def456',
+      emailDeliverable: true,
+      emailTransportSource: 'fallback',
+    });
+  });
+
+  it('affiche quand même l\'étape SMTP (A1 : jamais masquée) avec un message source précis et "Passer cette étape"', async () => {
+    renderWizard();
+    await waitFor(() => {
+      expect(screen.getByTestId('smtp-host')).toBeInTheDocument();
+    });
+    // Message précis selon la source détectée (ici fallback : intercepteur local).
+    expect(screen.getByText(/127\.0\.0\.1:1025/)).toBeInTheDocument();
+    // Anti-régression UX : UNE seule boîte info (la description du stepper) —
+    // pas de second bandeau redondant empilé dans le formulaire.
+    expect(screen.getAllByRole('status')).toHaveLength(1);
+    expect(screen.getByTestId('smtp-continue-btn')).toHaveTextContent('Passer cette étape');
+  });
+
+  it('"Passer cette étape" avance vers admin sans appeler saveSetupSmtp (rien à sauvegarder)', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeInTheDocument());
+    await user.click(screen.getByTestId('smtp-continue-btn'));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Email')).toBeInTheDocument();
+    });
+    expect(mockedSaveSetupSmtp).not.toHaveBeenCalled();
+  });
+
+  it('renseigner un hôte redemande une config valide : "Continuer" sauvegarde normalement', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeInTheDocument());
+    await user.type(screen.getByTestId('smtp-host'), 'smtp.exemple.com');
+    // Dès qu'un hôte est saisi, le bouton redevient "Continuer" (plus "Passer").
+    expect(screen.getByTestId('smtp-continue-btn')).toHaveTextContent('Continuer');
+
+    await user.click(screen.getByTestId('smtp-continue-btn'));
+
+    await waitFor(() => {
+      expect(mockedSaveSetupSmtp).toHaveBeenCalledWith(
+        expect.objectContaining({ smtpHost: 'smtp.exemple.com' }),
+      );
+    });
+    await waitFor(() => expect(screen.getByLabelText('Email')).toBeInTheDocument());
+  });
+});
+
+describe('SetupWizard — échec du chargement du statut de la clé', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedGetSetupSmtp.mockResolvedValue(emptySmtp);
+  });
+
+  it('affiche un message d\'erreur et un bouton "Réessayer" quand getSetupEncryptionKey rejette', async () => {
+    mockedGetSetupEncryptionKey.mockRejectedValue(new Error('network error'));
+    renderWizard();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Réessayer' })).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('smtp-host')).not.toBeInTheDocument();
   });
 });

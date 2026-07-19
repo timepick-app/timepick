@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { requireAdmin } from '../middleware/adminAuth'
-import { getTransportStatus, checkSmtpConnection } from '../services/email.service'
+import { getTransportStatus, checkSmtpConnection, getEncryptionKeyMismatch } from '../services/email.service'
 import { query } from '../db'
 
 const router = Router()
@@ -22,12 +22,15 @@ router.get('/health', requireAdmin, async (_req, res) => {
   const smtpStatus: 'ok' | 'error' | 'unknown' =
     smtpHealthy === true ? 'ok' : smtpHealthy === false ? 'error' : 'unknown'
 
+  const encryptionKeyMismatch = getEncryptionKeyMismatch()
+
   res.json({
-    status: dbStatus === 'ok' && smtpHealthy !== false ? 'ok' : 'degraded',
+    status: dbStatus === 'ok' && smtpHealthy !== false && !encryptionKeyMismatch ? 'ok' : 'degraded',
     timestamp: new Date().toISOString(),
     services: {
       database: { status: dbStatus },
       smtp: { status: smtpStatus, healthy: smtpHealthy },
+      encryptionKey: { mismatch: encryptionKeyMismatch },
     },
   })
 })

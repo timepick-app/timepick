@@ -4,7 +4,7 @@ import dotenv from 'dotenv'
 // Load environment variables for testing.
 // envSetup.js (setupFiles) already loaded server/.env.test with override:true,
 // so DATABASE_URL, JWT_SECRET, ENCRYPTION_KEY and EMAIL_FROM are already set.
-// This bare dotenv.config() fills in anything missing (e.g., EMAIL_HOST) from server/.env,
+// This bare dotenv.config() fills in anything missing (e.g., PORT) from server/.env,
 // without overriding the already-set values.
 dotenv.config()
 

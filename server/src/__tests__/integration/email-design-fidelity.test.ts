@@ -8,7 +8,7 @@
  *
  * Contrairement à email-visual-baselines.test.ts (qui rend contre la marque
  * d'usine et n'asserte que du texte), ce test vérifie le DESIGN. Aucun envoi
- * SMTP/MailHog : `renderEmail()` est appelé directement. Le singleton de marque
+ * SMTP/Mailpit : `renderEmail()` est appelé directement. Le singleton de marque
  * est muté en `beforeAll` et restauré à l'identique en `afterAll` (Jest exécute
  * `afterAll` même en cas d'échec ; `maxWorkers:1` → aucune fuite inter-suites).
  *

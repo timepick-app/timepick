@@ -1,7 +1,7 @@
 import request from 'supertest'
 import jwt from 'jsonwebtoken'
 
-// Email mocké (non négociable — pas de vrais envois MailHog en test). On
+// Email mocké (non négociable — pas de vrais envois Mailpit en test). On
 // préserve les autres exports (getTransportStatus, etc. consommés par app.ts)
 // via requireActual et on ne remplace que sendSlotCancellationEmail.
 jest.mock('../../services/email.service', () => {

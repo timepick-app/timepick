@@ -8,7 +8,7 @@ import { adminActionLimiter } from '../../middleware/adminActionLimiter'
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret'
 
 // La route POST .../invitations/send appelle sendEventInvitation pour chaque destinataire autorisé.
-// Sans mock, ~26 vrais emails « Inscription participation » partent vers MailHog (effet de bord).
+// Sans mock, ~26 vrais emails « Inscription participation » partent vers Mailpit (effet de bord).
 // On stub au niveau fichier — aucun test n'assert l'envoi réel : `failed` provient du contrôle
 // d'autorisation (utilisateur hors event_users), indépendant de la valeur de retour de l'envoi.
 beforeAll(() => {
