@@ -1,0 +1,15 @@
+# compose.dev.yaml — services de dev opt-in (jamais démarrés par `npm run dev`).
+# Mailpit : intercepteur SMTP local « clé en main » — `npm run mail` / `npm run mail:stop`.
+# Activation explicite requise : `docker compose -f compose.dev.yaml --profile mail up -d --wait`.
+services:
+  mailpit:
+    image: axllent/mailpit:v1.27   # pin mineur : patchs auto, pas de dérive `latest` (E2E sur API v1)
+    profiles: ["mail"]             # opt-in : ne démarre pas sans --profile mail
+    ports:
+      - "127.0.0.1:1025:1025"      # SMTP (repli hardcodé) — loopback : rien d'exposé au LAN
+      - "127.0.0.1:8025:8025"      # UI web + API v1 — idem (l'UI affiche les magic links !)
+    # Pas de restart policy (défaut "no") : un outil opt-in ne doit pas ressusciter au
+    # reboot et squatter 1025/8025 — ce serait réintroduire, en différé, le conflit de
+    # ports que l'opt-in élimine.
+    # Pas de healthcheck custom : l'image embarque HEALTHCHECK ["/mailpit","readyz"]
+    # → `up -d --wait` suffit. Pas de volume : messages perdus au `down`, voulu en dev.

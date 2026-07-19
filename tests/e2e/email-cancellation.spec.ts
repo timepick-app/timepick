@@ -9,6 +9,7 @@
  * Prérequis :
  * - Mailpit lancé : `brew services start mailpit`
  *   (ou `docker run -d --name mailpit -p 1025:1025 -p 8025:8025 axllent/mailpit`)
+ *   (ou, depuis la racine, `npm run mail` — service compose opt-in fourni)
  * - Serveur dev démarré (auto via Playwright webServer)
  * - ALLOW_TEST_ROUTES=true dans server/.env
  *

@@ -8,6 +8,7 @@
  * Prerequisites:
  * - Mailpit running: `brew services start mailpit`
  *   (or `docker run -d --name mailpit -p 1025:1025 -p 8025:8025 axllent/mailpit`)
+ *   (or, from the repo root, `npm run mail` — provided opt-in compose service)
  * - Server + client dev servers running (or let Playwright webServer start them)
  * - ALLOW_TEST_ROUTES=true in server .env
  *

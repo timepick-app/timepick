@@ -179,6 +179,15 @@ docker run -p 1025:1025 -p 8025:8025 axllent/mailpit
 
 Interface web : http://localhost:8025
 
+**Via le compose de dev (fourni, opt-in) :**
+
+```bash
+npm run mail       # démarre Mailpit et attend son healthcheck (--wait)
+npm run mail:stop  # arrête le conteneur
+```
+
+Interface web identique : http://localhost:8025. Le service est **opt-in** (profil `mail` de `compose.dev.yaml`) : il ne démarre jamais avec `npm run dev`. Si les ports 1025/8025 sont déjà pris par un binding IPv4 (typiquement `docker run -p 1025:1025 …`), `npm run mail` échoue avec `port is already allocated` — c'est attendu : gardez alors votre intercepteur existant sans activer le profil. (Sur macOS, un Mailpit lancé via Homebrew écoute en IPv6 et peut coexister sans erreur avec le service compose, lié en IPv4 loopback.)
+
 ---
 
 ## ⚙️ Configuration initiale (première utilisation)

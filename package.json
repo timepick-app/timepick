@@ -1,6 +1,6 @@
 {
   "name": "timepick",
-  "version": "0.26.0",
+  "version": "0.27.0",
   "license": "FSL-1.1-MIT",
   "type": "module",
   "workspaces": [
@@ -39,6 +39,8 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:report": "playwright show-report",
+    "mail": "docker compose -f compose.dev.yaml --profile mail up -d --wait",
+    "mail:stop": "docker compose -f compose.dev.yaml --profile mail down",
     "changelog": "node scripts/generate-changelog.js --output docs/CHANGELOG.md",
     "generate:ds": "tsx scripts/generate-ds-manifest.js",
     "verify:mjml-strict": "cd server && npm run verify:mjml-strict --",
