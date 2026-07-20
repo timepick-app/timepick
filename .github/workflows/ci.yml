@@ -125,3 +125,17 @@ jobs:
       - name: Run jest
         run: npm test
         working-directory: server
+
+  image-tag-sync:
+    name: Tag image épinglé == version
+    # Filet : le tag GHCR du kit compose (deploy/compose/ + doc inline) DOIT
+    # suivre package.json. Réécrit au bump par le skill timepick-push
+    # (npm run sync:image-tag) ; ici on vérifie qu'aucune dérive n'a été poussée.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Vérifier l'épinglage du tag image (script sans dépendances)
+        run: node scripts/sync-image-tag.js --check

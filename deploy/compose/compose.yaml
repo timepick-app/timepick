@@ -1,0 +1,62 @@
+# TimePick — auto-hébergement « pur Docker » : app + PostgreSQL en conteneurs liés.
+# Quickstart : `cp .env.example .env` (renseigner chaque valeur) puis `docker compose up -d`.
+# Doc : https://timepick.docs.jensen-siu.net/installation/installation-production-docker.html
+name: timepick
+
+services:
+  app:
+    # Tag ÉPINGLÉ — ne jamais utiliser `latest` en production (contenu mouvant,
+    # redéploiement imprévisible). Mise à jour : sauvegarder la base, éditer ce
+    # tag, puis `docker compose pull && docker compose up -d`.
+    image: ghcr.io/timepick-app/timepick:v0.30.0
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      # Port HTTP unique : SPA + /api + /uploads + /health.
+      - "${TIMEPICK_PORT:-3000}:3000"
+    environment:
+      # `db` = nom du service PostgreSQL ci-dessous (résolution DNS interne Compose).
+      DATABASE_URL: postgresql://timepick:${POSTGRES_PASSWORD:?voir .env.example}@db:5432/timepick
+      # Secrets requis en variables d'environnement (doctrine production) : aucun
+      # état secret caché dans un volume → sauvegarde/migration = .env + volumes.
+      JWT_SECRET: ${JWT_SECRET:?générer avec `openssl rand -hex 32` — voir .env.example}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?générer avec `openssl rand -hex 32` — voir .env.example}
+      APP_URL: ${APP_URL:?URL publique de l'instance — voir .env.example}
+      EMAIL_FROM: ${EMAIL_FROM:?adresse d'expédition des emails — voir .env.example}
+    volumes:
+      # Images uploadées dans l'éditeur d'emails — perdues à la recréation du
+      # conteneur sans ce volume (STORAGE_DRIVER=local, le défaut).
+      - uploads:/app/server/uploads
+    healthcheck:
+      # curl est présent dans l'image runtime. /health répond 200 même si le
+      # SMTP n'est pas encore configuré (statut "degraded") — sonde fiable.
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: timepick
+      POSTGRES_USER: timepick
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?voir .env.example}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # AUCUN `ports:` volontairement : la base n'est joignable que depuis le
+    # réseau interne Compose (surface d'attaque minimale, pas de conflit avec
+    # un PostgreSQL déjà présent sur l'hôte). Accès ponctuel :
+    #   docker compose exec db psql -U timepick -d timepick
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U timepick -d timepick"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  pgdata:
+  uploads:

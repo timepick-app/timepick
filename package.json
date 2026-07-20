@@ -1,6 +1,6 @@
 {
   "name": "timepick",
-  "version": "0.29.0",
+  "version": "0.30.0",
   "license": "FSL-1.1-MIT",
   "type": "module",
   "workspaces": [
@@ -42,6 +42,7 @@
     "mail": "docker compose -f compose.dev.yaml --profile mail up -d --wait",
     "mail:stop": "docker compose -f compose.dev.yaml --profile mail down",
     "changelog": "node scripts/generate-changelog.js --output docs/CHANGELOG.md",
+    "sync:image-tag": "node scripts/sync-image-tag.js",
     "generate:ds": "tsx scripts/generate-ds-manifest.js",
     "verify:mjml-strict": "cd server && npm run verify:mjml-strict --",
     "knip": "knip",
