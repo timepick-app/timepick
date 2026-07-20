@@ -1,0 +1,243 @@
+# =============================================================================
+# TimePick — DigitalOcean App Platform — App Spec (kit prêt-à-lancer)
+# =============================================================================
+# STATUT : NON PROUVÉ EN SESSION (aucun compte DO / doctl disponible ici).
+# Voir deploy/digitalocean/README.md pour le protocole de déploiement complet
+# et le PROTOCOLE DE PREUVE SMTP (obligatoire avant mise en production réelle).
+#
+# Source des clés : doc officielle DigitalOcean App Spec Reference
+#   https://docs.digitalocean.com/products/app-platform/reference/app-spec/
+# et « How to Deploy from Container Images »
+#   https://docs.digitalocean.com/products/app-platform/how-to/deploy-from-container-images/
+#
+# Usage :
+#   doctl apps create --spec deploy/digitalocean/app.yaml
+#   doctl apps update <APP_ID> --spec deploy/digitalocean/app.yaml   (mises à jour)
+#
+# Contrat gelé (voir https://timepick.docs.jensen-siu.net/installation/deploiement-paas) :
+#   - Image canonique multi-arch : ghcr.io/timepick-app/timepick (amd64+arm64).
+#     App Platform ne supporte QUE l'architecture AMD64 pour les images de
+#     conteneur — c'est la variante amd64 du manifest multi-arch qui est
+#     tirée automatiquement. OK, aucune action requise.
+#   - VITE_API_URL=/api est déjà baké dans l'image au build → NE PAS définir
+#     VITE_API_URL ici (variable build-time inutile pour un déploiement image).
+#   - Le conteneur écoute sur $PORT (fallback 3000). App Platform injecte
+#     automatiquement PORT=http_port si aucune variable PORT n'est définie
+#     manuellement → NE PAS définir PORT dans envs.
+#   - Scale = 1 instance OBLIGATOIRE (rate limiters en mémoire per-process).
+#   - App Platform n'a PAS de volumes persistants : le système de fichiers du
+#     conteneur est éphémère et plafonné à 4 GiB, réinitialisé à chaque
+#     redeploy → STORAGE_DRIVER=s3 est OBLIGATOIRE (chantier A) et
+#     JWT_SECRET / ENCRYPTION_KEY doivent être en variables d'env
+#     persistantes côté plateforme (chantier B), jamais sur le FS du
+#     conteneur.
+# =============================================================================
+
+name: timepick
+# region : slug d'origine géographique. Défaut DO = "nearest available" si
+# omis. Ajuster selon la région de la DB managée et de vos utilisateurs
+# (voir liste à jour dans la console DO : Create App > Region).
+region: nyc
+
+services:
+  - name: timepick
+
+    # -------------------------------------------------------------------
+    # Source : image externe GHCR (pull-only, cf. contrat CI). L'image est
+    # publique -> pas de registry_credentials nécessaires ("Public images
+    # do not require credentials", doc DO ci-dessus). Si l'image devient
+    # privée, ajouter :
+    #   registry_credentials: "$github_username:$ghcr_read_only_token"
+    # -------------------------------------------------------------------
+    image:
+      registry_type: GHCR
+      # Pour GHCR, "registry" = l'organisation/utilisateur GitHub propriétaire
+      # de l'image (pas une URL).
+      registry: timepick-app
+      repository: timepick
+      tag: latest
+      # Alternative recommandée par DO pour un déploiement reproductible :
+      # utiliser un digest SHA immuable au lieu de "tag: latest" (un tag
+      # peut changer de contenu, un digest jamais) :
+      #   digest: sha256:<court-ou-complet-du-tag-git-choisi>
+      #   (retirer alors la clé "tag" — tag et digest sont mutuellement exclusifs)
+
+    # ---------------------------------------------------------------------
+    # REPLI si le pull GHCR externe n'est pas disponible / bloqué pour ce
+    # compte DO (registre non connecté, restriction réseau, etc.) :
+    # basculer sur un build depuis le code source avec le Dockerfile du
+    # repo. Décommenter le bloc ci-dessous et supprimer le bloc "image:"
+    # au-dessus (un seul de "image" ou "github" doit être défini).
+    #
+    # github:
+    #   repo: timepick-app/timepick     # owner/repo GitHub du code source
+    #   branch: main                    # ou le tag/branche de release voulue
+    #   deploy_on_push: false           # true = redeploy auto à chaque push
+    # dockerfile_path: Dockerfile
+    # source_dir: /
+    # (build_command / run_command : laisser vide, le Dockerfile du repo
+    #  définit déjà l'ENTRYPOINT/CMD de prod — cf. contrat gelé.)
+    # ---------------------------------------------------------------------
+
+    instance_count: 1   # OBLIGATOIRE = 1 (rate limiters MemoryStore per-process, cf. contrat)
+
+    # basic-xxs = plus petit palier partagé (défaut DO). Ajuster selon la
+    # charge réelle (voir DO App Platform > Pricing pour les paliers
+    # instance_size_slug disponibles, ex. basic-xs, basic-s, apps-s-1vcpu-1gb…).
+    instance_size_slug: basic-xxs
+
+    # PIÈGE DO : par défaut App Platform sonde le port 8080 en TCP. Le
+    # conteneur TimePick écoute sur 3000 (process.env.PORT || 3000,
+    # EXPOSE 3000 dans le Dockerfile) → http_port DOIT être explicite.
+    http_port: 3000
+
+    health_check:
+      # Sonde HTTP GET /health -> 200 JSON (jamais une sonde TCP : sans
+      # http_path, DO utilise une sonde TCP nue qui ne vérifie ni le boot
+      # applicatif ni l'état DB/SMTP). /health renvoie 200 même si le SMTP
+      # est "degraded" — ce n'est pas un verdict SMTP, juste une preuve de
+      # process vivant + DB accessible.
+      http_path: /health
+      port: 3000
+      initial_delay_seconds: 10   # laisse le temps aux migrations idempotentes de boot (prepare-db.js)
+      period_seconds: 10
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 3
+
+    envs:
+      # --- Base de données -------------------------------------------------
+      # Variable bindable vers le composant "databases[].name: timepick-db"
+      # défini plus bas. DO injecte l'URL de connexion complète.
+      - key: DATABASE_URL
+        value: ${timepick-db.DATABASE_URL}
+        scope: RUN_TIME
+        type: GENERAL
+
+      # --- Secrets applicatifs (chantier B) --------------------------------
+      # OBLIGATOIRES sur FS éphémère : sans eux, JWT_SECRET est régénéré à
+      # chaque boot (sessions/magic-links invalidés) et ENCRYPTION_KEY
+      # manquante rend le mot de passe SMTP en base indéchiffrable (lockout
+      # admin). Sur une install EXISTANTE : extraire l'ancienne clé AVANT de
+      # basculer (cf. runbook chantier B).
+      - key: JWT_SECRET
+        value: "<JWT_SECRET_ALEATOIRE_NON_VIDE>"
+        scope: RUN_TIME
+        type: SECRET
+      - key: ENCRYPTION_KEY
+        value: "<64_CARACTERES_HEX_EXACTEMENT>"
+        scope: RUN_TIME
+        type: SECRET
+
+      # --- URL publique / environnement ------------------------------------
+      - key: APP_URL
+        value: "<https://VOTRE-APP.ondigitalocean.app-ou-domaine-custom>"
+        scope: RUN_TIME
+        type: GENERAL
+      - key: NODE_ENV
+        value: production
+        scope: RUN_TIME
+        type: GENERAL
+      # NB : ne PAS définir VITE_API_URL (build-time, déjà baké dans
+      # l'image) ni PORT (App Platform l'injecte automatiquement = http_port).
+
+      # --- Stockage objet (chantier A — OBLIGATOIRE sur App Platform : FS
+      # éphémère plafonné à 4 GiB, aucun volume persistant) ------------------
+      - key: STORAGE_DRIVER
+        value: s3
+        scope: RUN_TIME
+        type: GENERAL
+      - key: S3_ENDPOINT
+        value: "<https://ENDPOINT_S3_COMPATIBLE>"   # ex. DigitalOcean Spaces: https://<region>.digitaloceanspaces.com
+        scope: RUN_TIME
+        type: GENERAL
+      - key: S3_BUCKET
+        value: "<nom-du-bucket>"
+        scope: RUN_TIME
+        type: GENERAL
+      - key: S3_ACCESS_KEY_ID
+        value: "<ACCESS_KEY_ID>"
+        scope: RUN_TIME
+        type: SECRET
+      - key: S3_SECRET_ACCESS_KEY
+        value: "<SECRET_ACCESS_KEY>"
+        scope: RUN_TIME
+        type: SECRET
+      # Optionnels (défauts applicatifs si absents) :
+      # - key: S3_REGION
+      #   value: "<region, defaut 'auto'>"
+      #   scope: RUN_TIME
+      #   type: GENERAL
+      # - key: S3_PUBLIC_BASE_URL
+      #   value: "<https://CDN-ou-domaine-public-des-uploads>"
+      #   scope: RUN_TIME
+      #   type: GENERAL
+      # PUBLIC_BASE_URL (storage local uniquement) : NON pertinent ici,
+      # STORAGE_DRIVER=s3 impose l'usage de S3_PUBLIC_BASE_URL à la place.
+
+      # --- SMTP (seedé en DB au 1er boot par prepare-db.js — modifier ces
+      # vars APRES le 1er boot n'a plus d'effet, cf. contrat) ----------------
+      - key: SMTP_HOST
+        value: "<smtp.exemple.tld>"
+        scope: RUN_TIME
+        type: GENERAL
+      - key: SMTP_PORT
+        value: "<587-ou-465>"
+        scope: RUN_TIME
+        type: GENERAL
+      - key: SMTP_SECURE
+        value: "<false-pour-587-STARTTLS-ou-true-pour-465-SSL>"
+        scope: RUN_TIME
+        type: GENERAL
+      - key: SMTP_USER
+        value: "<utilisateur-smtp>"
+        scope: RUN_TIME
+        type: GENERAL
+      - key: SMTP_PASSWORD
+        value: "<mot-de-passe-ou-cle-api-smtp>"
+        scope: RUN_TIME
+        type: SECRET
+      - key: SMTP_FROM_NAME
+        value: "<Nom expéditeur>"
+        scope: RUN_TIME
+        type: GENERAL
+      - key: SMTP_FROM_EMAIL
+        value: "<expediteur@exemple.tld>"
+        scope: RUN_TIME
+        type: GENERAL
+
+# Route racine explicite vers l'unique service (single-service app ; DO
+# route par défaut vers le composant principal même sans "ingress", mais
+# l'expliciter évite toute ambiguïté sur une future extension multi-composant).
+ingress:
+  rules:
+    - component:
+        name: timepick
+      match:
+        path:
+          prefix: /
+
+databases:
+  # PostgreSQL managé DigitalOcean, version >= 16 OBLIGATOIRE (version minimale
+  # supportée du projet). App Platform n'a pas de volumes
+  # persistants -> une base "in-process" est exclue de toute façon ; ceci
+  # est un cluster DBaaS géré séparément par DO, jamais du stockage local.
+  - name: timepick-db
+    engine: PG
+    version: "16"
+    # production: true référence un cluster DBaaS DO déjà provisionné
+    # (cluster_name obligatoire dans ce cas). Créer le cluster au préalable :
+    #   doctl databases create timepick-db-cluster --engine pg --version 16 \
+    #     --region nyc3 --size db-s-1vcpu-1gb --num-nodes 1
+    # puis reporter son nom ci-dessous.
+    production: true
+    cluster_name: "<nom-du-cluster-DBaaS-postgresql-existant>"
+    db_name: timepick
+    db_user: timepick
+    # Alternative rapide pour un test jetable (NON recommandée en prod :
+    # pas de HA, taille limitée, cycle de vie lié à l'app) — provisionne
+    # une dev database automatiquement, sans cluster préexistant :
+    #   - name: timepick-db
+    #     engine: PG
+    #     version: "16"
+    #     production: false

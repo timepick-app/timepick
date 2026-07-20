@@ -1,3 +1,4 @@
+import type { AxiosError } from 'axios'
 import { useState, useEffect } from 'react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -5,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Banner, BannerDescription } from '@/components/ui/banner'
 import { toast } from 'sonner'
 import { getSetupSmtp, saveSetupSmtp, testSetupSmtp } from '@/services/setup.service'
-import type { SmtpSettingsPayload } from '@/services/settings.service'
+import type { EmailSettingsPayload, SmtpSettingsPayload } from '@/services/settings.service'
 import { SmtpFields } from '@/components/smtp/SmtpFields'
 import type { SmtpFieldsValues } from '@/components/smtp/SmtpFields'
 import { EMAIL_RE } from '@/lib/email'
@@ -25,6 +26,8 @@ interface Props {
 
 export function SetupSmtpStep({ onDone, skippable = false }: Props) {
   const [formValues, setFormValues] = useState<FormValues>({
+    emailProvider: 'smtp',
+    emailApiKey: '',
     smtpHost: '',
     smtpPort: String(DEFAULT_PORT),
     smtpSecure: false,
@@ -46,6 +49,8 @@ export function SetupSmtpStep({ onDone, skippable = false }: Props) {
       .then((settings) => {
         if (cancelled) return
         setFormValues({
+          emailProvider: settings.emailProvider || 'smtp',
+          emailApiKey: settings.emailApiKey || '',
           smtpHost: settings.smtpHost || '',
           smtpPort: settings.smtpPort || String(DEFAULT_PORT),
           smtpSecure: settings.smtpSecure ?? false,
@@ -65,12 +70,13 @@ export function SetupSmtpStep({ onDone, skippable = false }: Props) {
     return () => { cancelled = true }
   }, [])
 
-  // A1 : SMTP sautable-mais-visible — tant qu'aucun hôte n'a été saisi et que
-  // le serveur autorise le saut (`skippable`), « Continuer » n'exige rien et
-  // n'enregistre rien. Dès qu'un hôte est renseigné, la validation classique
-  // reprend la main (host+port requis) : l'utilisateur peut toujours choisir
-  // de configurer un vrai fournisseur SMTP à cette étape.
-  const wantsToSkip = skippable && !formValues.smtpHost.trim()
+  // A1 : SMTP sautable-mais-visible — tant qu'aucun hôte n'a été saisi, que le
+  // provider est resté 'smtp' et que le serveur autorise le saut (`skippable`),
+  // « Continuer » n'exige rien et n'enregistre rien. Dès qu'un hôte est
+  // renseigné (ou que Resend est choisi), la validation classique reprend la
+  // main : l'utilisateur peut toujours choisir de configurer un vrai
+  // fournisseur d'email à cette étape.
+  const wantsToSkip = skippable && formValues.emailProvider === 'smtp' && !formValues.smtpHost.trim()
 
   const updateField = <K extends keyof FormValues>(field: K, value: FormValues[K]) => {
     setFormValues(prev => ({ ...prev, [field]: value }))
@@ -94,12 +100,20 @@ export function SetupSmtpStep({ onDone, skippable = false }: Props) {
 
   const validate = (): boolean => {
     const errors: Record<string, string> = {}
-    if (!formValues.smtpHost.trim()) {
-      errors.smtpHost = "L'hôte SMTP est requis"
-    }
-    const port = Number(formValues.smtpPort)
-    if (!formValues.smtpPort || isNaN(port) || port < 1 || port > 65535) {
-      errors.smtpPort = 'Le port doit être entre 1 et 65535'
+    if (formValues.emailProvider === 'resend') {
+      // La sentinelle '****' (clé déjà stockée) est acceptée — seule une
+      // valeur vide est invalide.
+      if (!formValues.emailApiKey) {
+        errors.emailApiKey = 'La clé API Resend est requise'
+      }
+    } else {
+      if (!formValues.smtpHost.trim()) {
+        errors.smtpHost = "L'hôte SMTP est requis"
+      }
+      const port = Number(formValues.smtpPort)
+      if (!formValues.smtpPort || isNaN(port) || port < 1 || port > 65535) {
+        errors.smtpPort = 'Le port doit être entre 1 et 65535'
+      }
     }
     if (formValues.smtpFromEmail && !EMAIL_RE.test(formValues.smtpFromEmail)) {
       errors.smtpFromEmail = "Format d'email invalide"
@@ -108,7 +122,7 @@ export function SetupSmtpStep({ onDone, skippable = false }: Props) {
     return Object.keys(errors).length === 0
   }
 
-  const buildPayload = (): SmtpSettingsPayload => ({
+  const buildSmtpPayload = (): SmtpSettingsPayload => ({
     smtpHost: formValues.smtpHost.trim(),
     smtpPort: Number(formValues.smtpPort),
     smtpSecure: formValues.smtpSecure,
@@ -118,6 +132,16 @@ export function SetupSmtpStep({ onDone, skippable = false }: Props) {
     smtpFromEmail: formValues.smtpFromEmail || undefined,
   })
 
+  const buildResendPayload = (): EmailSettingsPayload => ({
+    provider: 'resend',
+    emailApiKey: formValues.emailApiKey || '****',
+    smtpFromName: formValues.smtpFromName || undefined,
+    smtpFromEmail: formValues.smtpFromEmail || undefined,
+  })
+
+  const buildPayload = (): EmailSettingsPayload =>
+    formValues.emailProvider === 'resend' ? buildResendPayload() : buildSmtpPayload()
+
   const handleTest = async () => {
     if (!validate()) return
     setIsTesting(true)
@@ -126,7 +150,7 @@ export function SetupSmtpStep({ onDone, skippable = false }: Props) {
       const result = await testSetupSmtp({ ...buildPayload(), recipient })
       setTestResult(result)
     } catch (err) {
-      const data = (err as import('axios').AxiosError<{ error?: { message?: string } | string }>).response?.data?.error
+      const data = (err as AxiosError<{ error?: { message?: string } | string }>).response?.data?.error
       setTestResult({ success: false, message: (typeof data === 'string' ? data : data?.message) ?? 'Erreur lors du test SMTP' })
     } finally {
       setIsTesting(false)
@@ -145,7 +169,7 @@ export function SetupSmtpStep({ onDone, skippable = false }: Props) {
       await saveSetupSmtp(buildPayload())
       onDone()
     } catch (err) {
-      const data = (err as import('axios').AxiosError<{ error?: { message?: string } | string }>).response?.data?.error
+      const data = (err as AxiosError<{ error?: { message?: string } | string }>).response?.data?.error
       const message = typeof data === 'string' ? data : data?.message
       toast.error(message ?? "Erreur lors de l'enregistrement SMTP")
     } finally {

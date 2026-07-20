@@ -1,0 +1,149 @@
+name: Docker image
+
+# Build & publication de l'image canonique TimePick (chantier D, P1=(b)).
+#
+# Une image UNIQUE, multi-arch (amd64 + arm64), construite en CI et publiée sur
+# GHCR. Tous les hôtes la tirent en « pull » (Coolify/Oracle A1 inclus, en arm64) :
+#   - amd64 → PaaS (Heroku, DO App Platform…)
+#   - arm64 → conserve le chemin Oracle A1 sans compiler sharp/bcrypt sur le VPS
+#
+# Déclencheurs : tag `v*` (release) + `workflow_dispatch` (build manuel).
+# Le build multi-arch (QEMU) est lent → on ne le lance PAS sur chaque push.
+#
+# Garde de dépôt : le job ne tourne QUE dans timepick-app/timepick (miroir
+# public, seul namespace de publication de l'image officielle). Le fichier
+# étant synchronisé verbatim vers le public, le trigger v* reste ici ; un tag
+# v* poussé dans le privé (seangoogoo/timepick — tag d'HISTORIQUE créé par
+# timepick-push) saute simplement le build → jamais d'image sous
+# ghcr.io/seangoogoo/….
+#
+# Gating : la variante amd64 est d'abord bootée (smoke réel + /health 200) contre
+# un PostgreSQL de service ; la publication multi-arch sur GHCR n'a lieu QUE si ce
+# smoke passe. Un smoke rouge fait échouer le job AVANT le push → jamais de tag
+# `latest`/`vX.Y` cassé publié à une flotte qui tire en pull.
+#
+# VITE_API_URL est figé au BUILD dans le bundle client (Vite). On le bake en
+# chemin RELATIF `/api` : l'image devient indépendante du domaine et sert
+# n'importe quel hôte en same-origin (l'API est servie par le même Express).
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }} # timepick-app/timepick — la garde du job force le dépôt public (déjà en minuscules)
+
+jobs:
+  build-smoke-push:
+    name: Build amd64 → smoke /health → push multi-arch
+    # Garde de dépôt : publication UNIQUEMENT depuis le miroir public.
+    if: ${{ github.repository == 'timepick-app/timepick' }}
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata (tags + labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # latest + <tag git, ex. v1.2> + sha-<court>.
+          # `latest` seulement sur un tag FINAL (exclut v2.0-rc1 / v1.2-beta via le `-`).
+          tags: |
+            type=ref,event=tag
+            type=sha,format=short
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' && !contains(github.ref_name, '-') }}
+
+      # 1) Build amd64 chargée dans le démon docker du runner (natif amd64 →
+      #    rapide ; --load est mono-plateforme). Sert le smoke ci-dessous.
+      - name: Build amd64 image (for smoke)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          build-args: |
+            VITE_API_URL=/api
+          tags: timepick:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 2) Smoke réel : boot de l'image amd64 contre le PG de service → /health 200.
+      #    --network host : le conteneur (migrations au boot) joint le service
+      #    postgres publié sur localhost:5432, et expose :3000 au runner.
+      #    Un échec ici FAIT ÉCHOUER le job → l'étape 3 (push) est sautée.
+      - name: Smoke test (boot amd64 + /health 200)
+        run: |
+          set -euo pipefail
+          docker run -d --name timepick --network host \
+            -e NODE_ENV=production \
+            -e PORT=3000 \
+            -e DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres \
+            -e JWT_SECRET=ci-smoke-secret \
+            -e ENCRYPTION_KEY="$(openssl rand -hex 32)" \
+            -e APP_URL=http://localhost:3000 \
+            timepick:smoke
+
+          echo "En attente de /health (boot = prepare-db + migrations + healthcheck email)…"
+          for i in $(seq 1 90); do
+            code="$(curl -s -o /tmp/health.json -w '%{http_code}' http://localhost:3000/health || true)"
+            if [ "$code" = "200" ]; then
+              echo "OK — /health a renvoyé 200 :"
+              cat /tmp/health.json
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "ÉCHEC — /health n'a jamais renvoyé 200. Logs du conteneur :"
+          docker logs timepick || true
+          exit 1
+
+      # 3) Publication multi-arch — atteinte UNIQUEMENT si le smoke a réussi.
+      #    amd64 est réutilisée depuis le cache gha ; seule arm64 se construit ici.
+      - name: Build & push multi-arch (amd64+arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VITE_API_URL=/api
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          provenance: false

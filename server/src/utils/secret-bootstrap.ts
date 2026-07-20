@@ -39,8 +39,9 @@ export const JWT_SECRET_SPEC: SecretSpec = {
  * `process.env.DATA_DIR` override, else `<server>/data` — resolved identically
  * in dev (`src/utils/`) and prod (`dist/utils/`). This module lives one level
  * under the `src/`/`dist/` root, so it climbs two `..` to reach the server
- * package root — same technique and depth as `getEmailUploadsRoot()`
- * (`email-upload.service.ts`, also under `services/`).
+ * package root — same technique as `getEmailUploadsRoot()`
+ * (`services/storage/local-driver.ts`), which climbs three `..` because it sits
+ * one level deeper under `services/storage/`.
  */
 export function resolveDataDir(): string {
   return process.env.DATA_DIR ?? path.resolve(__dirname, '..', '..', 'data')

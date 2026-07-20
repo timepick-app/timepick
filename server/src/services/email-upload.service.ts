@@ -1,7 +1,10 @@
 import sharp from 'sharp'
-import fs from 'node:fs'
-import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { getStorage } from './storage'
+
+// Re-exported so existing importers (`email-brand-settings.controller`) keep
+// resolving it from this module after the storage refactor (chantier A).
+export { PathOutsideUploadsRootError } from './storage'
 
 export class UnsupportedImageError extends Error {
   statusCode = 415
@@ -19,33 +22,19 @@ export class ImageProcessingError extends Error {
   }
 }
 
-export class PathOutsideUploadsRootError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'PathOutsideUploadsRootError'
-  }
-}
-
-/**
- * Resolve the on-disk root for email uploads.
- *
- * Production: `<server-package>/` (so writes land at `<server-package>/uploads/emails/...`).
- * Tests can redirect to a tmpdir via `process.env.UPLOADS_ROOT_OVERRIDE`.
- */
-export function getEmailUploadsRoot(): string {
-  return process.env.UPLOADS_ROOT_OVERRIDE ?? path.resolve(__dirname, '..', '..')
-}
-
 export interface ProcessedEmailImage {
-  relPath: string
-  urlPath: string
-  absPath: string
+  /** Final absolute public URL, recopied verbatim into the DB. */
+  src: string
   width: number
   height: number
   bytes: number
 }
 
-const ALLOWED_MIME = new Set(['image/png', 'image/jpeg', 'image/webp'])
+const ALLOWED_MIME: Record<string, true> = {
+  'image/png': true,
+  'image/jpeg': true,
+  'image/webp': true,
+}
 
 // file-type v22 is ESM-only and the server compiles to CommonJS. ts-node would
 // rewrite a static `await import('file-type')` to require(), which fails on ESM
@@ -56,11 +45,19 @@ type FileTypeModule = {
 }
 const dynamicImport = new Function('mod', 'return import(mod)') as (mod: string) => Promise<unknown>
 
-export async function processEmailImage(buffer: Buffer): Promise<ProcessedEmailImage> {
+/**
+ * Validate + normalise an uploaded image to WebP, hand it to the active storage
+ * driver, and return the driver's final public URL. `requestOrigin` is the local
+ * driver's dev fallback base when `PUBLIC_BASE_URL` is unset (ignored by `s3`).
+ */
+export async function processEmailImage(
+  buffer: Buffer,
+  requestOrigin?: string,
+): Promise<ProcessedEmailImage> {
   const fileTypeMod = (await dynamicImport('file-type')) as FileTypeModule
   const ft = await fileTypeMod.fileTypeFromBuffer(buffer)
 
-  if (!ft || !ALLOWED_MIME.has(ft.mime)) {
+  if (!ft || !Object.prototype.hasOwnProperty.call(ALLOWED_MIME, ft.mime)) {
     throw new UnsupportedImageError("Format d'image non supporté")
   }
 
@@ -100,98 +97,38 @@ export async function processEmailImage(buffer: Buffer): Promise<ProcessedEmailI
   const now = new Date()
   const yyyy = String(now.getUTCFullYear())
   const mm = String(now.getUTCMonth() + 1).padStart(2, '0')
-  const uuid = randomUUID()
-  const filename = `${uuid}.webp`
-  const relDir = `uploads/emails/${yyyy}/${mm}`
-  const absDir = path.resolve(getEmailUploadsRoot(), relDir)
-  const absPath = path.join(absDir, filename)
-  const urlPath = `/${relDir}/${filename}`
+  // Canonical object key, driver-agnostic: `emails/<YYYY>/<MM>/<uuid>.webp`.
+  // The local driver maps it under `uploads/`; the s3 driver uses it verbatim.
+  const key = `emails/${yyyy}/${mm}/${randomUUID()}.webp`
 
-  await fs.promises.mkdir(absDir, { recursive: true })
-  await fs.promises.writeFile(absPath, processed)
+  const src = await getStorage().active.put(key, processed, 'image/webp', requestOrigin)
 
   if (process.env.NODE_ENV !== 'production') {
     console.log(
       '[EmailUpload] processed image %s (%dx%d, %d bytes)',
-      urlPath,
+      src,
       meta.width,
       meta.height,
-      processed.length
+      processed.length,
     )
   }
 
-  return {
-    relPath: `${relDir}/${filename}`,
-    urlPath,
-    absPath,
-    width: meta.width,
-    height: meta.height,
-    bytes: processed.length,
-  }
+  return { src, width: meta.width, height: meta.height, bytes: processed.length }
 }
 
 /**
- * Best-effort deletion of a previously uploaded email image.
+ * Best-effort deletion of a previously uploaded email image, addressed by the
+ * absolute URL persisted in the DB. Dispatches to the driver that owns the URL
+ * so mixed-state cleanup works (a legacy `/uploads/...` logo stays deletable
+ * after switching to `s3`, and vice versa); any URL no driver claims falls
+ * through to the local driver, whose guards throw `PathOutsideUploadsRootError`
+ * on out-of-scope paths. ENOENT / 404 resolve silently.
  *
- * Accepts the absolute-URL shape persisted in `email_brand_settings.logo_url`
- * (e.g. `https://host/uploads/emails/2026/05/abc.webp`) — strips host/leading
- * slash, re-anchors against `getEmailUploadsRoot()`, and verifies the resolved
- * path stays inside that root before unlinking. Path-traversal attempts throw
- * `PathOutsideUploadsRootError` BEFORE any filesystem call. ENOENT is the only
- * silent path; any other I/O error (EPERM, EISDIR, EROFS, …) re-throws so the
- * caller can log it.
+ * Kept as a named export on this module — it is the historical delete entry
+ * point and a test seam (`jest.spyOn(emailUploadService, 'deleteEmailImage')`).
  */
 export async function deleteEmailImage(stored: string): Promise<void> {
-  // Strip optional `https?://host` prefix and any leading slash so we have a
-  // path that should start with `uploads/emails/`.
-  const withoutOrigin = stored.replace(/^https?:\/\/[^/]+/i, '')
-  const relPathRaw = withoutOrigin.replace(/^\/+/, '')
-
-  // Decode percent-encoded segments BEFORE the structural checks so an
-  // attacker can't bypass the `..` filter with `%2E%2E`. malformed URIs throw
-  // — re-route to PathOutsideUploadsRootError so the controller logs them as
-  // a security event rather than a generic I/O failure.
-  let relPath: string
-  try {
-    relPath = decodeURIComponent(relPathRaw)
-  } catch {
-    throw new PathOutsideUploadsRootError(
-      `logo_url is not a valid URI-encoded path: ${stored}`,
-    )
-  }
-
-  if (!relPath.startsWith('uploads/emails/')) {
-    throw new PathOutsideUploadsRootError(
-      `logo_url does not point inside uploads/emails/: ${stored}`,
-    )
-  }
-
-  // Defense-in-depth: reject any `..` segment before path.resolve normalizes
-  // it away. The downstream startsWith check would only catch escapes past
-  // the uploads root, but a `..` segment that lands elsewhere INSIDE the root
-  // (e.g. `uploads/emails/../../etc/passwd` resolving to `<root>/etc/passwd`
-  // when the root is deep enough) is still an unexpected target.
-  if (relPath.split('/').includes('..')) {
-    throw new PathOutsideUploadsRootError(
-      `logo_url contains parent-traversal segment: ${stored}`,
-    )
-  }
-
-  const rootAbs = path.resolve(getEmailUploadsRoot()) + path.sep
-  const abs = path.resolve(getEmailUploadsRoot(), relPath)
-
-  if (!abs.startsWith(rootAbs)) {
-    throw new PathOutsideUploadsRootError(
-      `logo_url resolves outside uploads root: ${stored}`,
-    )
-  }
-
-  try {
-    await fs.promises.unlink(abs)
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      return
-    }
-    throw err
-  }
+  const { deleteDrivers, localDriver } = getStorage()
+  const owner = deleteDrivers.find((d) => d.owns(stored)) ?? localDriver
+  await owner.delete(stored)
 }

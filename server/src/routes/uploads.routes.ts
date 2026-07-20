@@ -39,17 +39,18 @@ router.post(
     }
 
     try {
-      const result = await processEmailImage(req.file.buffer)
-      // F1 fix: return ABSOLUTE URL so the asset works in the Aperçu iframe
-      // (sandboxed, opaque origin) AND in real email clients (no base URL).
-      // Prefer PUBLIC_BASE_URL when set; fall back to the request origin.
-      const publicBase =
-        process.env.PUBLIC_BASE_URL?.replace(/\/+$/, '') ??
-        `${req.protocol}://${req.get('host')}`
+      // F1 fix: the driver returns an ABSOLUTE URL so the asset works in the
+      // Aperçu iframe (sandboxed, opaque origin) AND in real email clients (no
+      // base URL). The local driver prefers PUBLIC_BASE_URL, falling back to the
+      // request origin passed here; the s3 driver uses S3_PUBLIC_BASE_URL.
+      const result = await processEmailImage(
+        req.file.buffer,
+        `${req.protocol}://${req.get('host')}`,
+      )
       res.json({
         data: [
           {
-            src: `${publicBase}${result.urlPath}`,
+            src: result.src,
             type: 'image',
             width: result.width,
             height: result.height,

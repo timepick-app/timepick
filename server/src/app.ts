@@ -23,6 +23,7 @@ import { encryptionKeyAdminRoutes } from './routes/encryption-key.admin.routes';
 import { optionalAuth } from './middleware/auth.middleware';
 import { snakeToCamelMiddleware } from './middleware/jsonConverter';
 import { getTransportStatus, checkSmtpConnection } from './services/email.service';
+import { getStorage } from './services/storage';
 
 const app = express();
 
@@ -32,7 +33,19 @@ const app = express();
 // in front of us; bump the count or use a list for multi-hop setups.
 app.set('trust proxy', 1);
 
-app.use(helmet());
+// STORAGE_DRIVER=s3 serves images from an external bucket origin; helmet's
+// default CSP (img-src 'self' data:) would block them in the admin editor and
+// the Aperçu iframe (srcdoc, same CSP). Extend img-src to the bucket origin only
+// under s3. Calling getStorage() here also fails fast at boot on an incomplete
+// s3 config (StorageConfigError thrown at app construction).
+const storage = getStorage();
+app.use(
+  helmet(
+    storage.mode === 's3'
+      ? { contentSecurityPolicy: { useDefaults: true, directives: { 'img-src': ["'self'", 'data:', storage.s3PublicOrigin] } } }
+      : undefined,
+  ),
+);
 app.use(cors({ exposedHeaders: ['Content-Disposition'] }));
 app.use(morgan('dev'));
 app.use(express.json());

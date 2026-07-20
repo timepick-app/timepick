@@ -1,0 +1,39 @@
+# heroku.yml — manifest Heroku (stack "container") pour TimePick.
+#
+# Doc officielle (schéma vérifié) :
+# https://devcenter.heroku.com/articles/build-docker-images-heroku-yml
+#
+# Ce manifeste ne sert QUE la Voie B (repli — build côté Heroku) du README.
+# La Voie A (recommandée — pull GHCR + re-push vers le Heroku Container
+# Registry) n'utilise PAS heroku.yml : voir README.md §Voie A.
+#
+# ⚠️ ARCHITECTURE : le Heroku Container Registry / builds heroku.yml ne
+#    produisent et n'exécutent QUE des images amd64 (x86_64) — pas d'ARM sur
+#    Heroku. L'image canonique ghcr.io/timepick-app/timepick est multi-arch
+#    (amd64+arm64) : sa variante amd64 est celle utilisée par ce kit (Voie A
+#    via `docker pull --platform linux/amd64 ...`). Un build heroku.yml
+#    (Voie B, ce fichier) recompile directement depuis le Dockerfile du repo
+#    sur l'infra Heroku (déjà amd64 nativement) : aucune action d'architecture
+#    n'est nécessaire côté opérateur pour cette voie.
+#
+# ⚠️ PORT : Heroku injecte automatiquement $PORT dans chaque dyno au runtime.
+#    Le serveur Express lit déjà process.env.PORT (fallback 3000, cf.
+#    server/src/index.ts). NE JAMAIS définir/forcer PORT via `heroku
+#    config:set PORT=...` ni ici : Heroku le fixe lui-même par dyno et route
+#    le trafic HTTP externe uniquement vers le process nommé "web" ci-dessous.
+build:
+  docker:
+    web: Dockerfile
+  # Variables disponibles UNIQUEMENT au moment du build de l'image (elles
+  # doivent correspondre à un `ARG` du Dockerfile — ici `ARG VITE_API_URL`).
+  # Ce ne sont PAS des config vars runtime (`heroku config:set` est distinct
+  # et ces valeurs ne sont pas visibles au démarrage du conteneur).
+  #
+  # VITE_API_URL=/api est un chemin RELATIF : il est baké une fois pour
+  # toutes dans le bundle client (Vite) et fonctionne en same-origin quel
+  # que soit le domaine Heroku (<app>.herokuapp.com ou domaine custom),
+  # car l'API est servie par le même process Express que le SPA. Ne PAS
+  # remplacer par une URL absolue — cf. contrat Chantier D (image unique
+  # multi-hôtes).
+  config:
+    VITE_API_URL: /api

@@ -6,6 +6,12 @@ const serverBaseURL = (import.meta.env.VITE_API_URL || 'http://localhost:3000/ap
 const publicApi = axios.create({ baseURL: serverBaseURL })
 
 /**
+ * Transport email pluggable — 'brevo' est accepté en DB/client mais REFUSÉ
+ * par le validateur serveur (itération suivante).
+ */
+export type EmailProvider = 'smtp' | 'resend' | 'brevo'
+
+/**
  * SMTP settings as returned by GET /api/admin/settings/smtp
  * Note: smtpPort is a STRING from the database (app_config stores text values)
  */
@@ -17,6 +23,10 @@ export interface SmtpSettings {
   smtpPassword: string
   smtpFromName: string
   smtpFromEmail: string
+  /** 'smtp' par défaut si absent/inconnu en DB */
+  emailProvider: EmailProvider
+  /** '****' si une clé API est stockée côté serveur, '' sinon — jamais la clé réelle */
+  emailApiKey: string
 }
 
 /**
@@ -32,6 +42,24 @@ export interface SmtpSettingsPayload {
   smtpFromName?: string
   smtpFromEmail?: string
 }
+
+/**
+ * Payload for the Resend (API-based) provider — PUT/POST /admin/settings/smtp[/test]
+ * with `provider: 'resend'`. `emailApiKey` may be the sentinel '****' to keep/test
+ * the key already stored server-side.
+ */
+export interface EmailApiProviderPayload {
+  provider: 'resend'
+  emailApiKey?: string
+  smtpFromName?: string
+  smtpFromEmail?: string
+}
+
+/**
+ * Discriminated union accepted by saveSmtpSettings/testSmtpConnection.
+ * `provider` is optional and defaults to 'smtp' server-side when absent.
+ */
+export type EmailSettingsPayload = ({ provider?: 'smtp' } & SmtpSettingsPayload) | EmailApiProviderPayload
 
 /**
  * Response from the SMTP test endpoint
@@ -50,18 +78,19 @@ export const getSmtpSettings = async (): Promise<SmtpSettings> => {
 }
 
 /**
- * Save SMTP settings
+ * Save SMTP settings — payload is provider-discriminated (smtp historique ou resend)
  */
-export const saveSmtpSettings = async (payload: SmtpSettingsPayload): Promise<{ message: string }> => {
+export const saveSmtpSettings = async (payload: EmailSettingsPayload): Promise<{ message: string }> => {
   const { data } = await api.put<ApiResponse<{ message: string }>>('/admin/settings/smtp', payload)
   return data.data
 }
 
 /**
- * Test SMTP connection with given parameters
- * The password must NOT be the sentinel "****" — the backend rejects it.
+ * Test connection with given parameters (smtp or resend)
+ * SMTP path: the password must NOT be the sentinel "****" — the backend rejects it.
+ * Resend path: the sentinel "****" is accepted — it tests the key already stored.
  */
-export const testSmtpConnection = async (payload: SmtpSettingsPayload): Promise<SmtpTestResult> => {
+export const testSmtpConnection = async (payload: EmailSettingsPayload): Promise<SmtpTestResult> => {
   const { data } = await api.post<SmtpTestResult>('/admin/settings/smtp/test', payload)
   return data
 }

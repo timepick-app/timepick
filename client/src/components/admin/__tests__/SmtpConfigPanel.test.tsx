@@ -28,6 +28,8 @@ const sampleSettings: SmtpSettings = {
   smtpPassword: 'real-secret-password',
   smtpFromName: 'TimePick',
   smtpFromEmail: 'noreply@example.com',
+  emailProvider: 'smtp',
+  emailApiKey: '',
 }
 
 const emptySettings: SmtpSettings = {
@@ -38,6 +40,8 @@ const emptySettings: SmtpSettings = {
   smtpPassword: '',
   smtpFromName: '',
   smtpFromEmail: '',
+  emailProvider: 'smtp',
+  emailApiKey: '',
 }
 
 const createQueryClient = () =>
@@ -152,6 +156,7 @@ describe('SmtpConfigPanel', () => {
           smtpPassword: 'real-secret-password',
           smtpFromName: 'TimePick Updated',
           smtpFromEmail: 'noreply@example.com',
+          provider: 'smtp',
         },
         expect.objectContaining({ onSuccess: expect.any(Function) })
       )
@@ -480,6 +485,118 @@ describe('SmtpConfigPanel', () => {
       } finally {
         vi.useRealTimers()
       }
+    })
+  })
+
+  // Provider Resend — bascule, badge, payloads
+  describe('Provider Resend', () => {
+    const resendConfigured: SmtpSettings = {
+      ...emptySettings,
+      smtpFromName: 'TimePick',
+      smtpFromEmail: 'noreply@example.com',
+      emailProvider: 'resend',
+      emailApiKey: '****',
+    }
+
+    it('bascule vers Resend masque les champs SMTP et affiche la clé API', async () => {
+      const user = userEvent.setup()
+      renderPanel()
+
+      await user.click(screen.getByTestId('email-provider-select'))
+      await user.click(await screen.findByRole('option', { name: 'Resend' }))
+
+      expect(screen.queryByTestId('smtp-host')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('smtp-port')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('smtp-user')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('smtp-password')).not.toBeInTheDocument()
+      expect(screen.getByTestId('email-api-key')).toBeInTheDocument()
+      // Les champs expéditeur communs restent affichés
+      expect(screen.getByTestId('smtp-from-name')).toBeInTheDocument()
+    })
+
+    it('badge "Non configuré" quand provider resend sans clé', () => {
+      mockUseSmtpSettings.mockReturnValue({
+        data: { ...emptySettings, emailProvider: 'resend', emailApiKey: '' },
+        isLoading: false,
+        error: null,
+      })
+
+      renderPanel()
+
+      expect(screen.getByText('Non configuré')).toBeInTheDocument()
+    })
+
+    it('badge "Opérationnel via Resend" quand provider resend + clé + healthy', () => {
+      mockUseSmtpSettings.mockReturnValue({
+        data: resendConfigured,
+        isLoading: false,
+        error: null,
+      })
+
+      renderPanel()
+
+      expect(screen.getByText('Opérationnel via Resend')).toBeInTheDocument()
+    })
+
+    it('sauvegarde envoie le payload resend avec la sentinelle non modifiée', async () => {
+      mockUseSmtpSettings.mockReturnValue({
+        data: resendConfigured,
+        isLoading: false,
+        error: null,
+      })
+
+      renderPanel()
+
+      fireEvent.change(screen.getByTestId('smtp-from-name'), { target: { value: 'TimePick Updated' } })
+      fireEvent.click(screen.getByTestId('smtp-save-btn'))
+
+      await waitFor(() => {
+        expect(mockSave).toHaveBeenCalledWith(
+          {
+            provider: 'resend',
+            emailApiKey: '****',
+            smtpFromName: 'TimePick Updated',
+            smtpFromEmail: 'noreply@example.com',
+          },
+          expect.objectContaining({ onSuccess: expect.any(Function) })
+        )
+      })
+    })
+
+    it('test envoie la clé saisie quand elle est modifiée', async () => {
+      mockUseSmtpSettings.mockReturnValue({
+        data: resendConfigured,
+        isLoading: false,
+        error: null,
+      })
+
+      renderPanel()
+
+      fireEvent.change(screen.getByTestId('email-api-key'), { target: { value: 're_newkey123' } })
+      fireEvent.click(screen.getByTestId('smtp-test-btn'))
+
+      await waitFor(() => {
+        expect(mockTest).toHaveBeenCalledWith(
+          expect.objectContaining({ provider: 'resend', emailApiKey: 're_newkey123' })
+        )
+      })
+    })
+
+    it('affiche une erreur de validation si la clé API est vide à la sauvegarde', () => {
+      mockUseSmtpSettings.mockReturnValue({
+        data: { ...emptySettings, emailProvider: 'resend', emailApiKey: '' },
+        isLoading: false,
+        error: null,
+      })
+
+      renderPanel()
+
+      // Rendre le formulaire dirty (from name) sans renseigner de clé
+      fireEvent.change(screen.getByTestId('smtp-from-name'), { target: { value: 'TimePick' } })
+      fireEvent.click(screen.getByTestId('smtp-save-btn'))
+
+      expect(screen.getByText(/La clé API Resend est requise/)).toBeInTheDocument()
+      expect(mockSave).not.toHaveBeenCalled()
     })
   })
 })

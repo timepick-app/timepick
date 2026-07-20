@@ -6,7 +6,7 @@ import {
   clearSmtpSettings,
   getAdminHealth,
   type SmtpSettings,
-  type SmtpSettingsPayload,
+  type EmailSettingsPayload,
   type SmtpTestResult,
   type AdminHealthResponse,
 } from '../services/settings.service'
@@ -51,7 +51,7 @@ export const useSaveSmtpSettings = () => {
  * Shows success/failure toast based on result
  */
 export const useTestSmtpConnection = () => {
-  return useMutation<SmtpTestResult, unknown, SmtpSettingsPayload>({
+  return useMutation<SmtpTestResult, unknown, EmailSettingsPayload>({
     mutationFn: testSmtpConnection,
     onSuccess: (result) => {
       if (result.success) {

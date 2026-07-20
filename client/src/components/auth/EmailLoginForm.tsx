@@ -35,8 +35,8 @@ export function EmailLoginForm({
         <Card data-testid="login-success" role="status" aria-live="polite">
           <CardHeader>
             <AuthBrand />
-            <Typography variant="h3" as="h2" className="tracking-tight">Email envoyé !</Typography>
-            <CardDescription>Vérifiez votre boîte de réception (et vos spams).</CardDescription>
+            <Typography variant="h3" as="h2" className="tracking-tight">Vérifiez votre boîte de réception</Typography>
+            <CardDescription>Si cet email est enregistré, vous recevrez un lien de connexion. Pensez à vérifier vos spams.</CardDescription>
           </CardHeader>
           <CardContent className="pt-0">
             <Typography variant="body-xs" color="muted">

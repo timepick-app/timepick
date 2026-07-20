@@ -1,5 +1,7 @@
 import nodemailer from 'nodemailer';
 import { getSmtpSettings } from '../db/settings.db';
+import { getEmailProviderConfig, type EmailProvider } from '../db/email-provider.db';
+import { createApiTransport } from './email-transport';
 import type { Transporter } from 'nodemailer';
 
 /**
@@ -102,11 +104,40 @@ function looksLikeDecryptFailure(err: unknown): boolean {
  * 1. DB (app_config) → highest priority
  * 2. .env (SMTP_*) → fallback
  * 3. Env-aware fallback: null in production, local SMTP interceptor (127.0.0.1:1025) in dev/test
+ *
+ * Chantier C — dispatch provider (E3, insertion AVANT le try SMTP historique
+ * ci-dessous) : `email_provider !== 'smtp'` avec une clé API stockée →
+ * court-circuite la cascade et construit le transport HTTP (Resend/Brevo).
+ * Sans clé → log + cascade SMTP inchangée. `providerKeyMismatch` bloque le
+ * reset de `encryptionKeyMismatch` par le try SMTP qui suit quand LA CLÉ
+ * PROVIDER (pas le mot de passe SMTP) est indéchiffrable — seul delta
+ * autorisé dans le chemin SMTP existant (cf. contrat §5).
  */
 async function buildTransport(): Promise<Transporter | null> {
+  let providerKeyMismatch = false
+  try {
+    const { provider, apiKey }: { provider: EmailProvider; apiKey: string } = await getEmailProviderConfig()
+    if (provider !== 'smtp') {
+      if (apiKey) {
+        encryptionKeyMismatch = false
+        transportSource = 'db'
+        return nodemailer.createTransport(createApiTransport(provider, apiKey))
+      }
+      console.error(`[EmailService] email_provider=${provider} sans clé API — cascade SMTP utilisée`)
+    }
+  } catch (error) {
+    if (looksLikeDecryptFailure(error)) {
+      providerKeyMismatch = true
+      encryptionKeyMismatch = true
+      console.error('[EmailService] ENCRYPTION_KEY mismatch — la clé API stockée est indéchiffrable avec la clé courante. Restaurez la clé de chiffrement sauvegardée ou ressaisissez la clé API dans Réglages → Email (runbook B).')
+    } else {
+      console.error('[EmailService] Failed to read email provider config:', error)
+    }
+  }
+
   try {
     const dbSettings = await getSmtpSettings();
-    encryptionKeyMismatch = false;
+    if (!providerKeyMismatch) encryptionKeyMismatch = false;
 
     if (dbSettings.smtpHost) {
       transportSource = 'db';
@@ -273,6 +304,41 @@ export async function sendSmtpTest(
     return { success: false, message: `Erreur: ${err instanceof Error ? err.message : 'Erreur inconnue'}` }
   } finally {
     transport.close()
+  }
+}
+
+export interface ProviderTestParams {
+  provider: 'resend'
+  apiKey: string
+  fromName?: string
+  fromEmail?: string
+}
+
+/** Teste un provider API email (Resend) ad-hoc et envoie à `recipient` le
+ *  corps (html + text) fourni par l'orchestrateur. Miroir de sendSmtpTest
+ *  pour le transport HTTP : verify() (GET /domains authentifié) PUIS un
+ *  vrai envoi. Ne lève jamais : retourne { success, message }. */
+export async function sendProviderTest(
+  params: ProviderTestParams,
+  recipient: string,
+  body: { html: string; text: string },
+): Promise<{ success: boolean; message: string }> {
+  let transport: Transporter | undefined
+  try {
+    transport = nodemailer.createTransport(createApiTransport(params.provider, params.apiKey))
+    await transport.verify()
+    await transport.sendMail({
+      from: `"${params.fromName || 'TimePick'}" <${params.fromEmail || recipient}>`,
+      to: recipient,
+      subject: `Test ${params.provider === 'resend' ? 'Resend' : params.provider} - TimePick`,
+      html: body.html,
+      text: body.text,
+    })
+    return { success: true, message: 'Connexion réussie' }
+  } catch (err) {
+    return { success: false, message: err instanceof Error ? err.message : 'Erreur inconnue' }
+  } finally {
+    transport?.close()
   }
 }
 

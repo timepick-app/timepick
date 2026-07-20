@@ -22,7 +22,7 @@ import {
   useClearSmtpSettings,
   useAdminHealth,
 } from '@/hooks/useSmtpSettings'
-import type { SmtpSettingsPayload } from '@/services/settings.service'
+import type { EmailProvider, EmailSettingsPayload, SmtpSettingsPayload } from '@/services/settings.service'
 import { SmtpFields } from '@/components/smtp/SmtpFields'
 import type { SmtpFieldsValues } from '@/components/smtp/SmtpFields'
 import { EMAIL_RE } from '@/lib/email'
@@ -33,6 +33,8 @@ const DEFAULT_PORT = 587
 type FormValues = SmtpFieldsValues
 
 const initialFormValues: FormValues = {
+  emailProvider: 'smtp',
+  emailApiKey: '',
   smtpHost: '',
   smtpPort: String(DEFAULT_PORT),
   smtpSecure: false,
@@ -43,18 +45,26 @@ const initialFormValues: FormValues = {
 }
 
 /**
- * Validate SMTP form values.
+ * Validate SMTP/Resend form values.
  * Returns an object with field names as keys and error messages as values.
  * Empty object means no errors.
  */
 const validateSmtpForm = (values: FormValues): Record<string, string> => {
   const errors: Record<string, string> = {}
 
-  // smtpHost is optional — blank = disable SMTP (triggers DELETE via handleSave)
-  // Only validate port/fromEmail format when host is set
-  const port = Number(values.smtpPort)
-  if (values.smtpHost && (!values.smtpPort || isNaN(port) || port < 1 || port > 65535)) {
-    errors.smtpPort = 'Le port doit être entre 1 et 65535'
+  if (values.emailProvider === 'resend') {
+    // La clé peut être la sentinelle '****' (clé déjà stockée côté serveur) —
+    // seule une valeur vide est invalide.
+    if (!values.emailApiKey) {
+      errors.emailApiKey = 'La clé API Resend est requise'
+    }
+  } else {
+    // smtpHost is optional — blank = disable SMTP (triggers DELETE via handleSave)
+    // Only validate port format when host is set
+    const port = Number(values.smtpPort)
+    if (values.smtpHost && (!values.smtpPort || isNaN(port) || port < 1 || port > 65535)) {
+      errors.smtpPort = 'Le port doit être entre 1 et 65535'
+    }
   }
 
   if (values.smtpFromEmail && !EMAIL_RE.test(values.smtpFromEmail)) {
@@ -65,25 +75,28 @@ const validateSmtpForm = (values: FormValues): Record<string, string> => {
 }
 
 /**
- * SMTP status badge — 4 states:
- *   no host            → "Non configuré"
- *   host + loading     → "Vérification…"
- *   host + healthy     → "Opérationnel"
- *   host + unhealthy   → "Non joignable"
- *   host + UI timeout  → "Statut inconnu"
+ * SMTP status badge — 4 states, generalisé pour Resend :
+ *   non configuré      → "Non configuré"
+ *   configuré + loading → "Vérification…"
+ *   configuré + healthy → "Opérationnel" (ou "Opérationnel via Resend")
+ *   configuré + unhealthy → "Non joignable"
+ *   UI timeout          → "Statut inconnu"
  */
 interface SmtpStatusBadgeProps {
+  provider: EmailProvider
   smtpHost: string | undefined
+  emailApiKey: string | undefined
   healthy: boolean | null | undefined
   healthLoading: boolean
   smtpTimeout: boolean
 }
 
-const SmtpStatusBadge = ({ smtpHost, healthy, healthLoading, smtpTimeout }: SmtpStatusBadgeProps) => {
-  if (!smtpHost) return <Badge variant="default">Non configuré</Badge>
+const SmtpStatusBadge = ({ provider, smtpHost, emailApiKey, healthy, healthLoading, smtpTimeout }: SmtpStatusBadgeProps) => {
+  const configured = provider === 'resend' ? !!emailApiKey : !!smtpHost
+  if (!configured) return <Badge variant="default">Non configuré</Badge>
   if (smtpTimeout) return <Badge variant="default">Statut inconnu</Badge>
   if (healthLoading) return <Badge variant="default">Vérification…</Badge>
-  if (healthy === true) return <Badge variant="success">Opérationnel</Badge>
+  if (healthy === true) return <Badge variant="success">{provider === 'resend' ? 'Opérationnel via Resend' : 'Opérationnel'}</Badge>
   if (healthy === false) return <Badge variant="destructive">Non joignable</Badge>
   return <Badge variant="default">Chargement…</Badge>
 }
@@ -116,7 +129,10 @@ export const SmtpConfigPanel = ({ className }: SmtpConfigPanelProps) => {
   const [smtpTimeout, setSmtpTimeout] = useState(false)
   const [syncedSettings, setSyncedSettings] = useState<typeof settings>(undefined)
 
+  const provider: EmailProvider = settings?.emailProvider ?? 'smtp'
   const smtpHost = settings?.smtpHost
+  const emailApiKey = settings?.emailApiKey
+  const isConfigured = provider === 'resend' ? !!emailApiKey : !!smtpHost
   const smtpHealthy = healthData?.services?.smtp?.healthy ?? null
 
   // Resync hors-effet : aligne le formulaire sur les réglages fetchés dès que
@@ -124,6 +140,8 @@ export const SmtpConfigPanel = ({ className }: SmtpConfigPanelProps) => {
   if (settings && settings !== syncedSettings) {
     setSyncedSettings(settings)
     setFormValues({
+      emailProvider: settings.emailProvider || 'smtp',
+      emailApiKey: settings.emailApiKey || '',
       smtpHost: settings.smtpHost || '',
       smtpPort: settings.smtpPort || String(DEFAULT_PORT),
       smtpSecure: settings.smtpSecure ?? false,
@@ -136,17 +154,17 @@ export const SmtpConfigPanel = ({ className }: SmtpConfigPanelProps) => {
 
   // Drapeau « >15s » remis à zéro hors-effet dès que la vérification n'est plus
   // en cours, pour repartir proprement au prochain cycle de chargement.
-  if (smtpTimeout && !(isHealthLoading && smtpHost)) {
+  if (smtpTimeout && !(isHealthLoading && isConfigured)) {
     setSmtpTimeout(false)
   }
 
   // 15s UI timeout for "Vérification…" state — after that, show "Statut inconnu"
   useEffect(() => {
-    if (isHealthLoading && smtpHost) {
+    if (isHealthLoading && isConfigured) {
       const timer = setTimeout(() => setSmtpTimeout(true), 15_000)
       return () => clearTimeout(timer)
     }
-  }, [isHealthLoading, smtpHost])
+  }, [isHealthLoading, isConfigured])
 
   // Local validation
   const validate = useCallback(() => {
@@ -156,7 +174,7 @@ export const SmtpConfigPanel = ({ className }: SmtpConfigPanelProps) => {
   }, [formValues])
 
   // Build payload from form values (converts port string → number)
-  const buildPayload = useCallback((): SmtpSettingsPayload => ({
+  const buildSmtpPayload = useCallback((): SmtpSettingsPayload => ({
     smtpHost: formValues.smtpHost.trim(),
     smtpPort: Number(formValues.smtpPort),
     smtpSecure: formValues.smtpSecure,
@@ -166,29 +184,44 @@ export const SmtpConfigPanel = ({ className }: SmtpConfigPanelProps) => {
     smtpFromEmail: formValues.smtpFromEmail || undefined,
   }), [formValues])
 
-  // Save handler — empty host triggers DELETE (clear config), else PUT
+  const buildResendPayload = useCallback((): EmailSettingsPayload => ({
+    provider: 'resend',
+    emailApiKey: formValues.emailApiKey || '****',
+    smtpFromName: formValues.smtpFromName || undefined,
+    smtpFromEmail: formValues.smtpFromEmail || undefined,
+  }), [formValues])
+
+  // Save handler — smtp: empty host triggers DELETE (clear config), else PUT
+  // with an explicit provider:'smtp'. resend: PUT with the resend payload.
   const handleSave = () => {
     if (!validate()) return
+
+    if (formValues.emailProvider === 'resend') {
+      saveSettings(buildResendPayload(), { onSuccess: () => { void refetchHealth() } })
+      return
+    }
 
     if (!formValues.smtpHost.trim()) {
       clearSettings(undefined, { onSuccess: () => { void refetchHealth() } })
       return
     }
 
-    saveSettings(buildPayload(), { onSuccess: () => { void refetchHealth() } })
+    saveSettings({ ...buildSmtpPayload(), provider: 'smtp' }, { onSuccess: () => { void refetchHealth() } })
   }
 
   // Test connection handler
   const handleTestConnection = () => {
     if (!validate()) return
 
-    testConnection(buildPayload())
+    testConnection(formValues.emailProvider === 'resend' ? buildResendPayload() : buildSmtpPayload())
   }
 
   // Reset handler
   const handleReset = () => {
     if (settings) {
       setFormValues({
+        emailProvider: settings.emailProvider || 'smtp',
+        emailApiKey: settings.emailApiKey || '',
         smtpHost: settings.smtpHost || '',
         smtpPort: settings.smtpPort || String(DEFAULT_PORT),
         smtpSecure: settings.smtpSecure ?? false,
@@ -216,7 +249,9 @@ export const SmtpConfigPanel = ({ className }: SmtpConfigPanelProps) => {
 
   const isBusy = isLoading || isSaving || isTesting || isClearing
   const isDirty = settings != null && (
-       formValues.smtpHost      !== (settings.smtpHost      || '')
+       formValues.emailProvider !== (settings.emailProvider || 'smtp')
+    || formValues.emailApiKey   !== (settings.emailApiKey   || '')
+    || formValues.smtpHost      !== (settings.smtpHost      || '')
     || formValues.smtpPort      !== (settings.smtpPort      || String(DEFAULT_PORT))
     || formValues.smtpSecure    !== (settings.smtpSecure    ?? false)
     || formValues.smtpUser      !== (settings.smtpUser      || '')
@@ -231,7 +266,9 @@ export const SmtpConfigPanel = ({ className }: SmtpConfigPanelProps) => {
         <CardTitle as="h2" className="flex items-center gap-3">
           <span>Configuration SMTP</span>
           <SmtpStatusBadge
+            provider={provider}
             smtpHost={smtpHost}
+            emailApiKey={emailApiKey}
             healthy={smtpHealthy}
             healthLoading={isHealthLoading}
             smtpTimeout={smtpTimeout}
@@ -246,11 +283,15 @@ export const SmtpConfigPanel = ({ className }: SmtpConfigPanelProps) => {
           </Banner>
         )}
 
-        {/* Health warning — SMTP is configured but the server cannot reach it */}
-        {smtpHost && smtpHealthy === false && (
+        {/* Health warning — email is configured but the server cannot reach it */}
+        {isConfigured && smtpHealthy === false && (
           <Banner variant="warning" role="alert" data-testid="smtp-health-warning">
             <AlertTriangle className="h-4 w-4" />
-            <BannerDescription>Le serveur SMTP est configuré mais non joignable. Les emails ne seront pas envoyés.</BannerDescription>
+            <BannerDescription>
+              {provider === 'resend'
+                ? "Le fournisseur d'email (Resend) est configuré mais non joignable. Les emails ne seront pas envoyés."
+                : 'Le serveur SMTP est configuré mais non joignable. Les emails ne seront pas envoyés.'}
+            </BannerDescription>
           </Banner>
         )}
 
@@ -278,7 +319,7 @@ export const SmtpConfigPanel = ({ className }: SmtpConfigPanelProps) => {
 
         {/* Action buttons */}
         <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-4 border-t max-sm:[&>button]:flex-1">
-          {smtpHost && (
+          {isConfigured && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button
@@ -288,14 +329,16 @@ export const SmtpConfigPanel = ({ className }: SmtpConfigPanelProps) => {
                   data-testid="smtp-disable-btn"
                   className="sm:mr-auto"
                 >
-                  {isClearing ? 'Désactivation...' : 'Désactiver SMTP'}
+                  {isClearing ? 'Désactivation...' : provider === 'resend' ? "Désactiver l'envoi d'emails" : 'Désactiver SMTP'}
                 </Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
-                  <AlertDialogTitle>Désactiver la configuration SMTP ?</AlertDialogTitle>
+                  <AlertDialogTitle>{provider === 'resend' ? "Désactiver l'envoi d'emails ?" : 'Désactiver la configuration SMTP ?'}</AlertDialogTitle>
                   <AlertDialogDescription>
-                    La configuration SMTP sera supprimée. Les emails seront désactivés en production jusqu&apos;à ce qu&apos;une nouvelle configuration soit ajoutée. Cette action ne peut pas être annulée.
+                    {provider === 'resend'
+                      ? "La configuration du fournisseur d'email (clé API comprise) et les réglages SMTP seront supprimés. Les emails seront désactivés en production jusqu'à ce qu'une nouvelle configuration soit ajoutée. Cette action ne peut pas être annulée."
+                      : "La configuration SMTP sera supprimée. Les emails seront désactivés en production jusqu'à ce qu'une nouvelle configuration soit ajoutée. Cette action ne peut pas être annulée."}
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>

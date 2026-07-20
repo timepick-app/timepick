@@ -1,15 +1,15 @@
 import api from './api'
-import type { SmtpSettings, SmtpSettingsPayload } from './settings.service'
+import type { SmtpSettings, EmailSettingsPayload } from './settings.service'
 
 export const getSetupSmtp = async (): Promise<SmtpSettings> =>
   (await api.get('/setup/smtp')).data.data
 
-export const saveSetupSmtp = async (p: SmtpSettingsPayload): Promise<void> => {
+export const saveSetupSmtp = async (p: EmailSettingsPayload): Promise<void> => {
   await api.put('/setup/smtp', p)
 }
 
 export const testSetupSmtp = async (
-  p: SmtpSettingsPayload & { recipient: string },
+  p: EmailSettingsPayload & { recipient: string },
 ): Promise<{ success: boolean; message: string }> =>
   (await api.post('/setup/smtp/test', p)).data
 

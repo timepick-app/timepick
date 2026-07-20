@@ -69,7 +69,7 @@ test.describe('Login — emergency-login contextual reveal', () => {
 
     const successBlock = page.getByTestId('login-success')
     await expect(successBlock).toBeVisible()
-    await expect(successBlock).toContainText(/email envoyé/i)
+    await expect(successBlock).toContainText(/si cet email est enregistré/i)
 
     const recoveryLink = successBlock.locator('a[href="/emergency-login"]')
     await expect(recoveryLink).toBeVisible()

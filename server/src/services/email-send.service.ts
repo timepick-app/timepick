@@ -17,7 +17,9 @@ import {
   withAdminCtx,
   sendMailWithFallback,
   sendSmtpTest,
+  sendProviderTest,
   type SmtpTestParams,
+  type ProviderTestParams,
 } from './email-transport.service'
 
 // ---------------------------------------------------------------------------
@@ -791,4 +793,27 @@ export async function sendBrandedSmtpTest(
     }
   }
   return sendSmtpTest(params, recipient, body)
+}
+
+/**
+ * Rend le corps brandé de l'email de test provider (Resend), puis l'envoie à
+ * `recipient` via le transport ad-hoc sendProviderTest. Miroir exact de
+ * sendBrandedSmtpTest pour le transport HTTP — même contrat « ne lève
+ * jamais », même message d'erreur de rendu.
+ * @returns { success, message } — ne lève jamais (propage le contrat de sendProviderTest).
+ */
+export async function sendBrandedProviderTest(
+  params: ProviderTestParams,
+  recipient: string,
+): Promise<{ success: boolean; message: string }> {
+  let body: { html: string; text: string }
+  try {
+    body = await renderSmtpTestEmail()
+  } catch (err) {
+    return {
+      success: false,
+      message: `Erreur de rendu de l'email de test: ${err instanceof Error ? err.message : 'erreur inconnue'}`,
+    }
+  }
+  return sendProviderTest(params, recipient, body)
 }

@@ -228,7 +228,7 @@ describe('Login — emergency-login reveal', () => {
     await user.click(submit);
 
     const successBlock = await screen.findByTestId('login-success');
-    expect(successBlock).toHaveTextContent(/email envoyé/i);
+    expect(successBlock).toHaveTextContent(/si cet email est enregistré/i);
     expect(successBlock).toHaveTextContent(/vous êtes administrateur/i);
     // Scope link assertion to the success block so a future persistent layout
     // link outside the success container cannot satisfy this test (F13).

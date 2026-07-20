@@ -75,3 +75,36 @@ export const smtpSetupTestSchema = smtpTestSchema.extend({
   recipient: z.string().email('Email de test invalide'),
   smtpPassword: z.string().optional(),
 })
+
+/**
+ * Chantier C — providers email HTTP (transport API, alternative au SMTP).
+ *
+ * Dispatch contrôleur : `body.provider` absent ou 'smtp' → schémas SMTP
+ * ci-dessus (chemin historique intact) ; 'resend' → schémas ci-dessous.
+ * 'brevo' est réservé (type DB + client conçus pour l'accueillir) mais REFUSÉ
+ * ici tant que son transport n'est pas implémenté — jamais de config
+ * enregistrable sans transport derrière.
+ *
+ * Sentinelle '****' pour la clé API : à la sauvegarde comme au test, '' et
+ * '****' signifient « utiliser la clé stockée » (résolue côté serveur). Le test
+ * valide donc la clé RÉELLEMENT stockée — contrairement au test SMTP qui ne
+ * teste qu'un mot de passe saisi à la main.
+ */
+export const emailApiProviderSettingsSchema = z.object({
+  provider: z.enum(['resend'], {
+    error: () => "Provider email non supporté (disponibles : smtp, resend)"
+  }),
+
+  // '' ou '****' → préserve la clé stockée (sentinelle, cf. smtp_password)
+  emailApiKey: z.string().optional(),
+
+  smtpFromName: z.string().optional(),
+  smtpFromEmail: z.string().email("L'email de l'expéditeur doit être une adresse email valide").optional().or(z.literal(''))
+})
+
+/**
+ * Test provider API depuis le wizard de setup : + recipient.
+ */
+export const emailApiProviderSetupTestSchema = emailApiProviderSettingsSchema.extend({
+  recipient: z.string().email('Email de test invalide'),
+})

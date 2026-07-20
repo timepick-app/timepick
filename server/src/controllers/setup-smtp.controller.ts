@@ -1,8 +1,9 @@
 import net from 'net'
 import type { Request, Response } from 'express'
 import { getSmtpSettings } from '../db/settings.db'
-import { sendBrandedSmtpTest } from '../services/email.service'
-import { smtpSetupTestSchema } from '../validators/settings.validator'
+import { getEmailProviderConfig } from '../db/email-provider.db'
+import { sendBrandedSmtpTest, sendBrandedProviderTest } from '../services/email.service'
+import { smtpSetupTestSchema, emailApiProviderSetupTestSchema } from '../validators/settings.validator'
 import { formatApiError } from '../validators/config.validator'
 
 /**
@@ -35,13 +36,22 @@ function isBlockedSmtpHost(host: string): boolean {
 
 /**
  * GET /api/setup/smtp
- * Retourne la config SMTP avec le mot de passe masqué.
+ * Retourne la config SMTP avec le mot de passe masqué, ainsi que le provider
+ * email actif (Chantier C) — clé API masquée ('****'/'').
  * Endpoint public gated (checkSetupNotDone + rate-limit).
  */
 export const getSetupSmtpConfigHandler = async (_req: Request, res: Response): Promise<void> => {
   try {
     const s = await getSmtpSettings()
-    res.json({ data: { ...s, smtpPassword: s.smtpPassword ? '****' : '' } })
+    const { provider, apiKey } = await getEmailProviderConfig()
+    res.json({
+      data: {
+        ...s,
+        smtpPassword: s.smtpPassword ? '****' : '',
+        emailProvider: provider,
+        emailApiKey: apiKey ? '****' : '',
+      },
+    })
   } catch (e) {
     console.error('[SetupSmtp] get error:', e)
     res.status(500).json({
@@ -57,9 +67,36 @@ export const getSetupSmtpConfigHandler = async (_req: Request, res: Response): P
  *
  * Sentinel '****' : si smtpPassword est absent ou vaut '****', le mot de passe
  * chiffré en DB est chargé et utilisé (cas env-seed pré-rempli).
+ *
+ * Chantier C — body.provider:'resend' dispatche vers `emailApiProviderSetupTestSchema`
+ * (même schéma + recipient) : résolution de clé identique au chemin admin,
+ * la blocklist d'IPs privées reste scoped au chemin SMTP ci-dessous.
  */
 export const testSetupSmtpHandler = async (req: Request, res: Response): Promise<void> => {
   try {
+    const provider = typeof req.body?.provider === 'string' ? req.body.provider : undefined
+
+    if (provider && provider !== 'smtp') {
+      const validated = emailApiProviderSetupTestSchema.parse(req.body)
+
+      let apiKey = validated.emailApiKey
+      if (!apiKey || apiKey === '****') {
+        apiKey = (await getEmailProviderConfig()).apiKey
+      }
+      if (!apiKey) {
+        res.json({ success: false, message: 'Aucune clé API configurée pour ce provider.' })
+        return
+      }
+
+      res.json(
+        await sendBrandedProviderTest(
+          { provider: validated.provider, apiKey, fromName: validated.smtpFromName, fromEmail: validated.smtpFromEmail },
+          validated.recipient,
+        ),
+      )
+      return
+    }
+
     const p = smtpSetupTestSchema.parse(req.body)
     const { recipient, ...smtpParams } = p
 

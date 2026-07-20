@@ -52,6 +52,8 @@ const emptySmtp: SmtpSettings = {
   smtpPassword: '',
   smtpFromName: '',
   smtpFromEmail: '',
+  emailProvider: 'smtp',
+  emailApiKey: '',
 };
 
 const createTestQueryClient = () =>
