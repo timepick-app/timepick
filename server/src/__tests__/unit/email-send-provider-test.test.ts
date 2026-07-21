@@ -26,7 +26,7 @@ const mockedSend = sendProviderTest as unknown as {
   mock: { calls: unknown[] }
 }
 
-const PARAMS: ProviderTestParams = { provider: 'resend', apiKey: 'k' }
+const PARAMS: ProviderTestParams = { provider: 'resend', credentials: { apiKey: 'k' } }
 
 describe('sendBrandedProviderTest — contrat « ne lève jamais »', () => {
   beforeEach(() => {

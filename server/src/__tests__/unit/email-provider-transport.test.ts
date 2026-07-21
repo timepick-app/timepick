@@ -5,7 +5,9 @@ import type { EmailProvider } from '../../db/email-provider.db'
 
 // ---------------------------------------------------------------------------
 // Mocks — must be declared BEFORE importing the module under test (style
-// email-transport.test.ts).
+// email-transport.test.ts). `descriptors`/`provider-credentials` restent
+// RÉELS (données pures + fonctions sans effet de bord) — seuls les modules à
+// effet de bord (DB, transport HTTP, nodemailer) sont mockés.
 // ---------------------------------------------------------------------------
 
 const mockGetSmtpSettings = jest.fn<() => Promise<SmtpSettings>>()
@@ -13,7 +15,7 @@ jest.mock('../../db/settings.db', () => ({
   getSmtpSettings: mockGetSmtpSettings,
 }))
 
-const mockGetEmailProviderConfig = jest.fn<() => Promise<{ provider: EmailProvider; apiKey: string }>>()
+const mockGetEmailProviderConfig = jest.fn<() => Promise<{ provider: EmailProvider; credentials: Record<string, string> }>>()
 jest.mock('../../db/email-provider.db', () => ({
   getEmailProviderConfig: mockGetEmailProviderConfig,
 }))
@@ -59,11 +61,20 @@ const DB_SETTINGS_EMPTY: SmtpSettings = {
 
 const DB_SETTINGS_HOST: SmtpSettings = { ...DB_SETTINGS_EMPTY, smtpHost: 'smtp.example.com' }
 
+/** Credentials COMPLETS par fournisseur (tous les champs requis du catalogue). */
+const COMPLETE_CREDENTIALS: Record<Exclude<EmailProvider, 'smtp'>, Record<string, string>> = {
+  brevo: { apiKey: 'xkeysib-abc' },
+  mailjet: { apiKey: 'ak', secretKey: 'sk' },
+  scaleway: { secretKey: 'sec', projectId: 'proj-1', region: 'fr-par' },
+  sweego: { apiKey: 'sw-key' },
+  resend: { apiKey: 'abc-key' },
+}
+
 // ---------------------------------------------------------------------------
 // buildTransport() dispatch — contrat §5, testé via getTransporter()
 // ---------------------------------------------------------------------------
 
-describe('buildTransport — dispatch provider (contrat §5)', () => {
+describe('buildTransport — dispatch provider data-driven (contrat §5, 5 fournisseurs)', () => {
   beforeEach(() => {
     jest.clearAllMocks()
     invalidateTransportCache()
@@ -75,21 +86,24 @@ describe('buildTransport — dispatch provider (contrat §5)', () => {
     jest.restoreAllMocks()
   })
 
-  it("T1: email_provider='resend' avec clé → court-circuite vers createApiTransport, source='db', getSmtpSettings jamais appelé", async () => {
-    mockGetEmailProviderConfig.mockResolvedValue({ provider: 'resend', apiKey: 'abc-key' })
-    const fakeApiTransport = { name: 'Resend' }
-    mockCreateApiTransport.mockReturnValue(fakeApiTransport)
+  it.each(Object.entries(COMPLETE_CREDENTIALS) as [Exclude<EmailProvider, 'smtp'>, Record<string, string>][])(
+    "T1.%s: email_provider='%s' avec credentials complets → court-circuite vers createApiTransport, source='db', getSmtpSettings jamais appelé",
+    async (provider, credentials) => {
+      mockGetEmailProviderConfig.mockResolvedValue({ provider, credentials })
+      const fakeApiTransport = { name: provider }
+      mockCreateApiTransport.mockReturnValue(fakeApiTransport)
 
-    await getTransporter()
+      await getTransporter()
 
-    expect(mockCreateApiTransport).toHaveBeenCalledWith('resend', 'abc-key')
-    expect(mockCreateTransport).toHaveBeenCalledWith(fakeApiTransport)
-    expect(getEmailTransportSource()).toBe('db')
-    expect(mockGetSmtpSettings).not.toHaveBeenCalled()
-  })
+      expect(mockCreateApiTransport).toHaveBeenCalledWith(provider, credentials)
+      expect(mockCreateTransport).toHaveBeenCalledWith(fakeApiTransport)
+      expect(getEmailTransportSource()).toBe('db')
+      expect(mockGetSmtpSettings).not.toHaveBeenCalled()
+    },
+  )
 
   it("T2: email_provider='resend' sans clé → log explicite + cascade SMTP inchangée", async () => {
-    mockGetEmailProviderConfig.mockResolvedValue({ provider: 'resend', apiKey: '' })
+    mockGetEmailProviderConfig.mockResolvedValue({ provider: 'resend', credentials: { apiKey: '' } })
     mockGetSmtpSettings.mockResolvedValue(DB_SETTINGS_HOST)
     const errSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined)
 
@@ -98,11 +112,22 @@ describe('buildTransport — dispatch provider (contrat §5)', () => {
     expect(mockCreateApiTransport).not.toHaveBeenCalled()
     expect(mockGetSmtpSettings).toHaveBeenCalled()
     expect(mockCreateTransport).toHaveBeenCalledWith(expect.objectContaining({ host: 'smtp.example.com' }))
-    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('email_provider=resend sans clé API'))
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('email_provider=resend sans identifiants complets'))
+  })
+
+  it("T2b: email_provider='mailjet' avec apiKey mais SANS secretKey (multi-champ incomplet) → cascade SMTP", async () => {
+    mockGetEmailProviderConfig.mockResolvedValue({ provider: 'mailjet', credentials: { apiKey: 'ak', secretKey: '' } })
+    mockGetSmtpSettings.mockResolvedValue(DB_SETTINGS_HOST)
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    await getTransporter()
+
+    expect(mockCreateApiTransport).not.toHaveBeenCalled()
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('email_provider=mailjet sans identifiants complets'))
   })
 
   it("T3: email_provider='smtp' → createApiTransport jamais appelé, cascade SMTP byte-identique", async () => {
-    mockGetEmailProviderConfig.mockResolvedValue({ provider: 'smtp', apiKey: '' })
+    mockGetEmailProviderConfig.mockResolvedValue({ provider: 'smtp', credentials: { apiKey: '' } })
     mockGetSmtpSettings.mockResolvedValue(DB_SETTINGS_HOST)
 
     await getTransporter()
@@ -145,20 +170,20 @@ describe('buildTransport — dispatch provider (contrat §5)', () => {
 describe('sendProviderTest — transport ad-hoc, ne lève jamais', () => {
   beforeEach(() => {
     jest.clearAllMocks()
-    mockCreateApiTransport.mockReturnValue({ name: 'Resend' })
+    mockCreateApiTransport.mockReturnValue({ name: 'resend' })
     mockVerify.mockResolvedValue(undefined)
     mockSendMail.mockResolvedValue({ messageId: 'id-1' })
   })
 
   it('T6: succès — verify() puis sendMail(), close() toujours appelé, message générique', async () => {
     const result = await sendProviderTest(
-      { provider: 'resend', apiKey: 'abc', fromName: 'MonApp', fromEmail: 'from@example.com' },
+      { provider: 'resend', credentials: { apiKey: 'abc' }, fromName: 'MonApp', fromEmail: 'from@example.com' },
       'admin@example.com',
       { html: '<p>hi</p>', text: 'hi' },
     )
 
     expect(result).toEqual({ success: true, message: 'Connexion réussie' })
-    expect(mockCreateApiTransport).toHaveBeenCalledWith('resend', 'abc')
+    expect(mockCreateApiTransport).toHaveBeenCalledWith('resend', { apiKey: 'abc' })
     expect(mockVerify).toHaveBeenCalledTimes(1)
     expect(mockSendMail).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -171,40 +196,50 @@ describe('sendProviderTest — transport ad-hoc, ne lève jamais', () => {
     expect(mockClose).toHaveBeenCalledTimes(1)
   })
 
+  it('T6b: mailjet — credentials multi-champ transmis tels quels au transport', async () => {
+    await sendProviderTest(
+      { provider: 'mailjet', credentials: { apiKey: 'ak', secretKey: 'sk' } },
+      'admin@example.com',
+      { html: 'h', text: 't' },
+    )
+
+    expect(mockCreateApiTransport).toHaveBeenCalledWith('mailjet', { apiKey: 'ak', secretKey: 'sk' })
+  })
+
   it("T7: verify() rejette (mauvaise clé) → success:false, message propagé tel quel (jamais de faux succès)", async () => {
-    const eauthErr = Object.assign(new Error('Clé API Resend refusée (401): Invalid API key'), { code: 'EAUTH' })
+    const eauthErr = Object.assign(new Error('Clé API refusée (401): Invalid API key'), { code: 'EAUTH' })
     mockVerify.mockRejectedValue(eauthErr)
 
-    const result = await sendProviderTest({ provider: 'resend', apiKey: 'bad' }, 'admin@example.com', { html: 'h', text: 't' })
+    const result = await sendProviderTest({ provider: 'resend', credentials: { apiKey: 'bad' } }, 'admin@example.com', { html: 'h', text: 't' })
 
     expect(result.success).toBe(false)
-    expect(result.message).toBe('Clé API Resend refusée (401): Invalid API key')
+    expect(result.message).toBe('Clé API refusée (401): Invalid API key')
     expect(mockSendMail).not.toHaveBeenCalled()
     expect(mockClose).toHaveBeenCalledTimes(1)
   })
 
   it('T8: sendMail() rejette après verify() réussi → success:false, message propagé', async () => {
-    mockSendMail.mockRejectedValue(new Error('Requête Resend rejetée (400): destinataire invalide'))
+    mockSendMail.mockRejectedValue(new Error('Requête rejetée (400): destinataire invalide'))
 
-    const result = await sendProviderTest({ provider: 'resend', apiKey: 'abc' }, 'admin@example.com', { html: 'h', text: 't' })
+    const result = await sendProviderTest({ provider: 'resend', credentials: { apiKey: 'abc' } }, 'admin@example.com', { html: 'h', text: 't' })
 
-    expect(result).toEqual({ success: false, message: 'Requête Resend rejetée (400): destinataire invalide' })
+    expect(result).toEqual({ success: false, message: 'Requête rejetée (400): destinataire invalide' })
   })
 
   it("T9: from par défaut '\"TimePick\" <recipient>' quand fromName/fromEmail absents", async () => {
-    await sendProviderTest({ provider: 'resend', apiKey: 'abc' }, 'admin@example.com', { html: 'h', text: 't' })
+    await sendProviderTest({ provider: 'resend', credentials: { apiKey: 'abc' } }, 'admin@example.com', { html: 'h', text: 't' })
 
     expect(mockSendMail).toHaveBeenCalledWith(expect.objectContaining({ from: '"TimePick" <admin@example.com>' }))
   })
 
   it('T10: ne lève jamais même si la construction du transport échoue', async () => {
     mockCreateApiTransport.mockImplementation(() => {
-      throw new Error('Transport Brevo non implémenté')
+      throw new Error('Descripteur introuvable')
     })
 
     await expect(
-      sendProviderTest({ provider: 'resend', apiKey: 'abc' }, 'a@b.com', { html: 'h', text: 't' }),
-    ).resolves.toEqual({ success: false, message: 'Transport Brevo non implémenté' })
+      sendProviderTest({ provider: 'resend', credentials: { apiKey: 'abc' } }, 'a@b.com', { html: 'h', text: 't' }),
+    ).resolves.toEqual({ success: false, message: 'Descripteur introuvable' })
     expect(mockClose).not.toHaveBeenCalled() // transport jamais construit → rien à fermer
   })
 })

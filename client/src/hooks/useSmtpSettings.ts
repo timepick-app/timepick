@@ -5,13 +5,31 @@ import {
   testSmtpConnection,
   clearSmtpSettings,
   getAdminHealth,
+  getEmailProvidersCatalog,
   type SmtpSettings,
   type EmailSettingsPayload,
   type SmtpTestResult,
   type AdminHealthResponse,
+  type ProviderMeta,
 } from '../services/settings.service'
 import { toast } from 'sonner'
 import { extractErrorMessage } from '@/lib/extractErrorMessage'
+
+/**
+ * Catalogue des fournisseurs email HTTP (contrat §1/§3.1) — statique côté
+ * serveur (descripteurs figés au déploiement), staleTime long pour éviter
+ * un refetch à chaque montage. `variant` : `'admin'` (SmtpConfigPanel) ou
+ * `'setup'` (wizard, endpoint public gated).
+ */
+export const useEmailProvidersCatalog = (variant: 'admin' | 'setup' = 'admin') => {
+  return useQuery<ProviderMeta[]>({
+    queryKey: ['settings', 'email-providers', variant],
+    queryFn: () => getEmailProvidersCatalog(variant),
+    staleTime: 24 * 60 * 60 * 1000,
+    refetchInterval: false,
+    retry: false,
+  })
+}
 
 /**
  * Fetch SMTP settings with React Query

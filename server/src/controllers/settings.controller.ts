@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express'
 import { getSmtpSettings, saveSmtpSettings, clearSmtpSettings } from '../db/settings.db'
-import { getEmailProviderConfig, saveEmailProviderConfig, clearEmailProviderConfig } from '../db/email-provider.db'
+import { getEmailProviderConfig, saveEmailProviderConfig, clearEmailProviderConfig, type EmailProvider } from '../db/email-provider.db'
 import { invalidateTransportCache, sendBrandedSmtpTest, sendBrandedProviderTest } from '../services/email.service'
 import { query } from '../db'
 import {
@@ -9,20 +9,38 @@ import {
   emailApiProviderSettingsSchema,
 } from '../validators/settings.validator'
 import { formatApiError } from '../validators/config.validator'
+import { getProviderMeta } from '../services/email-transport/descriptors'
+import {
+  catalogSecretFieldsResolver,
+  maskCredentialsForResponse,
+  needsStoredCredentialLookup,
+  resolveProviderCredentials,
+} from '../services/email-transport/provider-credentials'
 
 /**
  * Récupérer les paramètres SMTP
  * GET /api/admin/settings/smtp
  *
- * Retourne la config SMTP complète avec le mot de passe masqué, ainsi que le
- * provider email actif (Chantier C) — la clé API du provider est masquée
- * ('****' si stockée, '' sinon), jamais en clair.
+ * Retourne la config SMTP complète avec le mot de passe SMTP **déchiffré** (clair,
+ * route admin authentifiée ; comportement intentionnel), ainsi que le
+ * provider email actif et ses `credentials` masquées champ par champ
+ * (contrat §4.1 : secrets → '****'/'', non-secrets en clair ; fail-safe si
+ * descripteur inconnu → tout masquer). `emailApiKey` reste renvoyé par
+ * compat (= `credentials.apiKey`, déprécié).
  */
 export const getSmtpSettingsHandler = async (req: Request, res: Response): Promise<void> => {
   try {
     const settings = await getSmtpSettings()
-    const { provider, apiKey } = await getEmailProviderConfig()
-    res.json({ data: { ...settings, emailProvider: provider, emailApiKey: apiKey ? '****' : '' } })
+    const { provider, credentials } = await getEmailProviderConfig(catalogSecretFieldsResolver)
+    const maskedCredentials = maskCredentialsForResponse(provider, credentials)
+    res.json({
+      data: {
+        ...settings,
+        emailProvider: provider,
+        emailApiKey: maskedCredentials.apiKey ?? '',
+        credentials: maskedCredentials,
+      },
+    })
   } catch (error) {
     console.error('[SettingsController] Error fetching SMTP settings:', error)
     res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Erreur lors de la récupération des paramètres SMTP' } })
@@ -36,10 +54,13 @@ export const getSmtpSettingsHandler = async (req: Request, res: Response): Promi
  * Valide les paramètres, chiffre le mot de passe si nécessaire,
  * et sauvegarde en base. Le sentinelle "****" préserve l'ancien mot de passe.
  *
- * Chantier C — dispatch par body.provider : absent/'smtp' → chemin historique
- * intact (ci-dessous) + saveEmailProviderConfig({provider:'smtp'}) pour rendre
- * la bascule resend→smtp effective ; 'resend' → schéma API provider (clé +
- * champs from communs, optionnels) ; 'brevo' → 400 (rejeté par le validateur).
+ * Chantier email-providers (B2) — dispatch par body.provider : absent/'smtp'
+ * → chemin historique intact (ci-dessous) + saveEmailProviderConfig({provider:'smtp'})
+ * pour rendre la bascule HTTP→smtp effective ; tout autre id du catalogue →
+ * schéma data-driven (`credentials` multi-champ). Résolution des sentinelles
+ * SCOPÉE au provider stocké (contrat §4.2/§7.7, durcissement revue delta 1) :
+ * un champ requis toujours vide après résolution → 400 (jamais de fusion
+ * inter-fournisseurs, jamais d'écriture partielle en DB).
  */
 export const saveSmtpSettingsHandler = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -47,12 +68,30 @@ export const saveSmtpSettingsHandler = async (req: Request, res: Response): Prom
 
     if (provider && provider !== 'smtp') {
       const validatedData = emailApiProviderSettingsSchema.parse(req.body)
-      await saveEmailProviderConfig({ provider: validatedData.provider, apiKey: validatedData.emailApiKey })
+      const meta = getProviderMeta(validatedData.provider)
+      if (!meta) {
+        // Filet défensif — déjà rejeté par le schéma ci-dessus en principe.
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Fournisseur email non supporté' } })
+        return
+      }
 
-      const fromFields: { smtpFromName?: string; smtpFromEmail?: string } = {}
-      if (validatedData.smtpFromName !== undefined) fromFields.smtpFromName = validatedData.smtpFromName
-      if (validatedData.smtpFromEmail !== undefined) fromFields.smtpFromEmail = validatedData.smtpFromEmail
-      if (Object.keys(fromFields).length > 0) await saveSmtpSettings(fromFields)
+      const stored = needsStoredCredentialLookup(meta, validatedData.credentials)
+        ? await getEmailProviderConfig(catalogSecretFieldsResolver)
+        : { provider: 'smtp' as EmailProvider, credentials: {} }
+
+      const { raw, missingLabels } = resolveProviderCredentials(meta, validatedData.credentials, stored.provider, stored.credentials)
+      if (missingLabels.length > 0) {
+        res.status(400).json({
+          error: { code: 'VALIDATION_ERROR', message: `Champ(s) requis manquant(s) : ${missingLabels.join(', ')}.` },
+        })
+        return
+      }
+
+      await saveEmailProviderConfig({ provider: meta.id as EmailProvider, credentials: raw }, catalogSecretFieldsResolver)
+      await saveSmtpSettings({
+        ...(validatedData.smtpFromName !== undefined ? { smtpFromName: validatedData.smtpFromName } : {}),
+        smtpFromEmail: validatedData.smtpFromEmail ?? '',
+      })
     } else {
       const validatedData = smtpSettingsSchema.parse(req.body)
       // Convert port from number to string for DB layer
@@ -104,9 +143,10 @@ async function resolveAdminEmail(req: Request, res: Response): Promise<string | 
  * Les paramètres viennent du body (pas de la DB) pour permettre
  * le test avant sauvegarde.
  *
- * Chantier C — body.provider:'resend' dispatche vers le transport API : la
- * clé résolue (fournie, ou sentinelle/'' → clé stockée) est testée par un
- * vrai verify() + envoi ; sans clé disponible, réponse { success:false } sans
+ * Chantier email-providers (B2) — body.provider ≠ 'smtp' dispatche vers le
+ * transport API : credentials résolus PAR CHAMP, sentinelle SCOPÉE au
+ * provider stocké (même garde-fou que le PUT, contrat §4.3/§7.7) — sans
+ * valeur utilisable pour un champ requis, réponse { success:false } sans
  * jamais construire de transport. La blocklist d'IPs privées (chemin SMTP
  * historique) ne s'applique pas ici — hors de propos pour une API HTTPS.
  */
@@ -115,23 +155,29 @@ export const testSmtpConnectionHandler = async (req: Request, res: Response): Pr
     const provider = typeof req.body?.provider === 'string' ? req.body.provider : undefined
 
     if (provider && provider !== 'smtp') {
-      // Test admin : mêmes champs que la sauvegarde ; la sentinelle **** est résolue plus bas (clé stockée) → vrai appel authentifié.
       const validated = emailApiProviderSettingsSchema.parse(req.body)
       const adminEmail = await resolveAdminEmail(req, res)
       if (!adminEmail) return
 
-      let apiKey = validated.emailApiKey
-      if (!apiKey || apiKey === '****') {
-        apiKey = (await getEmailProviderConfig()).apiKey
+      const meta = getProviderMeta(validated.provider)
+      if (!meta) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Fournisseur email non supporté' } })
+        return
       }
-      if (!apiKey) {
-        res.json({ success: false, message: 'Aucune clé API configurée pour ce provider.' })
+
+      const stored = needsStoredCredentialLookup(meta, validated.credentials)
+        ? await getEmailProviderConfig(catalogSecretFieldsResolver)
+        : { provider: 'smtp' as EmailProvider, credentials: {} }
+
+      const { resolved, missingLabels } = resolveProviderCredentials(meta, validated.credentials, stored.provider, stored.credentials)
+      if (missingLabels.length > 0) {
+        res.json({ success: false, message: `Champ(s) requis manquant(s) pour ce fournisseur : ${missingLabels.join(', ')}.` })
         return
       }
 
       res.json(
         await sendBrandedProviderTest(
-          { provider: validated.provider, apiKey, fromName: validated.smtpFromName, fromEmail: validated.smtpFromEmail },
+          { provider: meta.id as Exclude<EmailProvider, 'smtp'>, credentials: resolved, fromName: validated.smtpFromName, fromEmail: validated.smtpFromEmail },
           adminEmail,
         ),
       )

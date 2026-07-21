@@ -21,20 +21,22 @@ import {
   useTestSmtpConnection,
   useClearSmtpSettings,
   useAdminHealth,
+  useEmailProvidersCatalog,
 } from '@/hooks/useSmtpSettings'
-import type { EmailProvider, EmailSettingsPayload, SmtpSettingsPayload } from '@/services/settings.service'
-import { SmtpFields } from '@/components/smtp/SmtpFields'
+import type { EmailProvider, EmailSettingsPayload, SmtpSettingsPayload, ProviderMeta } from '@/services/settings.service'
+import { SmtpFields, validateProviderCredentials } from '@/components/smtp/SmtpFields'
 import type { SmtpFieldsValues } from '@/components/smtp/SmtpFields'
 import { EMAIL_RE } from '@/lib/email'
 
 /** Sentinel value returned by the API when a password exists */
 const DEFAULT_PORT = 587
+const SMTP_PROVIDER = 'smtp' as const
 
 type FormValues = SmtpFieldsValues
 
 const initialFormValues: FormValues = {
-  emailProvider: 'smtp',
-  emailApiKey: '',
+  emailProvider: SMTP_PROVIDER,
+  credentials: {},
   smtpHost: '',
   smtpPort: String(DEFAULT_PORT),
   smtpSecure: false,
@@ -44,27 +46,37 @@ const initialFormValues: FormValues = {
   smtpFromEmail: '',
 }
 
+/** Deux Records de credentials sont équivalents s'ils ont le même jeu de clés
+ *  et les mêmes valeurs (utilisé pour le calcul de `isDirty`). */
+const credentialsEqual = (a: Record<string, string> | undefined, b: Record<string, string> | undefined): boolean => {
+  const aKeys = Object.keys(a ?? {})
+  const bKeys = Object.keys(b ?? {})
+  if (aKeys.length !== bKeys.length) return false
+  return aKeys.every(k => (a ?? {})[k] === (b ?? {})[k])
+}
+
 /**
- * Validate SMTP/Resend form values.
+ * Validate SMTP / fournisseur HTTP form values.
  * Returns an object with field names as keys and error messages as values.
  * Empty object means no errors.
  */
-const validateSmtpForm = (values: FormValues): Record<string, string> => {
+const validateSmtpForm = (
+  values: FormValues,
+  catalog: ProviderMeta[],
+  storedProvider: EmailProvider | undefined,
+  storedCredentials: Record<string, string> | undefined,
+): Record<string, string> => {
   const errors: Record<string, string> = {}
 
-  if (values.emailProvider === 'resend') {
-    // La clé peut être la sentinelle '****' (clé déjà stockée côté serveur) —
-    // seule une valeur vide est invalide.
-    if (!values.emailApiKey) {
-      errors.emailApiKey = 'La clé API Resend est requise'
-    }
-  } else {
+  if (values.emailProvider === SMTP_PROVIDER) {
     // smtpHost is optional — blank = disable SMTP (triggers DELETE via handleSave)
     // Only validate port format when host is set
     const port = Number(values.smtpPort)
     if (values.smtpHost && (!values.smtpPort || isNaN(port) || port < 1 || port > 65535)) {
       errors.smtpPort = 'Le port doit être entre 1 et 65535'
     }
+  } else {
+    Object.assign(errors, validateProviderCredentials(values, catalog, storedProvider, storedCredentials))
   }
 
   if (values.smtpFromEmail && !EMAIL_RE.test(values.smtpFromEmail)) {
@@ -75,28 +87,28 @@ const validateSmtpForm = (values: FormValues): Record<string, string> => {
 }
 
 /**
- * SMTP status badge — 4 states, generalisé pour Resend :
+ * SMTP status badge — 4 états, générique quel que soit le fournisseur :
  *   non configuré      → "Non configuré"
  *   configuré + loading → "Vérification…"
- *   configuré + healthy → "Opérationnel" (ou "Opérationnel via Resend")
+ *   configuré + healthy → "Opérationnel"
  *   configuré + unhealthy → "Non joignable"
  *   UI timeout          → "Statut inconnu"
  */
 interface SmtpStatusBadgeProps {
   provider: EmailProvider
   smtpHost: string | undefined
-  emailApiKey: string | undefined
+  credentials: Record<string, string> | undefined
   healthy: boolean | null | undefined
   healthLoading: boolean
   smtpTimeout: boolean
 }
 
-const SmtpStatusBadge = ({ provider, smtpHost, emailApiKey, healthy, healthLoading, smtpTimeout }: SmtpStatusBadgeProps) => {
-  const configured = provider === 'resend' ? !!emailApiKey : !!smtpHost
+const SmtpStatusBadge = ({ provider, smtpHost, credentials, healthy, healthLoading, smtpTimeout }: SmtpStatusBadgeProps) => {
+  const configured = provider === SMTP_PROVIDER ? !!smtpHost : Object.values(credentials ?? {}).some(Boolean)
   if (!configured) return <Badge variant="default">Non configuré</Badge>
   if (smtpTimeout) return <Badge variant="default">Statut inconnu</Badge>
   if (healthLoading) return <Badge variant="default">Vérification…</Badge>
-  if (healthy === true) return <Badge variant="success">{provider === 'resend' ? 'Opérationnel via Resend' : 'Opérationnel'}</Badge>
+  if (healthy === true) return <Badge variant="success">Opérationnel</Badge>
   if (healthy === false) return <Badge variant="destructive">Non joignable</Badge>
   return <Badge variant="default">Chargement…</Badge>
 }
@@ -123,16 +135,17 @@ export const SmtpConfigPanel = ({ className }: SmtpConfigPanelProps) => {
   const { mutate: testConnection, isPending: isTesting } = useTestSmtpConnection()
   const { mutate: clearSettings, isPending: isClearing, error: clearError } = useClearSmtpSettings()
   const { data: healthData, isLoading: isHealthLoading, refetch: refetchHealth } = useAdminHealth()
+  const { data: catalog = [], isLoading: isCatalogLoading } = useEmailProvidersCatalog()
 
   const [formValues, setFormValues] = useState<FormValues>(initialFormValues)
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
   const [smtpTimeout, setSmtpTimeout] = useState(false)
   const [syncedSettings, setSyncedSettings] = useState<typeof settings>(undefined)
 
-  const provider: EmailProvider = settings?.emailProvider ?? 'smtp'
+  const provider: EmailProvider = settings?.emailProvider ?? SMTP_PROVIDER
   const smtpHost = settings?.smtpHost
-  const emailApiKey = settings?.emailApiKey
-  const isConfigured = provider === 'resend' ? !!emailApiKey : !!smtpHost
+  const credentials = settings?.credentials
+  const isConfigured = provider === SMTP_PROVIDER ? !!smtpHost : Object.values(credentials ?? {}).some(Boolean)
   const smtpHealthy = healthData?.services?.smtp?.healthy ?? null
 
   // Resync hors-effet : aligne le formulaire sur les réglages fetchés dès que
@@ -140,8 +153,8 @@ export const SmtpConfigPanel = ({ className }: SmtpConfigPanelProps) => {
   if (settings && settings !== syncedSettings) {
     setSyncedSettings(settings)
     setFormValues({
-      emailProvider: settings.emailProvider || 'smtp',
-      emailApiKey: settings.emailApiKey || '',
+      emailProvider: settings.emailProvider || SMTP_PROVIDER,
+      credentials: settings.credentials ?? {},
       smtpHost: settings.smtpHost || '',
       smtpPort: settings.smtpPort || String(DEFAULT_PORT),
       smtpSecure: settings.smtpSecure ?? false,
@@ -168,10 +181,10 @@ export const SmtpConfigPanel = ({ className }: SmtpConfigPanelProps) => {
 
   // Local validation
   const validate = useCallback(() => {
-    const errors = validateSmtpForm(formValues)
+    const errors = validateSmtpForm(formValues, catalog, settings?.emailProvider, settings?.credentials)
     setValidationErrors(errors)
     return Object.keys(errors).length === 0
-  }, [formValues])
+  }, [formValues, catalog, settings])
 
   // Build payload from form values (converts port string → number)
   const buildSmtpPayload = useCallback((): SmtpSettingsPayload => ({
@@ -184,20 +197,20 @@ export const SmtpConfigPanel = ({ className }: SmtpConfigPanelProps) => {
     smtpFromEmail: formValues.smtpFromEmail || undefined,
   }), [formValues])
 
-  const buildResendPayload = useCallback((): EmailSettingsPayload => ({
-    provider: 'resend',
-    emailApiKey: formValues.emailApiKey || '****',
+  const buildProviderPayload = useCallback((): EmailSettingsPayload => ({
+    provider: formValues.emailProvider,
+    credentials: formValues.credentials,
     smtpFromName: formValues.smtpFromName || undefined,
     smtpFromEmail: formValues.smtpFromEmail || undefined,
   }), [formValues])
 
   // Save handler — smtp: empty host triggers DELETE (clear config), else PUT
-  // with an explicit provider:'smtp'. resend: PUT with the resend payload.
+  // with an explicit provider:'smtp'. HTTP: PUT with the provider payload.
   const handleSave = () => {
     if (!validate()) return
 
-    if (formValues.emailProvider === 'resend') {
-      saveSettings(buildResendPayload(), { onSuccess: () => { void refetchHealth() } })
+    if (formValues.emailProvider !== SMTP_PROVIDER) {
+      saveSettings(buildProviderPayload(), { onSuccess: () => { void refetchHealth() } })
       return
     }
 
@@ -206,22 +219,22 @@ export const SmtpConfigPanel = ({ className }: SmtpConfigPanelProps) => {
       return
     }
 
-    saveSettings({ ...buildSmtpPayload(), provider: 'smtp' }, { onSuccess: () => { void refetchHealth() } })
+    saveSettings({ ...buildSmtpPayload(), provider: SMTP_PROVIDER }, { onSuccess: () => { void refetchHealth() } })
   }
 
   // Test connection handler
   const handleTestConnection = () => {
     if (!validate()) return
 
-    testConnection(formValues.emailProvider === 'resend' ? buildResendPayload() : buildSmtpPayload())
+    testConnection(formValues.emailProvider !== SMTP_PROVIDER ? buildProviderPayload() : buildSmtpPayload())
   }
 
   // Reset handler
   const handleReset = () => {
     if (settings) {
       setFormValues({
-        emailProvider: settings.emailProvider || 'smtp',
-        emailApiKey: settings.emailApiKey || '',
+        emailProvider: settings.emailProvider || SMTP_PROVIDER,
+        credentials: settings.credentials ?? {},
         smtpHost: settings.smtpHost || '',
         smtpPort: settings.smtpPort || String(DEFAULT_PORT),
         smtpSecure: settings.smtpSecure ?? false,
@@ -249,8 +262,8 @@ export const SmtpConfigPanel = ({ className }: SmtpConfigPanelProps) => {
 
   const isBusy = isLoading || isSaving || isTesting || isClearing
   const isDirty = settings != null && (
-       formValues.emailProvider !== (settings.emailProvider || 'smtp')
-    || formValues.emailApiKey   !== (settings.emailApiKey   || '')
+       formValues.emailProvider !== (settings.emailProvider || SMTP_PROVIDER)
+    || !credentialsEqual(formValues.credentials, settings.credentials)
     || formValues.smtpHost      !== (settings.smtpHost      || '')
     || formValues.smtpPort      !== (settings.smtpPort      || String(DEFAULT_PORT))
     || formValues.smtpSecure    !== (settings.smtpSecure    ?? false)
@@ -268,7 +281,7 @@ export const SmtpConfigPanel = ({ className }: SmtpConfigPanelProps) => {
           <SmtpStatusBadge
             provider={provider}
             smtpHost={smtpHost}
-            emailApiKey={emailApiKey}
+            credentials={credentials}
             healthy={smtpHealthy}
             healthLoading={isHealthLoading}
             smtpTimeout={smtpTimeout}
@@ -288,9 +301,9 @@ export const SmtpConfigPanel = ({ className }: SmtpConfigPanelProps) => {
           <Banner variant="warning" role="alert" data-testid="smtp-health-warning">
             <AlertTriangle className="h-4 w-4" />
             <BannerDescription>
-              {provider === 'resend'
-                ? "Le fournisseur d'email (Resend) est configuré mais non joignable. Les emails ne seront pas envoyés."
-                : 'Le serveur SMTP est configuré mais non joignable. Les emails ne seront pas envoyés.'}
+              {provider === SMTP_PROVIDER
+                ? 'Le serveur SMTP est configuré mais non joignable. Les emails ne seront pas envoyés.'
+                : "Le fournisseur d'email est configuré mais non joignable. Les emails ne seront pas envoyés."}
             </BannerDescription>
           </Banner>
         )}
@@ -315,6 +328,10 @@ export const SmtpConfigPanel = ({ className }: SmtpConfigPanelProps) => {
           onChange={updateField}
           errors={validationErrors}
           disabled={isBusy}
+          catalog={catalog}
+          catalogLoading={isCatalogLoading}
+          storedProvider={settings?.emailProvider}
+          storedCredentials={settings?.credentials}
         />
 
         {/* Action buttons */}
@@ -329,16 +346,16 @@ export const SmtpConfigPanel = ({ className }: SmtpConfigPanelProps) => {
                   data-testid="smtp-disable-btn"
                   className="sm:mr-auto"
                 >
-                  {isClearing ? 'Désactivation...' : provider === 'resend' ? "Désactiver l'envoi d'emails" : 'Désactiver SMTP'}
+                  {isClearing ? 'Désactivation...' : provider === SMTP_PROVIDER ? 'Désactiver SMTP' : "Désactiver l'envoi d'emails"}
                 </Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
-                  <AlertDialogTitle>{provider === 'resend' ? "Désactiver l'envoi d'emails ?" : 'Désactiver la configuration SMTP ?'}</AlertDialogTitle>
+                  <AlertDialogTitle>{provider === SMTP_PROVIDER ? 'Désactiver la configuration SMTP ?' : "Désactiver l'envoi d'emails ?"}</AlertDialogTitle>
                   <AlertDialogDescription>
-                    {provider === 'resend'
-                      ? "La configuration du fournisseur d'email (clé API comprise) et les réglages SMTP seront supprimés. Les emails seront désactivés en production jusqu'à ce qu'une nouvelle configuration soit ajoutée. Cette action ne peut pas être annulée."
-                      : "La configuration SMTP sera supprimée. Les emails seront désactivés en production jusqu'à ce qu'une nouvelle configuration soit ajoutée. Cette action ne peut pas être annulée."}
+                    {provider === SMTP_PROVIDER
+                      ? "La configuration SMTP sera supprimée. Les emails seront désactivés en production jusqu'à ce qu'une nouvelle configuration soit ajoutée. Cette action ne peut pas être annulée."
+                      : "La configuration du fournisseur d'email (identifiants compris) et les réglages SMTP seront supprimés. Les emails seront désactivés en production jusqu'à ce qu'une nouvelle configuration soit ajoutée. Cette action ne peut pas être annulée."}
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>

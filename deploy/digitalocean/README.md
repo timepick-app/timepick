@@ -112,7 +112,7 @@ Le bouton **« Tester la connexion »** du wizard setup (ou tout bouton équival
 
 - **Magic-link reçu : OUI** → SMTP sortant 587/465 fonctionne réellement sur App Platform pour ce fournisseur/port. La cible est validée pour la prod.
 - **Magic-link reçu : NON** (ports 587/465 bloqués ou droppés silencieusement) → **App Platform n'est PAS un Droplet** : il n'existe **aucun repli sur le port 2525** ici (le repli 2525 documenté ailleurs suppose un accès réseau bas niveau type Droplet/VM, absent sur une PaaS managée type App Platform). Dans ce cas, deux options :
-  1. basculer l'envoi transactionnel vers un **transport email HTTP** (API HTTPS du fournisseur SMTP, ex. Brevo/SendGrid/Postmark via leur API REST plutôt que le protocole SMTP — c'est le périmètre du chantier C, hors scope de ce kit) ;
+  1. basculer l'envoi transactionnel vers un **transport email HTTP** — TimePick propose nativement Brevo, Mailjet, Scaleway et Sweego (fournisseurs européens) ainsi que Resend (US, en dernier recours) via son sélecteur **Envoi par API (HTTP)**, plutôt que le protocole SMTP (voir [Fournisseurs SMTP — Envoi par API (HTTP)](https://timepick.docs.jensen-siu.net/configuration/smtp-fournisseurs#envoi-par-api-http) — c'était le périmètre du chantier C, hors scope de ce kit) ;
   2. ou changer de cible de déploiement pour une plateforme offrant un accès réseau sortant moins restreint (ex. un Droplet classique, cf. kit correspondant si disponible).
 
 Ce verdict doit être binaire et daté — ne jamais l'inférer par extrapolation depuis un autre déploiement PaaS (chaque plateforme filtre différemment son trafic égress SMTP).

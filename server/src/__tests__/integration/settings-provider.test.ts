@@ -27,13 +27,14 @@ jest.mock('../../services/email.service', () => {
 })
 
 /**
- * Tests d'intégration Chantier C — dispatch provider (`body.provider`) des
- * routes admin SMTP existantes : GET expose emailProvider/emailApiKey masqués,
- * PUT/POST dispatchent par provider, DELETE réinitialise aussi le provider.
- * Ne duplique PAS les cas déjà couverts par settings.test.ts (chemin smtp
- * historique, validation, protection des routes).
+ * Tests d'intégration Chantier email-providers (B2) — dispatch provider
+ * (`body.provider`) DATA-DRIVEN des routes admin SMTP existantes : GET
+ * expose emailProvider/credentials masquées PAR CHAMP, PUT/POST dispatchent
+ * par provider avec un modèle `credentials` multi-champ, DELETE réinitialise
+ * aussi le provider. Ne duplique PAS les cas déjà couverts par
+ * settings.test.ts (chemin smtp historique, validation, protection des routes).
  */
-describe('SMTP Settings API — dispatch provider (Chantier C)', () => {
+describe('SMTP Settings API — dispatch provider data-driven (chantier email-providers)', () => {
   let adminToken: string
   let adminEmail: string
 
@@ -74,31 +75,50 @@ describe('SMTP Settings API — dispatch provider (Chantier C)', () => {
     })
     ;(settingsDb.saveSmtpSettings as jest.Mock).mockResolvedValue(undefined)
     ;(settingsDb.clearSmtpSettings as jest.Mock).mockResolvedValue(undefined)
-    ;(emailProviderDb.getEmailProviderConfig as jest.Mock).mockResolvedValue({ provider: 'smtp', apiKey: '' })
+    ;(emailProviderDb.getEmailProviderConfig as jest.Mock).mockResolvedValue({ provider: 'smtp', credentials: { apiKey: '' } })
     ;(emailProviderDb.saveEmailProviderConfig as jest.Mock).mockResolvedValue(undefined)
     ;(emailProviderDb.clearEmailProviderConfig as jest.Mock).mockResolvedValue(undefined)
   })
 
   // ===================================================
-  // GET — expose emailProvider + emailApiKey masqué
+  // GET — expose emailProvider + credentials masquées PAR CHAMP
   // ===================================================
   describe('GET /api/admin/settings/smtp', () => {
-    it('expose emailProvider + emailApiKey="****" quand une clé est stockée', async () => {
-      ;(emailProviderDb.getEmailProviderConfig as jest.Mock).mockResolvedValue({ provider: 'resend', apiKey: 're_stored_key' })
+    it('mailjet — champs secrets → "****", champs non-secrets absents restent \'\' (aucun champ non-secret pour mailjet)', async () => {
+      ;(emailProviderDb.getEmailProviderConfig as jest.Mock).mockResolvedValue({
+        provider: 'mailjet',
+        credentials: { apiKey: 'ak_stored', secretKey: 'sk_stored' },
+      })
 
       const res = await request(testServer())
         .get('/api/admin/settings/smtp')
         .set('Authorization', `Bearer ${adminToken}`)
 
       expect(res.status).toBe(200)
-      expect(res.body.data.emailProvider).toBe('resend')
-      expect(res.body.data.emailApiKey).toBe('****')
-      // La clé réelle ne fuite JAMAIS dans la réponse.
-      expect(JSON.stringify(res.body)).not.toContain('re_stored_key')
+      expect(res.body.data.emailProvider).toBe('mailjet')
+      expect(res.body.data.credentials).toEqual({ apiKey: '****', secretKey: '****' })
+      expect(res.body.data.emailApiKey).toBe('****') // compat §4.1
+      expect(JSON.stringify(res.body)).not.toContain('ak_stored')
+      expect(JSON.stringify(res.body)).not.toContain('sk_stored')
     })
 
-    it("expose emailApiKey='' quand aucune clé n'est stockée (provider smtp par défaut)", async () => {
-      ;(emailProviderDb.getEmailProviderConfig as jest.Mock).mockResolvedValue({ provider: 'smtp', apiKey: '' })
+    it('scaleway — champ non-secret (region, projectId) renvoyé EN CLAIR, secretKey masqué', async () => {
+      ;(emailProviderDb.getEmailProviderConfig as jest.Mock).mockResolvedValue({
+        provider: 'scaleway',
+        credentials: { secretKey: 'sec_stored', projectId: 'proj-123', region: 'fr-par' },
+      })
+
+      const res = await request(testServer())
+        .get('/api/admin/settings/smtp')
+        .set('Authorization', `Bearer ${adminToken}`)
+
+      expect(res.status).toBe(200)
+      expect(res.body.data.credentials).toEqual({ secretKey: '****', projectId: 'proj-123', region: 'fr-par' })
+      expect(JSON.stringify(res.body)).not.toContain('sec_stored')
+    })
+
+    it("expose credentials={} et emailApiKey='' quand aucune clé n'est stockée (provider smtp par défaut)", async () => {
+      ;(emailProviderDb.getEmailProviderConfig as jest.Mock).mockResolvedValue({ provider: 'smtp', credentials: {} })
 
       const res = await request(testServer())
         .get('/api/admin/settings/smtp')
@@ -108,57 +128,163 @@ describe('SMTP Settings API — dispatch provider (Chantier C)', () => {
       expect(res.body.data.emailProvider).toBe('smtp')
       expect(res.body.data.emailApiKey).toBe('')
     })
+
+    it('fail-safe masquage (delta revue 7) — descripteur inconnu (provider "smtp" avec des credentials résiduels) → tout masqué', async () => {
+      // 'smtp' n'a pas de descripteur HTTP (getProviderMeta('smtp') === undefined) : simule
+      // le cas d'un champ résiduel non nettoyé — doit être masqué, jamais renvoyé en clair.
+      ;(emailProviderDb.getEmailProviderConfig as jest.Mock).mockResolvedValue({
+        provider: 'smtp',
+        credentials: { residual: 'leftover-value' },
+      })
+
+      const res = await request(testServer())
+        .get('/api/admin/settings/smtp')
+        .set('Authorization', `Bearer ${adminToken}`)
+
+      expect(res.status).toBe(200)
+      expect(res.body.data.credentials).toEqual({ residual: '****' })
+      expect(JSON.stringify(res.body)).not.toContain('leftover-value')
+    })
   })
 
   // ===================================================
-  // PUT — dispatch par body.provider
+  // PUT — dispatch par body.provider (multi-champ)
   // ===================================================
-  describe('PUT /api/admin/settings/smtp — dispatch provider', () => {
-    it("provider:'resend' → saveEmailProviderConfig + saveSmtpSettings (from fields fournis uniquement)", async () => {
+  describe('PUT /api/admin/settings/smtp — dispatch provider multi-champ', () => {
+    it("provider:'mailjet' avec clé+secret → saveEmailProviderConfig + saveSmtpSettings (smtpFromEmail requis)", async () => {
       const res = await request(testServer())
         .put('/api/admin/settings/smtp')
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ provider: 'resend', emailApiKey: 're_new_key', smtpFromName: 'MonApp', smtpFromEmail: 'from@example.com' })
+        .send({
+          provider: 'mailjet',
+          credentials: { apiKey: 'ak_new', secretKey: 'sk_new' },
+          smtpFromName: 'MonApp',
+          smtpFromEmail: 'from@example.com',
+        })
 
       expect(res.status).toBe(200)
-      expect(emailProviderDb.saveEmailProviderConfig).toHaveBeenCalledWith({ provider: 'resend', apiKey: 're_new_key' })
+      expect(emailProviderDb.saveEmailProviderConfig).toHaveBeenCalledWith(
+        { provider: 'mailjet', credentials: { apiKey: 'ak_new', secretKey: 'sk_new' } },
+        expect.any(Function),
+      )
       expect(settingsDb.saveSmtpSettings).toHaveBeenCalledWith({ smtpFromName: 'MonApp', smtpFromEmail: 'from@example.com' })
       expect(emailService.invalidateTransportCache).toHaveBeenCalledTimes(1)
     })
 
-    it("provider:'resend' sans champs from → saveSmtpSettings n'est PAS appelé", async () => {
+    it("provider:'scaleway' avec secretKey+projectId+region → sauvegardé tel quel", async () => {
       const res = await request(testServer())
         .put('/api/admin/settings/smtp')
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ provider: 'resend', emailApiKey: 're_key' })
+        .send({
+          provider: 'scaleway',
+          credentials: { secretKey: 'sec', projectId: 'proj-1', region: 'fr-par' },
+          smtpFromEmail: 'from@example.com',
+        })
 
       expect(res.status).toBe(200)
-      expect(emailProviderDb.saveEmailProviderConfig).toHaveBeenCalledWith({ provider: 'resend', apiKey: 're_key' })
-      expect(settingsDb.saveSmtpSettings).not.toHaveBeenCalled()
+      expect(emailProviderDb.saveEmailProviderConfig).toHaveBeenCalledWith(
+        { provider: 'scaleway', credentials: { secretKey: 'sec', projectId: 'proj-1', region: 'fr-par' } },
+        expect.any(Function),
+      )
     })
 
-    it("provider:'resend' avec emailApiKey='****' (sentinelle) → préservée telle quelle vers saveEmailProviderConfig", async () => {
+    it("provider:'scaleway' avec region hors options → 400 VALIDATION_ERROR", async () => {
       const res = await request(testServer())
         .put('/api/admin/settings/smtp')
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ provider: 'resend', emailApiKey: '****' })
-
-      expect(res.status).toBe(200)
-      expect(emailProviderDb.saveEmailProviderConfig).toHaveBeenCalledWith({ provider: 'resend', apiKey: '****' })
-    })
-
-    it("provider:'brevo' → 400 VALIDATION_ERROR (rejeté par le validateur, jamais enregistrable)", async () => {
-      const res = await request(testServer())
-        .put('/api/admin/settings/smtp')
-        .set('Authorization', `Bearer ${adminToken}`)
-        .send({ provider: 'brevo', emailApiKey: 'xkeysib-x' })
+        .send({
+          provider: 'scaleway',
+          credentials: { secretKey: 'sec', projectId: 'proj-1', region: 'us-east-1' },
+          smtpFromEmail: 'from@example.com',
+        })
 
       expect(res.status).toBe(400)
       expect(res.body.error.code).toBe('VALIDATION_ERROR')
       expect(emailProviderDb.saveEmailProviderConfig).not.toHaveBeenCalled()
     })
 
-    it("body sans provider (chemin historique) → saveEmailProviderConfig({provider:'smtp'}) rend la bascule resend→smtp effective", async () => {
+    it("provider:'scaleway' avec region='****' (sentinelle sur champ non-secret) → 400, aucune écriture", async () => {
+      const res = await request(testServer())
+        .put('/api/admin/settings/smtp')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          provider: 'scaleway',
+          credentials: { secretKey: 'sec', projectId: 'proj-1', region: '****' },
+          smtpFromEmail: 'from@example.com',
+        })
+
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe('VALIDATION_ERROR')
+      expect(emailProviderDb.saveEmailProviderConfig).not.toHaveBeenCalled()
+    })
+
+    it("provider:'mailjet' sans secretKey (champ requis absent) → 400, aucune écriture", async () => {
+      const res = await request(testServer())
+        .put('/api/admin/settings/smtp')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ provider: 'mailjet', credentials: { apiKey: 'ak' }, smtpFromEmail: 'from@example.com' })
+
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe('VALIDATION_ERROR')
+      expect(emailProviderDb.saveEmailProviderConfig).not.toHaveBeenCalled()
+    })
+
+    it("provider:'resend' sans smtpFromEmail → 400 (requis pour tout provider HTTP, contrat §4.2/§7.6)", async () => {
+      const res = await request(testServer())
+        .put('/api/admin/settings/smtp')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ provider: 'resend', credentials: { apiKey: 're_key' } })
+
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe('VALIDATION_ERROR')
+      expect(emailProviderDb.saveEmailProviderConfig).not.toHaveBeenCalled()
+    })
+
+    it("provider:'resend' avec apiKey='****' (sentinelle, même provider stocké) → préservée telle quelle vers saveEmailProviderConfig", async () => {
+      ;(emailProviderDb.getEmailProviderConfig as jest.Mock).mockResolvedValue({ provider: 'resend', credentials: { apiKey: 're_stored' } })
+
+      const res = await request(testServer())
+        .put('/api/admin/settings/smtp')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ provider: 'resend', credentials: { apiKey: '****' }, smtpFromEmail: 'from@example.com' })
+
+      expect(res.status).toBe(200)
+      expect(emailProviderDb.saveEmailProviderConfig).toHaveBeenCalledWith(
+        { provider: 'resend', credentials: { apiKey: '****' } },
+        expect.any(Function),
+      )
+    })
+
+    it("durcissement revue — switch resend→mailjet avec apiKey='****' → 400, AUCUNE fuite de la clé resend stockée", async () => {
+      ;(emailProviderDb.getEmailProviderConfig as jest.Mock).mockResolvedValue({ provider: 'resend', credentials: { apiKey: 're_secret_stored' } })
+
+      const res = await request(testServer())
+        .put('/api/admin/settings/smtp')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          provider: 'mailjet',
+          credentials: { apiKey: '****', secretKey: 'sk_new' },
+          smtpFromEmail: 'from@example.com',
+        })
+
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe('VALIDATION_ERROR')
+      expect(emailProviderDb.saveEmailProviderConfig).not.toHaveBeenCalled()
+      expect(JSON.stringify(res.body)).not.toContain('re_secret_stored')
+    })
+
+    it("provider:'brevo' non reconnu → 400 VALIDATION_ERROR (id invalide, ex. faute de frappe)", async () => {
+      const res = await request(testServer())
+        .put('/api/admin/settings/smtp')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ provider: 'brevoo', credentials: { apiKey: 'xkeysib-x' }, smtpFromEmail: 'from@example.com' })
+
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe('VALIDATION_ERROR')
+      expect(emailProviderDb.saveEmailProviderConfig).not.toHaveBeenCalled()
+    })
+
+    it("body sans provider (chemin historique) → saveEmailProviderConfig({provider:'smtp'}) rend la bascule HTTP→smtp effective", async () => {
       const res = await request(testServer())
         .put('/api/admin/settings/smtp')
         .set('Authorization', `Bearer ${adminToken}`)
@@ -185,60 +311,74 @@ describe('SMTP Settings API — dispatch provider (Chantier C)', () => {
   // ===================================================
   // POST /test — dispatch par body.provider
   // ===================================================
-  describe('POST /api/admin/settings/smtp/test — dispatch provider', () => {
-    it("provider:'resend' avec clé fournie → sendBrandedProviderTest appelé avec la clé du body (pas de résolution DB)", async () => {
+  describe('POST /api/admin/settings/smtp/test — dispatch provider multi-champ', () => {
+    it("provider:'resend' avec clé fournie → sendBrandedProviderTest appelé avec les credentials du body (pas de résolution DB)", async () => {
       ;(emailService.sendBrandedProviderTest as jest.Mock).mockResolvedValue({ success: true, message: 'Connexion réussie' })
 
       const res = await request(testServer())
         .post('/api/admin/settings/smtp/test')
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ provider: 'resend', emailApiKey: 're_given_key' })
+        .send({ provider: 'resend', credentials: { apiKey: 're_given_key' }, smtpFromEmail: 'from@example.com' })
 
       expect(res.status).toBe(200)
       expect(res.body).toEqual({ success: true, message: 'Connexion réussie' })
       expect(emailProviderDb.getEmailProviderConfig).not.toHaveBeenCalled()
       expect(emailService.sendBrandedProviderTest).toHaveBeenCalledWith(
-        { provider: 'resend', apiKey: 're_given_key', fromName: undefined, fromEmail: undefined },
+        { provider: 'resend', credentials: { apiKey: 're_given_key' }, fromName: undefined, fromEmail: 'from@example.com' },
         adminEmail,
       )
     })
 
-    it("provider:'resend' avec sentinelle '****' → résout la clé RÉELLEMENT stockée", async () => {
-      ;(emailProviderDb.getEmailProviderConfig as jest.Mock).mockResolvedValue({ provider: 'resend', apiKey: 're_stored' })
+    it("provider:'resend' avec sentinelle '****' (même provider stocké) → résout la clé RÉELLEMENT stockée", async () => {
+      ;(emailProviderDb.getEmailProviderConfig as jest.Mock).mockResolvedValue({ provider: 'resend', credentials: { apiKey: 're_stored' } })
       ;(emailService.sendBrandedProviderTest as jest.Mock).mockResolvedValue({ success: true, message: 'Connexion réussie' })
 
       const res = await request(testServer())
         .post('/api/admin/settings/smtp/test')
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ provider: 'resend', emailApiKey: '****' })
+        .send({ provider: 'resend', credentials: { apiKey: '****' }, smtpFromEmail: 'from@example.com' })
 
       expect(res.status).toBe(200)
       expect(emailProviderDb.getEmailProviderConfig).toHaveBeenCalledTimes(1)
       expect(emailService.sendBrandedProviderTest).toHaveBeenCalledWith(
-        expect.objectContaining({ apiKey: 're_stored' }),
+        expect.objectContaining({ credentials: { apiKey: 're_stored' } }),
         adminEmail,
       )
     })
 
     it("provider:'resend' sans clé fournie ni stockée → {success:false} explicite, transport jamais tenté", async () => {
-      ;(emailProviderDb.getEmailProviderConfig as jest.Mock).mockResolvedValue({ provider: 'resend', apiKey: '' })
+      ;(emailProviderDb.getEmailProviderConfig as jest.Mock).mockResolvedValue({ provider: 'resend', credentials: { apiKey: '' } })
 
       const res = await request(testServer())
         .post('/api/admin/settings/smtp/test')
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ provider: 'resend' })
+        .send({ provider: 'resend', smtpFromEmail: 'from@example.com' })
 
       expect(res.status).toBe(200)
       expect(res.body.success).toBe(false)
-      expect(res.body.message).toContain('Aucune clé API configurée')
+      expect(res.body.message).toContain('requis manquant')
       expect(emailService.sendBrandedProviderTest).not.toHaveBeenCalled()
     })
 
-    it("provider:'brevo' → 400 VALIDATION_ERROR", async () => {
+    it("durcissement revue — test provider:'mailjet' avec apiKey='****' alors que resend est stocké → success:false, AUCUNE fuite de la clé resend", async () => {
+      ;(emailProviderDb.getEmailProviderConfig as jest.Mock).mockResolvedValue({ provider: 'resend', credentials: { apiKey: 're_secret_stored' } })
+
       const res = await request(testServer())
         .post('/api/admin/settings/smtp/test')
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ provider: 'brevo', emailApiKey: 'k' })
+        .send({ provider: 'mailjet', credentials: { apiKey: '****', secretKey: 'sk_new' }, smtpFromEmail: 'from@example.com' })
+
+      expect(res.status).toBe(200)
+      expect(res.body.success).toBe(false)
+      expect(emailService.sendBrandedProviderTest).not.toHaveBeenCalled()
+      expect(JSON.stringify(res.body)).not.toContain('re_secret_stored')
+    })
+
+    it("provider:'brevoo' (id invalide) → 400 VALIDATION_ERROR", async () => {
+      const res = await request(testServer())
+        .post('/api/admin/settings/smtp/test')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ provider: 'brevoo', credentials: { apiKey: 'k' }, smtpFromEmail: 'from@example.com' })
 
       expect(res.status).toBe(400)
       expect(res.body.error.code).toBe('VALIDATION_ERROR')
@@ -258,6 +398,26 @@ describe('SMTP Settings API — dispatch provider (Chantier C)', () => {
       expect(settingsDb.clearSmtpSettings).toHaveBeenCalledTimes(1)
       expect(emailProviderDb.clearEmailProviderConfig).toHaveBeenCalledTimes(1)
       expect(emailService.invalidateTransportCache).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  // ===================================================
+  // GET /api/admin/settings/email-providers — catalogue (contrat §1/§3.1)
+  // ===================================================
+  describe('GET /api/admin/settings/email-providers', () => {
+    it('catalogue EU-first / resend dernier, AUCUN secret', async () => {
+      const res = await request(testServer())
+        .get('/api/admin/settings/email-providers')
+        .set('Authorization', `Bearer ${adminToken}`)
+
+      expect(res.status).toBe(200)
+      expect(res.body.data.map((p: { id: string }) => p.id)).toEqual(['brevo', 'mailjet', 'scaleway', 'sweego', 'resend'])
+      for (const provider of res.body.data) {
+        expect(provider).not.toHaveProperty('credentials.apiKey')
+        for (const field of provider.credentialFields) {
+          expect(field).not.toHaveProperty('value')
+        }
+      }
     })
   })
 })

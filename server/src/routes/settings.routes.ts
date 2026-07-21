@@ -7,6 +7,7 @@ import {
   testSmtpConnectionHandler,
   deleteSmtpSettingsHandler
 } from '../controllers/settings.controller'
+import { getEmailProvidersCatalogHandler } from '../controllers/email-providers-catalog.controller'
 import {
   getEmailBrandSettingsHandler,
   patchEmailBrandSettingsHandler,
@@ -29,6 +30,9 @@ router.get('/smtp', getSmtpSettingsHandler)
 router.put('/smtp', saveSmtpSettingsHandler)
 router.delete('/smtp', deleteSmtpSettingsHandler)
 router.post('/smtp/test', testSmtpConnectionHandler)
+
+// Chantier email-providers (B2) — catalogue des fournisseurs HTTP (contrat §1/§3.1), aucun secret
+router.get('/email-providers', getEmailProvidersCatalogHandler)
 
 // Email brand identity (singleton — used by renderEmail() shell)
 router.get('/email-brand', getEmailBrandSettingsHandler)

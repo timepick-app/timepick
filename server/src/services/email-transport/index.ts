@@ -1,15 +1,17 @@
 import type { EmailProvider } from '../../db/email-provider.db'
-import { createResendTransport, type ResendTransport } from './resend-transport'
+import { createHttpTransport, type HttpTransport } from './http-transport'
+import { getProviderSpec } from './descriptors'
 
 /**
- * Chantier C — factory des transports API HTTP (alternative au SMTP), §4 du
- * contrat de barrière. `resend` implémenté maintenant ; `brevo` est accepté
- * par le type DB/client mais REFUSÉ par le validateur serveur (jamais
- * atteignable ici) — itération future (GET /v3/account, POST /v3/smtp/email).
+ * Chantier email-providers (B2) — factory data-driven (contrat §3.2/§4) :
+ * lookup du descripteur par `provider` → délègue au moteur générique (B1,
+ * `createHttpTransport`). Ajouter un fournisseur = un descripteur dans
+ * `descriptors/`, ZÉRO changement ici.
  */
-export function createApiTransport(provider: Exclude<EmailProvider, 'smtp'>, apiKey: string): ResendTransport {
-  if (provider === 'resend') {
-    return createResendTransport({ apiKey, baseUrl: process.env.RESEND_API_BASE_URL })
+export function createApiTransport(provider: Exclude<EmailProvider, 'smtp'>, credentials: Record<string, string>): HttpTransport {
+  const spec = getProviderSpec(provider)
+  if (!spec) {
+    throw new Error(`Descripteur introuvable pour le fournisseur '${provider}'`)
   }
-  throw new Error('Transport Brevo non implémenté — itération suivante (GET /v3/account, POST /v3/smtp/email)')
+  return createHttpTransport(spec, credentials)
 }

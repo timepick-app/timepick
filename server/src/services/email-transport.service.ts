@@ -2,6 +2,8 @@ import nodemailer from 'nodemailer';
 import { getSmtpSettings } from '../db/settings.db';
 import { getEmailProviderConfig, type EmailProvider } from '../db/email-provider.db';
 import { createApiTransport } from './email-transport';
+import { getProviderMeta } from './email-transport/descriptors';
+import { catalogSecretFieldsResolver } from './email-transport/provider-credentials';
 import type { Transporter } from 'nodemailer';
 
 /**
@@ -116,14 +118,16 @@ function looksLikeDecryptFailure(err: unknown): boolean {
 async function buildTransport(): Promise<Transporter | null> {
   let providerKeyMismatch = false
   try {
-    const { provider, apiKey }: { provider: EmailProvider; apiKey: string } = await getEmailProviderConfig()
+    const { provider, credentials }: { provider: EmailProvider; credentials: Record<string, string> } = await getEmailProviderConfig(catalogSecretFieldsResolver)
     if (provider !== 'smtp') {
-      if (apiKey) {
+      const meta = getProviderMeta(provider)
+      const missingRequired = meta?.credentialFields.filter(f => (f.required ?? true) && !credentials[f.key]) ?? []
+      if (meta && missingRequired.length === 0) {
         encryptionKeyMismatch = false
         transportSource = 'db'
-        return nodemailer.createTransport(createApiTransport(provider, apiKey))
+        return nodemailer.createTransport(createApiTransport(provider, credentials))
       }
-      console.error(`[EmailService] email_provider=${provider} sans clé API — cascade SMTP utilisée`)
+      console.error(`[EmailService] email_provider=${provider} sans identifiants complets — cascade SMTP utilisée`)
     }
   } catch (error) {
     if (looksLikeDecryptFailure(error)) {
@@ -308,16 +312,16 @@ export async function sendSmtpTest(
 }
 
 export interface ProviderTestParams {
-  provider: 'resend'
-  apiKey: string
+  provider: Exclude<EmailProvider, 'smtp'>
+  credentials: Record<string, string>
   fromName?: string
   fromEmail?: string
 }
 
-/** Teste un provider API email (Resend) ad-hoc et envoie à `recipient` le
- *  corps (html + text) fourni par l'orchestrateur. Miroir de sendSmtpTest
- *  pour le transport HTTP : verify() (GET /domains authentifié) PUIS un
- *  vrai envoi. Ne lève jamais : retourne { success, message }. */
+/** Teste un provider API email HTTP ad-hoc et envoie à `recipient` le corps
+ *  (html + text) fourni par l'orchestrateur. Miroir de sendSmtpTest pour le
+ *  transport HTTP : verify() (sonde du descripteur, skip→true si absente)
+ *  PUIS un vrai envoi. Ne lève jamais : retourne { success, message }. */
 export async function sendProviderTest(
   params: ProviderTestParams,
   recipient: string,
@@ -325,12 +329,12 @@ export async function sendProviderTest(
 ): Promise<{ success: boolean; message: string }> {
   let transport: Transporter | undefined
   try {
-    transport = nodemailer.createTransport(createApiTransport(params.provider, params.apiKey))
+    transport = nodemailer.createTransport(createApiTransport(params.provider, params.credentials))
     await transport.verify()
     await transport.sendMail({
       from: `"${params.fromName || 'TimePick'}" <${params.fromEmail || recipient}>`,
       to: recipient,
-      subject: `Test ${params.provider === 'resend' ? 'Resend' : params.provider} - TimePick`,
+      subject: `Test ${getProviderMeta(params.provider)?.label ?? params.provider} - TimePick`,
       html: body.html,
       text: body.text,
     })

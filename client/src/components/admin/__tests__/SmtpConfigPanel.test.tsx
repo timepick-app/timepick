@@ -1,16 +1,17 @@
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import userEvent, { type UserEvent } from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { SmtpConfigPanel } from '../SmtpConfigPanel'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { SmtpSettings, AdminHealthResponse } from '../../../services/settings.service'
+import type { SmtpSettings, AdminHealthResponse, ProviderMeta } from '../../../services/settings.service'
 
-// Mock the hooks — all 5 are required by the component
+// Mock the hooks — all 6 are required by the component
 const mockUseSmtpSettings = vi.fn()
 const mockUseSaveSmtpSettings = vi.fn()
 const mockUseTestSmtpConnection = vi.fn()
 const mockUseClearSmtpSettings = vi.fn()
 const mockUseAdminHealth = vi.fn()
+const mockUseEmailProvidersCatalog = vi.fn()
 
 vi.mock('../../../hooks/useSmtpSettings', () => ({
   useSmtpSettings: () => mockUseSmtpSettings(),
@@ -18,7 +19,71 @@ vi.mock('../../../hooks/useSmtpSettings', () => ({
   useTestSmtpConnection: () => mockUseTestSmtpConnection(),
   useClearSmtpSettings: () => mockUseClearSmtpSettings(),
   useAdminHealth: () => mockUseAdminHealth(),
+  useEmailProvidersCatalog: () => mockUseEmailProvidersCatalog(),
 }))
+
+// Fixture stub du catalogue (conforme contrat §3.1) — mono-champ (Brevo),
+// multi-secret (Mailjet), champ à options (Scaleway région). EU-first,
+// resend en dernier, exactement comme le catalogue réel (contrat §0/§3.1).
+const catalogFixture: ProviderMeta[] = [
+  {
+    id: 'brevo',
+    label: 'Brevo',
+    region: 'eu',
+    freeTierNote: '≈ 300 emails/jour (gratuit)',
+    credentialFields: [
+      { key: 'apiKey', label: 'Clé API', secret: true, placeholder: 'xkeysib-…' },
+    ],
+  },
+  {
+    id: 'mailjet',
+    label: 'Mailjet',
+    region: 'eu',
+    freeTierNote: '6 000 emails/mois (gratuit)',
+    credentialFields: [
+      { key: 'apiKey', label: 'Clé API', secret: true },
+      { key: 'secretKey', label: 'Clé secrète', secret: true },
+    ],
+  },
+  {
+    id: 'scaleway',
+    label: 'Scaleway',
+    region: 'eu',
+    freeTierNote: '300 emails/mois (gratuit)',
+    credentialFields: [
+      { key: 'secretKey', label: 'Clé secrète', secret: true },
+      { key: 'projectId', label: 'ID de projet', secret: false },
+      {
+        key: 'region',
+        label: 'Région',
+        secret: false,
+        options: [
+          { value: 'fr-par', label: 'Paris (fr-par)' },
+          { value: 'nl-ams', label: 'Amsterdam (nl-ams)' },
+          { value: 'pl-waw', label: 'Varsovie (pl-waw)' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'sweego',
+    label: 'Sweego',
+    region: 'eu',
+    freeTierNote: '100 emails/jour (gratuit)',
+    credentialFields: [
+      { key: 'apiKey', label: 'Clé API', secret: true },
+    ],
+  },
+  {
+    id: 'resend',
+    label: 'Resend',
+    region: 'us',
+    freeTierNote: '3 000 emails/mois (gratuit)',
+    credentialFields: [
+      { key: 'apiKey', label: 'Clé API', secret: true },
+    ],
+  },
+]
 
 const sampleSettings: SmtpSettings = {
   smtpHost: 'smtp.example.org',
@@ -108,6 +173,11 @@ describe('SmtpConfigPanel', () => {
       data: healthyHealth,
       isLoading: false,
       refetch: mockRefetchHealth,
+    })
+
+    mockUseEmailProvidersCatalog.mockReturnValue({
+      data: catalogFixture,
+      isLoading: false,
     })
   })
 
@@ -488,35 +558,272 @@ describe('SmtpConfigPanel', () => {
     })
   })
 
-  // Provider Resend — bascule, badge, payloads
-  describe('Provider Resend', () => {
-    const resendConfigured: SmtpSettings = {
-      ...emptySettings,
-      smtpFromName: 'TimePick',
-      smtpFromEmail: 'noreply@example.com',
-      emailProvider: 'resend',
-      emailApiKey: '****',
+  // Fournisseurs HTTP (catalogue) — sélecteur 2 niveaux + formulaire dynamique,
+  // remplace l'ancien bloc "Provider Resend" en dur (data-driven, contrat §1/§3.1).
+  describe('Fournisseurs HTTP (catalogue)', () => {
+    const selectCategory = async (user: UserEvent, label: string) => {
+      await user.click(screen.getByTestId('email-category-select'))
+      await user.click(await screen.findByRole('option', { name: label }))
     }
 
-    it('bascule vers Resend masque les champs SMTP et affiche la clé API', async () => {
+    const selectProvider = async (user: UserEvent, label: string) => {
+      await user.click(screen.getByTestId('email-provider-select'))
+      await user.click(await screen.findByRole('option', { name: new RegExp(`^${label}`) }))
+    }
+
+    it('bascule vers "Envoi par API (HTTP)" affiche le sous-menu EU-first (resend en dernier) et masque les champs SMTP', async () => {
       const user = userEvent.setup()
       renderPanel()
 
+      await selectCategory(user, 'Envoi par API (HTTP)')
+
       await user.click(screen.getByTestId('email-provider-select'))
-      await user.click(await screen.findByRole('option', { name: 'Resend' }))
+      const options = await screen.findAllByRole('option')
+      expect(options.map(o => o.textContent)).toEqual(['Brevo', 'Mailjet', 'Scaleway', 'Sweego', 'Resend'])
 
       expect(screen.queryByTestId('smtp-host')).not.toBeInTheDocument()
       expect(screen.queryByTestId('smtp-port')).not.toBeInTheDocument()
       expect(screen.queryByTestId('smtp-user')).not.toBeInTheDocument()
       expect(screen.queryByTestId('smtp-password')).not.toBeInTheDocument()
-      expect(screen.getByTestId('email-api-key')).toBeInTheDocument()
       // Les champs expéditeur communs restent affichés
       expect(screen.getByTestId('smtp-from-name')).toBeInTheDocument()
     })
 
-    it('badge "Non configuré" quand provider resend sans clé', () => {
+    it('fournisseur mono-champ (Brevo) affiche exactement 1 champ credential', async () => {
+      const user = userEvent.setup()
+      renderPanel()
+
+      await selectCategory(user, 'Envoi par API (HTTP)')
+      await selectProvider(user, 'Brevo')
+
+      expect(screen.getByTestId('credential-apiKey')).toBeInTheDocument()
+      expect(screen.queryByTestId('credential-secretKey')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('credential-projectId')).not.toBeInTheDocument()
+    })
+
+    it('fournisseur multi-secret (Mailjet) affiche 2 champs credential, secrets masqués', async () => {
+      const user = userEvent.setup()
+      renderPanel()
+
+      await selectCategory(user, 'Envoi par API (HTTP)')
+      await selectProvider(user, 'Mailjet')
+
+      const apiKeyInput = screen.getByTestId('credential-apiKey') as HTMLInputElement
+      const secretKeyInput = screen.getByTestId('credential-secretKey') as HTMLInputElement
+      expect(apiKeyInput.type).toBe('password')
+      expect(secretKeyInput.type).toBe('password')
+    })
+
+    it('fournisseur avec options (Scaleway) rend un <select> pour la région et 3 champs uniques', async () => {
+      const user = userEvent.setup()
+      renderPanel()
+
+      await selectCategory(user, 'Envoi par API (HTTP)')
+      await selectProvider(user, 'Scaleway')
+
+      expect(screen.getByTestId('credential-secretKey')).toBeInTheDocument()
+      expect(screen.getByTestId('credential-projectId')).toBeInTheDocument()
+      const regionTrigger = screen.getByTestId('credential-region')
+      expect(regionTrigger).toHaveAttribute('role', 'combobox')
+
+      // a11y : aucun id dupliqué sur ce fournisseur multi-champ (3 champs)
+      const ids = [
+        screen.getByTestId('credential-secretKey').id,
+        screen.getByTestId('credential-projectId').id,
+        regionTrigger.id,
+      ]
+      expect(new Set(ids).size).toBe(3)
+      expect(ids.every(Boolean)).toBe(true)
+    })
+
+    it('aucun id dupliqué dans tout le document pour un fournisseur multi-champ (Scaleway)', async () => {
+      const user = userEvent.setup()
+      renderPanel()
+
+      await selectCategory(user, 'Envoi par API (HTTP)')
+      await selectProvider(user, 'Scaleway')
+
+      const allIds = Array.from(document.querySelectorAll('[id]')).map(el => el.id).filter(Boolean)
+      expect(new Set(allIds).size).toBe(allIds.length)
+    })
+
+    it('sélectionner une option de région met à jour la valeur du champ', async () => {
+      const user = userEvent.setup()
+      renderPanel()
+
+      await selectCategory(user, 'Envoi par API (HTTP)')
+      await selectProvider(user, 'Scaleway')
+
+      await user.click(screen.getByTestId('credential-region'))
+      await user.click(await screen.findByRole('option', { name: /Amsterdam/ }))
+
+      expect(screen.getByTestId('credential-region')).toHaveTextContent('Amsterdam')
+    })
+
+    it('sauvegarde envoie { provider, credentials } avec les valeurs saisies pour un nouveau fournisseur', async () => {
+      const user = userEvent.setup()
+      renderPanel()
+
+      await selectCategory(user, 'Envoi par API (HTTP)')
+      await selectProvider(user, 'Brevo')
+
+      fireEvent.change(screen.getByTestId('credential-apiKey'), { target: { value: 'xkeysib-real-key' } })
+
+      const saveBtn = screen.getByTestId('smtp-save-btn')
+      fireEvent.click(saveBtn)
+
+      await waitFor(() => {
+        expect(mockSave).toHaveBeenCalledWith(
+          {
+            provider: 'brevo',
+            credentials: { apiKey: 'xkeysib-real-key' },
+            smtpFromName: 'TimePick',
+            smtpFromEmail: 'noreply@example.com',
+          },
+          expect.objectContaining({ onSuccess: expect.any(Function) })
+        )
+      })
+    })
+
+    it('sentinelle préservée quand le fournisseur ne change pas', async () => {
       mockUseSmtpSettings.mockReturnValue({
-        data: { ...emptySettings, emailProvider: 'resend', emailApiKey: '' },
+        data: {
+          ...emptySettings,
+          smtpFromName: 'TimePick',
+          smtpFromEmail: 'noreply@example.com',
+          emailProvider: 'mailjet',
+          credentials: { apiKey: '****', secretKey: '****' },
+        },
+        isLoading: false,
+        error: null,
+      })
+
+      renderPanel()
+
+      // Formulaire déjà sur mailjet (chargé depuis les settings) — dirty via from-name
+      fireEvent.change(screen.getByTestId('smtp-from-name'), { target: { value: 'TimePick Updated' } })
+      fireEvent.click(screen.getByTestId('smtp-save-btn'))
+
+      await waitFor(() => {
+        expect(mockSave).toHaveBeenCalledWith(
+          {
+            provider: 'mailjet',
+            credentials: { apiKey: '****', secretKey: '****' },
+            smtpFromName: 'TimePick Updated',
+            smtpFromEmail: 'noreply@example.com',
+          },
+          expect.objectContaining({ onSuccess: expect.any(Function) })
+        )
+      })
+    })
+
+    it('sentinelle scopée au provider : changer de fournisseur vide les champs secrets (anti-fuite) et force une saisie réelle', async () => {
+      mockUseSmtpSettings.mockReturnValue({
+        data: {
+          ...emptySettings,
+          smtpFromName: 'TimePick',
+          smtpFromEmail: 'noreply@example.com',
+          emailProvider: 'resend',
+          credentials: { apiKey: '****' },
+        },
+        isLoading: false,
+        error: null,
+      })
+
+      const user = userEvent.setup()
+      renderPanel()
+
+      // Le champ affiche bien la sentinelle tant qu'on reste sur resend
+      expect((screen.getByTestId('credential-apiKey') as HTMLInputElement).value).toBe('****')
+
+      // Changement de fournisseur → la sentinelle N'EST PAS reportée
+      await selectProvider(user, 'Brevo')
+      expect((screen.getByTestId('credential-apiKey') as HTMLInputElement).value).toBe('')
+
+      // Sauvegarder sans saisir de vraie clé → erreur de validation, pas d'appel save
+      fireEvent.click(screen.getByTestId('smtp-save-btn'))
+      expect(screen.getByText(/Le champ « Clé API » est requis/)).toBeInTheDocument()
+      expect(mockSave).not.toHaveBeenCalled()
+
+      // Avec une vraie valeur, la sauvegarde envoie la valeur saisie (jamais '****' de resend)
+      fireEvent.change(screen.getByTestId('credential-apiKey'), { target: { value: 'xkeysib-new-real-key' } })
+      fireEvent.click(screen.getByTestId('smtp-save-btn'))
+
+      await waitFor(() => {
+        expect(mockSave).toHaveBeenCalledWith(
+          expect.objectContaining({ provider: 'brevo', credentials: { apiKey: 'xkeysib-new-real-key' } }),
+          expect.objectContaining({ onSuccess: expect.any(Function) })
+        )
+      })
+    })
+
+    it('aria-invalid + role=alert sur les champs requis manquants (Mailjet)', async () => {
+      const user = userEvent.setup()
+      renderPanel()
+
+      await selectCategory(user, 'Envoi par API (HTTP)')
+      await selectProvider(user, 'Mailjet')
+
+      fireEvent.click(screen.getByTestId('smtp-save-btn'))
+
+      const apiKeyInput = screen.getByTestId('credential-apiKey')
+      const secretKeyInput = screen.getByTestId('credential-secretKey')
+      expect(apiKeyInput).toHaveAttribute('aria-invalid', 'true')
+      expect(secretKeyInput).toHaveAttribute('aria-invalid', 'true')
+      expect(screen.getAllByRole('alert').some(el => /Clé API/.test(el.textContent ?? ''))).toBe(true)
+      expect(screen.getAllByRole('alert').some(el => /Clé secrète/.test(el.textContent ?? ''))).toBe(true)
+      expect(mockSave).not.toHaveBeenCalled()
+    })
+
+    it('aria-label distinct par toggle de visibilité (Mailjet, 2 champs secrets)', async () => {
+      const user = userEvent.setup()
+      renderPanel()
+
+      await selectCategory(user, 'Envoi par API (HTTP)')
+      await selectProvider(user, 'Mailjet')
+
+      expect(screen.getByLabelText('Afficher Clé API')).toBeInTheDocument()
+      expect(screen.getByLabelText('Afficher Clé secrète')).toBeInTheDocument()
+    })
+
+    it('badge, bannière et dialog restent neutres — aucune occurrence "Resend"', async () => {
+      const user = userEvent.setup()
+      mockUseSmtpSettings.mockReturnValue({
+        data: {
+          ...emptySettings,
+          smtpFromName: 'TimePick',
+          smtpFromEmail: 'noreply@example.com',
+          emailProvider: 'resend',
+          credentials: { apiKey: '****' },
+        },
+        isLoading: false,
+        error: null,
+      })
+      mockUseAdminHealth.mockReturnValue({
+        data: unhealthyHealth,
+        isLoading: false,
+        refetch: mockRefetchHealth,
+      })
+
+      renderPanel()
+
+      // Badge
+      expect(screen.getByText('Non joignable')).toBeInTheDocument()
+
+      // Bannière santé
+      const warning = screen.getByTestId('smtp-health-warning')
+      expect(warning.textContent).not.toMatch(/Resend/)
+
+      // Dialog de désactivation
+      await user.click(screen.getByTestId('smtp-disable-btn'))
+      const dialog = screen.getByRole('alertdialog')
+      expect(dialog.textContent).toMatch(/Désactiver l'envoi d'emails/)
+      expect(dialog.textContent).not.toMatch(/Resend/)
+    })
+
+    it('badge "Non configuré" pour un fournisseur HTTP sans identifiants stockés', () => {
+      mockUseSmtpSettings.mockReturnValue({
+        data: { ...emptySettings, emailProvider: 'brevo', credentials: { apiKey: '' } },
         isLoading: false,
         error: null,
       })
@@ -526,77 +833,22 @@ describe('SmtpConfigPanel', () => {
       expect(screen.getByText('Non configuré')).toBeInTheDocument()
     })
 
-    it('badge "Opérationnel via Resend" quand provider resend + clé + healthy', () => {
+    it('badge "Opérationnel" pour un fournisseur HTTP configuré + healthy', () => {
       mockUseSmtpSettings.mockReturnValue({
-        data: resendConfigured,
+        data: {
+          ...emptySettings,
+          smtpFromName: 'TimePick',
+          smtpFromEmail: 'noreply@example.com',
+          emailProvider: 'resend',
+          credentials: { apiKey: '****' },
+        },
         isLoading: false,
         error: null,
       })
 
       renderPanel()
 
-      expect(screen.getByText('Opérationnel via Resend')).toBeInTheDocument()
-    })
-
-    it('sauvegarde envoie le payload resend avec la sentinelle non modifiée', async () => {
-      mockUseSmtpSettings.mockReturnValue({
-        data: resendConfigured,
-        isLoading: false,
-        error: null,
-      })
-
-      renderPanel()
-
-      fireEvent.change(screen.getByTestId('smtp-from-name'), { target: { value: 'TimePick Updated' } })
-      fireEvent.click(screen.getByTestId('smtp-save-btn'))
-
-      await waitFor(() => {
-        expect(mockSave).toHaveBeenCalledWith(
-          {
-            provider: 'resend',
-            emailApiKey: '****',
-            smtpFromName: 'TimePick Updated',
-            smtpFromEmail: 'noreply@example.com',
-          },
-          expect.objectContaining({ onSuccess: expect.any(Function) })
-        )
-      })
-    })
-
-    it('test envoie la clé saisie quand elle est modifiée', async () => {
-      mockUseSmtpSettings.mockReturnValue({
-        data: resendConfigured,
-        isLoading: false,
-        error: null,
-      })
-
-      renderPanel()
-
-      fireEvent.change(screen.getByTestId('email-api-key'), { target: { value: 're_newkey123' } })
-      fireEvent.click(screen.getByTestId('smtp-test-btn'))
-
-      await waitFor(() => {
-        expect(mockTest).toHaveBeenCalledWith(
-          expect.objectContaining({ provider: 'resend', emailApiKey: 're_newkey123' })
-        )
-      })
-    })
-
-    it('affiche une erreur de validation si la clé API est vide à la sauvegarde', () => {
-      mockUseSmtpSettings.mockReturnValue({
-        data: { ...emptySettings, emailProvider: 'resend', emailApiKey: '' },
-        isLoading: false,
-        error: null,
-      })
-
-      renderPanel()
-
-      // Rendre le formulaire dirty (from name) sans renseigner de clé
-      fireEvent.change(screen.getByTestId('smtp-from-name'), { target: { value: 'TimePick' } })
-      fireEvent.click(screen.getByTestId('smtp-save-btn'))
-
-      expect(screen.getByText(/La clé API Resend est requise/)).toBeInTheDocument()
-      expect(mockSave).not.toHaveBeenCalled()
+      expect(screen.getByText('Opérationnel')).toBeInTheDocument()
     })
   })
 })

@@ -6,10 +6,51 @@ const serverBaseURL = (import.meta.env.VITE_API_URL || 'http://localhost:3000/ap
 const publicApi = axios.create({ baseURL: serverBaseURL })
 
 /**
- * Transport email pluggable — 'brevo' est accepté en DB/client mais REFUSÉ
- * par le validateur serveur (itération suivante).
+ * Chantier email-providers — provider email pluggable, entièrement piloté par
+ * le catalogue serveur (`GET …/email-providers`, contrat §1/§3.1) : AUCUNE
+ * liste de fournisseurs en dur ici. `'smtp'` est la seule valeur connue du
+ * client ; tout autre id (brevo, mailjet, scaleway, sweego, resend, ou un
+ * fournisseur ajouté plus tard côté serveur) est un simple identifiant de
+ * catalogue, jamais codé en dur.
  */
-export type EmailProvider = 'smtp' | 'resend' | 'brevo'
+export type EmailProvider = string
+
+/** 'eu' pour les fournisseurs UE, 'us' (ex. resend) — informatif (contrat §3.1). */
+export type ProviderRegion = 'eu' | 'us'
+
+/**
+ * Champ d'identifiant d'un fournisseur HTTP (contrat §3.1) — `SmtpFields`
+ * rend UN composant par `CredentialField`, sans connaître les fournisseurs
+ * à l'avance.
+ */
+export interface CredentialField {
+  /** 'apiKey' | 'secretKey' | 'projectId' | 'region' | … */
+  key: string
+  /** Libellé FR affiché ('Clé API', 'Clé secrète', 'ID de projet', 'Région'). */
+  label: string
+  /** true → champ masqué + sentinelle '****' + chiffré en DB. */
+  secret: boolean
+  /** ex. 're_…', 'xkeysib-…' — indicatif, jamais bloquant. */
+  placeholder?: string
+  /** Aide courte optionnelle. */
+  help?: string
+  /** Défaut true. */
+  required?: boolean
+  /** Valeur contrainte (ex. région Scaleway) → rendu `<select>` côté client. */
+  options?: { value: string; label: string }[]
+}
+
+/** Descripteur d'un fournisseur HTTP tel qu'exposé par le catalogue (contrat §3.1). */
+export interface ProviderMeta {
+  id: string
+  /** Affichage neutre — n'apparaît qu'au 2e niveau du sélecteur (sous-menu). */
+  label: string
+  region: ProviderRegion
+  /** ex. '≈ 300 emails/jour (gratuit)' — informatif. */
+  freeTierNote: string
+  docsUrl?: string
+  credentialFields: CredentialField[]
+}
 
 /**
  * SMTP settings as returned by GET /api/admin/settings/smtp
@@ -25,8 +66,13 @@ export interface SmtpSettings {
   smtpFromEmail: string
   /** 'smtp' par défaut si absent/inconnu en DB */
   emailProvider: EmailProvider
-  /** '****' si une clé API est stockée côté serveur, '' sinon — jamais la clé réelle */
+  /** DÉPRÉCIÉ (compat transition) — '****' si une clé API est stockée côté
+   *  serveur, '' sinon (= credentials.apiKey). Préférer `credentials`. */
   emailApiKey: string
+  /** Credentials multi-champ du fournisseur actif (contrat §4.1) — secrets
+   *  masqués '****'/'', non-secrets en clair. Optionnel pour compat avec
+   *  d'anciennes fixtures qui ne le fournissent pas encore. */
+  credentials?: Record<string, string>
 }
 
 /**
@@ -44,13 +90,14 @@ export interface SmtpSettingsPayload {
 }
 
 /**
- * Payload for the Resend (API-based) provider — PUT/POST /admin/settings/smtp[/test]
- * with `provider: 'resend'`. `emailApiKey` may be the sentinel '****' to keep/test
- * the key already stored server-side.
+ * Payload pour un fournisseur HTTP (catalogue, `provider !== 'smtp'`) —
+ * PUT/POST /admin/settings/smtp[/test] (contrat §4.2/§4.3). `credentials`
+ * peut contenir la sentinelle '****'/'' par champ secret — résolue SCOPÉE
+ * au fournisseur stocké côté serveur (jamais de fusion inter-fournisseurs).
  */
 export interface EmailApiProviderPayload {
-  provider: 'resend'
-  emailApiKey?: string
+  provider: string
+  credentials: Record<string, string>
   smtpFromName?: string
   smtpFromEmail?: string
 }
@@ -78,7 +125,7 @@ export const getSmtpSettings = async (): Promise<SmtpSettings> => {
 }
 
 /**
- * Save SMTP settings — payload is provider-discriminated (smtp historique ou resend)
+ * Save SMTP settings — payload provider-discriminated (SMTP historique ou fournisseur HTTP du catalogue)
  */
 export const saveSmtpSettings = async (payload: EmailSettingsPayload): Promise<{ message: string }> => {
   const { data } = await api.put<ApiResponse<{ message: string }>>('/admin/settings/smtp', payload)
@@ -86,13 +133,25 @@ export const saveSmtpSettings = async (payload: EmailSettingsPayload): Promise<{
 }
 
 /**
- * Test connection with given parameters (smtp or resend)
+ * Test connection with given parameters (smtp or a catalog HTTP provider)
  * SMTP path: the password must NOT be the sentinel "****" — the backend rejects it.
- * Resend path: the sentinel "****" is accepted — it tests the key already stored.
+ * HTTP provider path: the sentinel "****" is accepted per field — it tests the value already stored.
  */
 export const testSmtpConnection = async (payload: EmailSettingsPayload): Promise<SmtpTestResult> => {
   const { data } = await api.post<SmtpTestResult>('/admin/settings/smtp/test', payload)
   return data
+}
+
+/**
+ * Catalogue des fournisseurs email HTTP (contrat §1/§3.1) — AUCUN secret,
+ * ordre EU-first/resend-last figé côté serveur. `variant` sélectionne
+ * l'endpoint : `'admin'` (authentifié) ou `'setup'` (wizard, public gated).
+ * Source unique de vérité côté client — aucun fournisseur/champ en dur.
+ */
+export const getEmailProvidersCatalog = async (variant: 'admin' | 'setup' = 'admin'): Promise<ProviderMeta[]> => {
+  const path = variant === 'setup' ? '/setup/email-providers' : '/admin/settings/email-providers'
+  const { data } = await api.get<ApiResponse<ProviderMeta[]>>(path)
+  return data.data
 }
 
 /**

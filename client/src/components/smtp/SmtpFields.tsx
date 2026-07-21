@@ -11,11 +11,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import type { EmailProvider } from '@/services/settings.service'
+import type { EmailProvider, ProviderMeta } from '@/services/settings.service'
+
+/** Seule valeur de provider connue du client — tout le reste vient du catalogue. */
+const SMTP_PROVIDER = 'smtp'
 
 export interface SmtpFieldsValues {
   emailProvider: EmailProvider
-  emailApiKey: string
+  /** Identifiants du fournisseur HTTP actif — un champ par `credentialField.key`. */
+  credentials: Record<string, string>
   smtpHost: string
   smtpPort: string
   smtpSecure: boolean
@@ -30,51 +34,163 @@ interface Props {
   onChange: <K extends keyof SmtpFieldsValues>(field: K, value: SmtpFieldsValues[K]) => void
   errors: Record<string, string>
   disabled: boolean
+  /** Catalogue des fournisseurs HTTP (contrat §1/§3.1) — EU-first, resend en dernier. */
+  catalog: ProviderMeta[]
+  catalogLoading?: boolean
+  /** Provider/credentials actuellement stockés côté serveur — pilote la
+   *  sentinelle scopée au provider (contrat §4.2, amendement revue delta 1). */
+  storedProvider?: EmailProvider
+  storedCredentials?: Record<string, string>
 }
 
-/** Providers proposés dans le sélecteur — Brevo est accepté en DB mais pas encore offert ici. */
-const PROVIDER_OPTIONS: { value: EmailProvider; label: string }[] = [
-  { value: 'smtp', label: 'SMTP' },
-  { value: 'resend', label: 'Resend' },
-]
+/**
+ * Résout les credentials à appliquer au changement de fournisseur — sentinelle
+ * SCOPÉE au provider (contrat §4.2/§7.7, amendement revue delta 1) : on ne
+ * restaure les valeurs stockées (`'****'` compris) QUE si l'on revient au
+ * fournisseur déjà en base. Tout autre changement repart de zéro : jamais de
+ * fuite d'identifiants entre fournisseurs qui partagent un nom de champ (ex.
+ * `apiKey`, utilisé par plusieurs fournisseurs du catalogue).
+ */
+function resolveCredentialsOnProviderChange(
+  newProviderId: string,
+  storedProvider: EmailProvider | undefined,
+  storedCredentials: Record<string, string> | undefined,
+): Record<string, string> {
+  return newProviderId === storedProvider ? { ...(storedCredentials ?? {}) } : {}
+}
 
-export function SmtpFields({ values, onChange, errors, disabled }: Props) {
+/**
+ * Validation client (miroir souple du serveur, contrat §5) pour le fournisseur
+ * HTTP actif : chaque `credentialField.required` (défaut true) doit être non
+ * vide, ou couvert par la sentinelle SCOPÉE au provider stocké ; `smtpFromEmail`
+ * est requis pour tout fournisseur HTTP (délivrabilité, amendement delta 2).
+ * Ne valide rien pour `smtp` (traité séparément par l'appelant) ni si le
+ * catalogue n'est pas encore chargé (le serveur validera dans ce cas).
+ */
+export function validateProviderCredentials(
+  values: SmtpFieldsValues,
+  catalog: ProviderMeta[],
+  storedProvider: EmailProvider | undefined,
+  storedCredentials: Record<string, string> | undefined,
+): Record<string, string> {
+  const errors: Record<string, string> = {}
+  if (values.emailProvider === SMTP_PROVIDER) return errors
+
+  const meta = catalog.find(p => p.id === values.emailProvider)
+  if (!meta) return errors
+
+  const providerUnchanged = storedProvider === meta.id
+  for (const field of meta.credentialFields) {
+    if (field.required === false) continue
+    const value = values.credentials[field.key] ?? ''
+    const hasRealValue = !!value && value !== '****'
+    const sentinelValid = field.secret && providerUnchanged && !!(storedCredentials?.[field.key])
+    if (!hasRealValue && !sentinelValid) {
+      errors[`credentials.${field.key}`] = `Le champ « ${field.label} » est requis`
+    }
+  }
+
+  if (!values.smtpFromEmail) {
+    errors.smtpFromEmail = "L'email de l'expéditeur est requis pour un envoi par API"
+  }
+
+  return errors
+}
+
+export function SmtpFields({
+  values,
+  onChange,
+  errors,
+  disabled,
+  catalog: rawCatalog,
+  catalogLoading = false,
+  storedProvider,
+  storedCredentials,
+}: Props) {
   const [showPassword, setShowPassword] = useState(false)
-  const [showApiKey, setShowApiKey] = useState(false)
+  const [visibility, setVisibility] = useState<Record<string, boolean>>({})
 
-  const isResend = values.emailProvider === 'resend'
-  const isKnownProvider = PROVIDER_OPTIONS.some(p => p.value === values.emailProvider)
+  // Défensif : un catalogue malformé (mock de test incomplet, réponse
+  // inattendue) ne doit jamais faire planter tout le formulaire — repli sur
+  // une liste vide plutôt que sur la valeur brute reçue.
+  const catalog = Array.isArray(rawCatalog) ? rawCatalog : []
+
+  const category: 'smtp' | 'http' = values.emailProvider === SMTP_PROVIDER ? 'smtp' : 'http'
+  const selectedMeta = catalog.find(p => p.id === values.emailProvider)
+
+  const selectProvider = (providerId: string) => {
+    onChange('emailProvider', providerId)
+    onChange('credentials', resolveCredentialsOnProviderChange(providerId, storedProvider, storedCredentials))
+  }
+
+  const selectCategory = (nextCategory: string) => {
+    if (nextCategory === SMTP_PROVIDER) {
+      selectProvider(SMTP_PROVIDER)
+    } else if (values.emailProvider === SMTP_PROVIDER) {
+      // Premier passage en HTTP : présélectionne le 1er fournisseur du catalogue (EU-first).
+      selectProvider(catalog[0]?.id ?? '')
+    }
+  }
+
+  const toggleVisibility = (key: string) => setVisibility(prev => ({ ...prev, [key]: !prev[key] }))
+
+  const updateCredential = (key: string, next: string) => {
+    onChange('credentials', { ...values.credentials, [key]: next })
+  }
 
   return (
     <>
-      {/* Provider selector */}
+      {/* Niveau 1 : catégorie neutre — aucun nom de marque */}
       <div className="space-y-2">
-        <Label htmlFor="email-provider">Fournisseur d&apos;email</Label>
-        <Select
-          value={values.emailProvider}
-          onValueChange={value => onChange('emailProvider', value as EmailProvider)}
-          disabled={disabled}
-        >
-          <SelectTrigger id="email-provider" data-testid="email-provider-select">
+        <Label htmlFor="email-category">Mode d&apos;envoi</Label>
+        <Select value={category} onValueChange={selectCategory} disabled={disabled}>
+          <SelectTrigger id="email-category" data-testid="email-category-select">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {PROVIDER_OPTIONS.map(option => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-            {/* Provider inconnu (ex. 'brevo' renvoyé un jour par le serveur) : on
-                affiche son libellé brut plutôt que de crasher ou de laisser le
-                sélecteur vide. */}
-            {!isKnownProvider && (
-              <SelectItem value={values.emailProvider}>{values.emailProvider}</SelectItem>
-            )}
+            <SelectItem value="smtp">SMTP</SelectItem>
+            <SelectItem value="http">Envoi par API (HTTP)</SelectItem>
           </SelectContent>
         </Select>
       </div>
 
-      {!isResend && (
+      {/* Niveau 2 : sous-menu fournisseur — depuis le catalogue serveur (EU-first) */}
+      {category === 'http' && (
+        <div className="space-y-2">
+          <Label htmlFor="email-provider">Fournisseur</Label>
+          <Select
+            value={values.emailProvider}
+            onValueChange={selectProvider}
+            disabled={disabled || catalogLoading}
+          >
+            <SelectTrigger id="email-provider" data-testid="email-provider-select">
+              <SelectValue placeholder={catalogLoading ? 'Chargement…' : undefined} />
+            </SelectTrigger>
+            <SelectContent>
+              {catalog.map(p => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.label}
+                </SelectItem>
+              ))}
+              {/* Fournisseur stocké pas (encore) dans le catalogue chargé : on
+                  affiche son id brut plutôt que de crasher ou vider le sélecteur. */}
+              {!catalogLoading && values.emailProvider !== SMTP_PROVIDER && !catalog.some(p => p.id === values.emailProvider) && (
+                <SelectItem value={values.emailProvider}>{values.emailProvider}</SelectItem>
+              )}
+            </SelectContent>
+          </Select>
+          {selectedMeta && (
+            <p className="text-xs text-muted-foreground">
+              {selectedMeta.region === 'eu' ? '🇪🇺' : '🇺🇸'} {selectedMeta.freeTierNote}
+            </p>
+          )}
+          {catalogLoading && (
+            <p className="text-xs text-muted-foreground">Chargement des fournisseurs…</p>
+          )}
+        </div>
+      )}
+
+      {category === 'smtp' && (
         <>
           {/* Host */}
           <div className="space-y-2">
@@ -187,46 +303,111 @@ export function SmtpFields({ values, onChange, errors, disabled }: Props) {
         </>
       )}
 
-      {isResend && (
-        <div className="space-y-2">
-          <Label htmlFor="email-api-key">Clé API Resend</Label>
-          <div className="relative">
-            <Input
-              id="email-api-key"
-              type={showApiKey ? 'text' : 'password'}
-              placeholder="re_…"
-              value={values.emailApiKey}
-              onChange={e => onChange('emailApiKey', e.target.value)}
-              disabled={disabled}
-              className="pr-10"
-              data-testid="email-api-key"
-              aria-invalid={!!errors.emailApiKey}
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="absolute right-1 top-1/2 -translate-y-1/2"
-              onClick={() => setShowApiKey(prev => !prev)}
-              disabled={disabled}
-              aria-label={showApiKey ? 'Masquer la clé API' : 'Afficher la clé API'}
-              data-testid="email-api-key-toggle"
-            >
-              {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-            </Button>
-          </div>
-          {errors.emailApiKey && (
-            <p className="text-xs text-destructive" role="alert">{errors.emailApiKey}</p>
-          )}
-          {values.emailApiKey === '****' && (
-            <p className="text-xs text-muted-foreground">
-              Clé configurée. Laissez «****» pour la conserver.
-            </p>
-          )}
+      {/* Formulaire dynamique — un champ par credentialField du fournisseur choisi, aucun champ en dur */}
+      {category === 'http' && selectedMeta && (
+        <div className="space-y-4">
+          {selectedMeta.credentialFields.map(field => {
+            const fieldId = `credential-${field.key}`
+            const value = values.credentials[field.key] ?? ''
+            const errorMsg = errors[`credentials.${field.key}`]
+            const errorId = `${fieldId}-error`
+            const isVisible = visibility[field.key] ?? false
+
+            if (field.options) {
+              return (
+                <div className="space-y-2" key={field.key}>
+                  <Label htmlFor={fieldId}>{field.label}</Label>
+                  <Select
+                    value={value}
+                    onValueChange={next => updateCredential(field.key, next)}
+                    disabled={disabled}
+                  >
+                    <SelectTrigger
+                      id={fieldId}
+                      data-testid={fieldId}
+                      aria-invalid={!!errorMsg}
+                      aria-describedby={errorMsg ? errorId : undefined}
+                    >
+                      <SelectValue placeholder={field.placeholder} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {field.options.map(option => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {field.help && <p className="text-xs text-muted-foreground">{field.help}</p>}
+                  {errorMsg && <p id={errorId} className="text-xs text-destructive" role="alert">{errorMsg}</p>}
+                </div>
+              )
+            }
+
+            if (field.secret) {
+              return (
+                <div className="space-y-2" key={field.key}>
+                  <Label htmlFor={fieldId}>{field.label}</Label>
+                  <div className="relative">
+                    <Input
+                      id={fieldId}
+                      type={isVisible ? 'text' : 'password'}
+                      placeholder={field.placeholder}
+                      value={value}
+                      onChange={e => updateCredential(field.key, e.target.value)}
+                      disabled={disabled}
+                      className="pr-10"
+                      data-testid={fieldId}
+                      aria-invalid={!!errorMsg}
+                      aria-describedby={errorMsg ? errorId : undefined}
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-1 top-1/2 -translate-y-1/2"
+                      onClick={() => toggleVisibility(field.key)}
+                      disabled={disabled}
+                      aria-label={isVisible ? `Masquer ${field.label}` : `Afficher ${field.label}`}
+                      data-testid={`${fieldId}-toggle`}
+                    >
+                      {isVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                  {field.help && <p className="text-xs text-muted-foreground">{field.help}</p>}
+                  {errorMsg && <p id={errorId} className="text-xs text-destructive" role="alert">{errorMsg}</p>}
+                  {value === '****' && (
+                    <p className="text-xs text-muted-foreground">
+                      Valeur configurée. Laissez «****» pour la conserver.
+                    </p>
+                  )}
+                </div>
+              )
+            }
+
+            return (
+              <div className="space-y-2" key={field.key}>
+                <Label htmlFor={fieldId}>{field.label}</Label>
+                <Input
+                  id={fieldId}
+                  type="text"
+                  placeholder={field.placeholder}
+                  value={value}
+                  onChange={e => updateCredential(field.key, e.target.value)}
+                  disabled={disabled}
+                  data-testid={fieldId}
+                  aria-invalid={!!errorMsg}
+                  aria-describedby={errorMsg ? errorId : undefined}
+                />
+                {field.help && <p className="text-xs text-muted-foreground">{field.help}</p>}
+                {errorMsg && <p id={errorId} className="text-xs text-destructive" role="alert">{errorMsg}</p>}
+              </div>
+            )
+          })}
         </div>
       )}
 
-      {/* Sender name + email — side by side, communs aux deux fournisseurs */}
+      {/* Sender name + email — side by side, communs à SMTP et aux fournisseurs HTTP */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="smtp-from-name">Nom de l&apos;expéditeur</Label>

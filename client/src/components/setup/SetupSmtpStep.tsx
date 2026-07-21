@@ -6,15 +6,16 @@ import { Button } from '@/components/ui/button'
 import { Banner, BannerDescription } from '@/components/ui/banner'
 import { toast } from 'sonner'
 import { getSetupSmtp, saveSetupSmtp, testSetupSmtp } from '@/services/setup.service'
-import type { EmailSettingsPayload, SmtpSettingsPayload } from '@/services/settings.service'
-import { SmtpFields } from '@/components/smtp/SmtpFields'
+import type { EmailProvider, EmailSettingsPayload, SmtpSettingsPayload } from '@/services/settings.service'
+import { useEmailProvidersCatalog } from '@/hooks/useSmtpSettings'
+import { SmtpFields, validateProviderCredentials } from '@/components/smtp/SmtpFields'
 import type { SmtpFieldsValues } from '@/components/smtp/SmtpFields'
 import { EMAIL_RE } from '@/lib/email'
 
 const DEFAULT_PORT = 587
+const SMTP_PROVIDER = 'smtp' as const
 
 type FormValues = SmtpFieldsValues
-
 
 interface Props {
   onDone: () => void
@@ -26,8 +27,8 @@ interface Props {
 
 export function SetupSmtpStep({ onDone, skippable = false }: Props) {
   const [formValues, setFormValues] = useState<FormValues>({
-    emailProvider: 'smtp',
-    emailApiKey: '',
+    emailProvider: SMTP_PROVIDER,
+    credentials: {},
     smtpHost: '',
     smtpPort: String(DEFAULT_PORT),
     smtpSecure: false,
@@ -42,6 +43,12 @@ export function SetupSmtpStep({ onDone, skippable = false }: Props) {
   const [isTesting, setIsTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
   const [isLoadingSettings, setIsLoadingSettings] = useState(true)
+  // Provider/credentials stockés côté serveur au chargement — pilote la
+  // sentinelle scopée au provider (contrat §4.2, amendement revue delta 1).
+  const [storedProvider, setStoredProvider] = useState<EmailProvider | undefined>(undefined)
+  const [storedCredentials, setStoredCredentials] = useState<Record<string, string> | undefined>(undefined)
+
+  const { data: catalog = [], isLoading: isCatalogLoading } = useEmailProvidersCatalog('setup')
 
   useEffect(() => {
     let cancelled = false
@@ -49,8 +56,8 @@ export function SetupSmtpStep({ onDone, skippable = false }: Props) {
       .then((settings) => {
         if (cancelled) return
         setFormValues({
-          emailProvider: settings.emailProvider || 'smtp',
-          emailApiKey: settings.emailApiKey || '',
+          emailProvider: settings.emailProvider || SMTP_PROVIDER,
+          credentials: settings.credentials ?? {},
           smtpHost: settings.smtpHost || '',
           smtpPort: settings.smtpPort || String(DEFAULT_PORT),
           smtpSecure: settings.smtpSecure ?? false,
@@ -59,6 +66,8 @@ export function SetupSmtpStep({ onDone, skippable = false }: Props) {
           smtpFromName: settings.smtpFromName || '',
           smtpFromEmail: settings.smtpFromEmail || '',
         })
+        setStoredProvider(settings.emailProvider || SMTP_PROVIDER)
+        setStoredCredentials(settings.credentials ?? {})
         setRecipient(settings.smtpFromEmail || settings.smtpUser || '')
       })
       .catch((err) => {
@@ -73,10 +82,10 @@ export function SetupSmtpStep({ onDone, skippable = false }: Props) {
   // A1 : SMTP sautable-mais-visible — tant qu'aucun hôte n'a été saisi, que le
   // provider est resté 'smtp' et que le serveur autorise le saut (`skippable`),
   // « Continuer » n'exige rien et n'enregistre rien. Dès qu'un hôte est
-  // renseigné (ou que Resend est choisi), la validation classique reprend la
-  // main : l'utilisateur peut toujours choisir de configurer un vrai
-  // fournisseur d'email à cette étape.
-  const wantsToSkip = skippable && formValues.emailProvider === 'smtp' && !formValues.smtpHost.trim()
+  // renseigné (ou qu'un fournisseur HTTP est choisi), la validation classique
+  // reprend la main : l'utilisateur peut toujours choisir de configurer un
+  // vrai fournisseur d'email à cette étape.
+  const wantsToSkip = skippable && formValues.emailProvider === SMTP_PROVIDER && !formValues.smtpHost.trim()
 
   const updateField = <K extends keyof FormValues>(field: K, value: FormValues[K]) => {
     setFormValues(prev => ({ ...prev, [field]: value }))
@@ -100,13 +109,7 @@ export function SetupSmtpStep({ onDone, skippable = false }: Props) {
 
   const validate = (): boolean => {
     const errors: Record<string, string> = {}
-    if (formValues.emailProvider === 'resend') {
-      // La sentinelle '****' (clé déjà stockée) est acceptée — seule une
-      // valeur vide est invalide.
-      if (!formValues.emailApiKey) {
-        errors.emailApiKey = 'La clé API Resend est requise'
-      }
-    } else {
+    if (formValues.emailProvider === SMTP_PROVIDER) {
       if (!formValues.smtpHost.trim()) {
         errors.smtpHost = "L'hôte SMTP est requis"
       }
@@ -114,6 +117,8 @@ export function SetupSmtpStep({ onDone, skippable = false }: Props) {
       if (!formValues.smtpPort || isNaN(port) || port < 1 || port > 65535) {
         errors.smtpPort = 'Le port doit être entre 1 et 65535'
       }
+    } else {
+      Object.assign(errors, validateProviderCredentials(formValues, catalog, storedProvider, storedCredentials))
     }
     if (formValues.smtpFromEmail && !EMAIL_RE.test(formValues.smtpFromEmail)) {
       errors.smtpFromEmail = "Format d'email invalide"
@@ -132,15 +137,15 @@ export function SetupSmtpStep({ onDone, skippable = false }: Props) {
     smtpFromEmail: formValues.smtpFromEmail || undefined,
   })
 
-  const buildResendPayload = (): EmailSettingsPayload => ({
-    provider: 'resend',
-    emailApiKey: formValues.emailApiKey || '****',
+  const buildProviderPayload = (): EmailSettingsPayload => ({
+    provider: formValues.emailProvider,
+    credentials: formValues.credentials,
     smtpFromName: formValues.smtpFromName || undefined,
     smtpFromEmail: formValues.smtpFromEmail || undefined,
   })
 
   const buildPayload = (): EmailSettingsPayload =>
-    formValues.emailProvider === 'resend' ? buildResendPayload() : buildSmtpPayload()
+    formValues.emailProvider === SMTP_PROVIDER ? buildSmtpPayload() : buildProviderPayload()
 
   const handleTest = async () => {
     if (!validate()) return
@@ -187,6 +192,10 @@ export function SetupSmtpStep({ onDone, skippable = false }: Props) {
         onChange={handleSmtpChange}
         errors={validationErrors}
         disabled={isBusy}
+        catalog={catalog}
+        catalogLoading={isCatalogLoading}
+        storedProvider={storedProvider}
+        storedCredentials={storedCredentials}
       />
 
       {/* Test recipient */}

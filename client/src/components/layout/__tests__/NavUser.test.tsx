@@ -91,6 +91,20 @@ describe('NavUser', () => {
     expect(onNavigate).toHaveBeenCalledTimes(1)
   })
 
+  it('ouvre la documentation dans un nouvel onglet via l\'item Documentation', () => {
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
+    const onNavigate = vi.fn()
+    render(<NavUser onNavigate={onNavigate} />)
+    screen.getByText('Documentation').click()
+    expect(openSpy).toHaveBeenCalledWith(
+      'https://timepick.docs.jensen-siu.net/',
+      '_blank',
+      'noopener,noreferrer',
+    )
+    expect(onNavigate).toHaveBeenCalledTimes(1)
+    openSpy.mockRestore()
+  })
+
   it('respecte le NavigationBlocker quand des modifications sont en attente', () => {
     blocker.isBlocked = true
     render(<NavUser />)

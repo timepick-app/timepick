@@ -3,6 +3,7 @@ import rateLimit from 'express-rate-limit';
 import { getSetupStatus, createFirstAdmin, checkSetupNotDone } from '../controllers/setup.controller';
 import { saveSmtpSettingsHandler } from '../controllers/settings.controller';
 import { getSetupSmtpConfigHandler, testSetupSmtpHandler } from '../controllers/setup-smtp.controller';
+import { getEmailProvidersCatalogHandler } from '../controllers/email-providers-catalog.controller';
 import { getSetupEncryptionKeyStatus } from '../controllers/setup-encryption-key.controller';
 
 const router = Router();
@@ -62,6 +63,10 @@ router.post('/create-admin', checkSetupNotDone, createFirstAdmin);
 router.get('/smtp', checkSetupNotDone, setupSmtpLimiter, getSetupSmtpConfigHandler);
 router.put('/smtp', checkSetupNotDone, setupSmtpLimiter, saveSmtpSettingsHandler);
 router.post('/smtp/test', checkSetupNotDone, setupSmtpTestLimiter, testSetupSmtpHandler);
+
+// Chantier email-providers (B2) — catalogue public (métadonnées statiques,
+// aucun secret), gate + rate-limit léger comme les autres routes /setup (contrat §1).
+router.get('/email-providers', checkSetupNotDone, setupSmtpLimiter, getEmailProvidersCatalogHandler);
 
 router.get('/encryption-key', checkSetupNotDone, setupEncryptionKeyLimiter, getSetupEncryptionKeyStatus);
 

@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { ChevronsUpDown, LogOut, UserRound, CalendarClock, LayoutDashboard } from 'lucide-react'
+import { ChevronsUpDown, LogOut, UserRound, CalendarClock, LayoutDashboard, BookOpen, ExternalLink } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useNavigationBlocker } from '@/contexts/NavigationBlockerContext'
 import { clearSessionData } from '@/hooks/useSessionTimeout'
@@ -14,6 +14,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+
+/** URL publique de la documentation TimePick (D8). */
+const DOCS_URL = 'https://timepick.docs.jensen-siu.net/'
 
 interface NavUserProps {
   /** Appelé après une navigation (ferme le tiroir mobile). */
@@ -52,6 +55,11 @@ export function NavUser({ onNavigate, profilePath = '/admin/profile', shell = 'a
     } else {
       navigate(profilePath)
     }
+    onNavigate?.()
+  }
+
+  const handleDocs = () => {
+    window.open(DOCS_URL, '_blank', 'noopener,noreferrer')
     onNavigate?.()
   }
 
@@ -123,6 +131,11 @@ export function NavUser({ onNavigate, profilePath = '/admin/profile', shell = 'a
         <DropdownMenuItem onClick={handleProfile}>
           <UserRound className="mr-2 h-4 w-4" />
           <span>Profil</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={handleDocs}>
+          <BookOpen className="mr-2 h-4 w-4" />
+          <span className="flex-1">Documentation</span>
+          <ExternalLink className="ml-2 h-3.5 w-3.5 text-muted-foreground" />
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={handleLogout}>
