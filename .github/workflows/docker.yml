@@ -1,4 +1,5 @@
 name: Docker image
+run-name: "Image Docker → GHCR (${{ github.ref_name }})"
 
 # Build & publication de l'image canonique TimePick (chantier D, P1=(b)).
 #

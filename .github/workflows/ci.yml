@@ -1,4 +1,5 @@
 name: CI
+run-name: "CI — tests & lint (${{ github.ref_name }})"
 
 # Pipeline d'intégration continue (aucune autre CI dans le repo).
 # Jobs parallèles : détection de code mort (knip), typecheck, tests client
