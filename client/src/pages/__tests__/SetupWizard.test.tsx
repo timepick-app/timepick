@@ -127,6 +127,7 @@ describe('SetupWizard — source env (flux à 2 étapes, inchangé)', () => {
     // Remplir le champ requis (host)
     await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeEnabled());
     await user.type(screen.getByTestId('smtp-host'), 'smtp.exemple.com');
+    await user.type(screen.getByTestId('smtp-from-email'), 'noreply@exemple.com');
     await user.click(screen.getByTestId('smtp-continue-btn'));
 
     await waitFor(() => {
@@ -152,6 +153,7 @@ describe('SetupWizard — source env (flux à 2 étapes, inchangé)', () => {
     // Passer à l'étape admin via "Continuer" SMTP
     await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeEnabled());
     await user.type(screen.getByTestId('smtp-host'), 'smtp.exemple.com');
+    await user.type(screen.getByTestId('smtp-from-email'), 'noreply@exemple.com');
     await user.click(screen.getByTestId('smtp-continue-btn'));
     await waitFor(() => expect(screen.getByLabelText('Email')).toBeInTheDocument());
 
@@ -183,6 +185,7 @@ describe('SetupWizard — source env (flux à 2 étapes, inchangé)', () => {
     // Passer à l'étape admin
     await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeEnabled());
     await user.type(screen.getByTestId('smtp-host'), 'smtp.exemple.com');
+    await user.type(screen.getByTestId('smtp-from-email'), 'noreply@exemple.com');
     await user.click(screen.getByTestId('smtp-continue-btn'));
     await waitFor(() => expect(screen.getByLabelText('Email')).toBeInTheDocument());
 
@@ -207,6 +210,7 @@ describe('SetupWizard — source env (flux à 2 étapes, inchangé)', () => {
 
     await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeEnabled());
     await user.type(screen.getByTestId('smtp-host'), 'smtp.exemple.com');
+    await user.type(screen.getByTestId('smtp-from-email'), 'noreply@exemple.com');
     // Remplir un recipient valide
     await user.clear(screen.getByTestId('smtp-recipient'));
     await user.type(screen.getByTestId('smtp-recipient'), 'test@exemple.com');
@@ -235,6 +239,7 @@ describe('SetupWizard — source env (flux à 2 étapes, inchangé)', () => {
 
     await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeEnabled());
     await user.type(screen.getByTestId('smtp-host'), 'smtp.exemple.com');
+    await user.type(screen.getByTestId('smtp-from-email'), 'noreply@exemple.com');
     await user.clear(screen.getByTestId('smtp-recipient'));
     await user.type(screen.getByTestId('smtp-recipient'), 'test@exemple.com');
     await user.click(screen.getByTestId('smtp-test-btn'));
@@ -254,11 +259,27 @@ describe('SetupWizard — source env (flux à 2 étapes, inchangé)', () => {
 
     await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeEnabled());
     await user.type(screen.getByTestId('smtp-host'), 'smtp.exemple.com');
+    await user.type(screen.getByTestId('smtp-from-email'), 'noreply@exemple.com');
     await user.click(screen.getByTestId('smtp-continue-btn'));
 
     await waitFor(() => {
       expect(mockToastError).toHaveBeenCalledWith('Limite de requêtes atteinte');
     });
+  });
+
+  it('"Continuer" bloqué (aucun appel réseau) quand le host est renseigné sans email expéditeur', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeEnabled());
+    await user.type(screen.getByTestId('smtp-host'), 'smtp.exemple.com');
+    // smtp-from-email volontairement laissé vide (emptySmtp)
+    await user.click(screen.getByTestId('smtp-continue-btn'));
+
+    await waitFor(() => {
+      expect(screen.getByText(/email de l'expéditeur est requis/i)).toBeInTheDocument();
+    });
+    expect(mockedSaveSetupSmtp).not.toHaveBeenCalled();
   });
 });
 
@@ -352,6 +373,7 @@ describe('SetupWizard — SMTP sautable (emailDeliverable=true)', () => {
 
     await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeEnabled());
     await user.type(screen.getByTestId('smtp-host'), 'smtp.exemple.com');
+    await user.type(screen.getByTestId('smtp-from-email'), 'noreply@exemple.com');
     // Dès qu'un hôte est saisi, le bouton redevient "Continuer" (plus "Passer").
     expect(screen.getByTestId('smtp-continue-btn')).toHaveTextContent('Continuer');
 

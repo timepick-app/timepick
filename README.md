@@ -224,7 +224,7 @@ npm run create-admin
 
 Le script est **interactif** — il crée un nouvel admin ou promeut un utilisateur existant. Ne pas passer d'email en argument (forme obsolète).
 
-Pour les détails, voir [`https://timepick.docs.jensen-siu.net/installation/installation-locale`](https://timepick.docs.jensen-siu.net/installation/installation-locale).
+Pour les détails, voir [`https://docs.timepick.app/installation/installation-locale`](https://docs.timepick.app/installation/installation-locale).
 
 ---
 
@@ -341,7 +341,7 @@ npm run migrate   # applique les migrations non encore exécutées
 | `recovery_audit_log` | Journal d'audit des utilisations de codes de secours |
 | `schema_migrations` | Suivi des migrations appliquées |
 
-Pour le détail des migrations (DDL, ordre, historique), voir [`https://timepick.docs.jensen-siu.net/reference/modele-de-donnees`](https://timepick.docs.jensen-siu.net/reference/modele-de-donnees).
+Pour le détail des migrations (DDL, ordre, historique), voir [`https://docs.timepick.app/reference/modele-de-donnees`](https://docs.timepick.app/reference/modele-de-donnees).
 
 ---
 
@@ -356,8 +356,8 @@ Pour le détail des migrations (DDL, ordre, historique), voir [`https://timepick
 | `ENCRYPTION_KEY` | Clé de chiffrement AES (32 octets = 64 caractères hex) pour le mot de passe SMTP stocké en base | Non \* | *(auto-généré)* |
 | `PORT` | Port d'écoute du serveur Express | Non | `3000` |
 | `APP_URL` | URL de base du frontend — utilisée pour construire les magic links et les CTA dans les emails ⚠️ variable **serveur** | Non | `http://localhost:5173` |
-| `EMAIL_FROM` | Adresse d'expéditeur par défaut | Non | `noreply@example.com` |
-| `SMTP_HOST` | Hôte du serveur SMTP (provisionnement initial) | Non | — |
+| `EMAIL_FROM` | Adresse d'expéditeur — **effective en développement/test uniquement** ; ignorée en production (voir `SMTP_FROM_EMAIL`, provisionnement initial) | Non | `noreply@example.com` |
+| `SMTP_HOST` | Hôte du serveur SMTP — **déclencheur du provisionnement initial** : sans elle, tout le bloc `SMTP_*` ci-dessous est ignoré | Non | — |
 | `SMTP_PORT` | Port SMTP (provisionnement initial) | Non | — |
 | `SMTP_SECURE` | TLS activé — `true`/`false` (provisionnement initial) | Non | — |
 | `SMTP_USER` | Identifiant SMTP (provisionnement initial) | Non | — |
@@ -384,7 +384,7 @@ Pour le détail des migrations (DDL, ordre, historique), voir [`https://timepick
 
 ## 🧪 Tests
 
-TimePick dispose de trois suites de tests complémentaires. Pour la configuration détaillée, les variables requises et les stratégies de test, voir [`https://timepick.docs.jensen-siu.net/exploitation/tests-et-qualite`](https://timepick.docs.jensen-siu.net/exploitation/tests-et-qualite).
+TimePick dispose de trois suites de tests complémentaires. Pour la configuration détaillée, les variables requises et les stratégies de test, voir [`https://docs.timepick.app/exploitation/tests-et-qualite`](https://docs.timepick.app/exploitation/tests-et-qualite).
 
 | Suite | Outil | Commande (racine) |
 |---|---|---|
@@ -499,7 +499,7 @@ docker run -p 3000:3000 --env-file server/.env -v timepick-data:/app/server/data
 
 TimePick est déployé en production sur un VPS via **Coolify** (conteneur unique : le serveur Node sert le SPA et l'API sur le même port ; PostgreSQL managé séparément). L'intégration continue est assurée par GitHub Actions (`.github/workflows/ci.yml`).
 
-Pour le guide de déploiement complet (configuration Coolify, variables d'environnement de production, HTTPS), voir [`https://timepick.docs.jensen-siu.net/installation/deploiement-coolify-vps`](https://timepick.docs.jensen-siu.net/installation/deploiement-coolify-vps).
+Pour le guide de déploiement complet (configuration Coolify, variables d'environnement de production, HTTPS), voir [`https://docs.timepick.app/installation/deploiement-coolify-vps`](https://docs.timepick.app/installation/deploiement-coolify-vps).
 
 ---
 
@@ -507,10 +507,10 @@ Pour le guide de déploiement complet (configuration Coolify, variables d'enviro
 
 | Document | Description |
 |---|---|
-| [`https://timepick.docs.jensen-siu.net/installation/installation-locale`](https://timepick.docs.jensen-siu.net/installation/installation-locale) | Configuration initiale et première utilisation |
-| [`https://timepick.docs.jensen-siu.net/installation/deploiement-coolify-vps`](https://timepick.docs.jensen-siu.net/installation/deploiement-coolify-vps) | Guide de déploiement (Docker, Coolify, variables de production) |
-| [`https://timepick.docs.jensen-siu.net/reference/modele-de-donnees`](https://timepick.docs.jensen-siu.net/reference/modele-de-donnees) | Système de migrations SQL — détail des 38 migrations |
-| [`https://timepick.docs.jensen-siu.net/exploitation/tests-et-qualite`](https://timepick.docs.jensen-siu.net/exploitation/tests-et-qualite) | Documentation des suites de tests et configuration |
+| [`https://docs.timepick.app/installation/installation-locale`](https://docs.timepick.app/installation/installation-locale) | Configuration initiale et première utilisation |
+| [`https://docs.timepick.app/installation/deploiement-coolify-vps`](https://docs.timepick.app/installation/deploiement-coolify-vps) | Guide de déploiement (Docker, Coolify, variables de production) |
+| [`https://docs.timepick.app/reference/modele-de-donnees`](https://docs.timepick.app/reference/modele-de-donnees) | Système de migrations SQL — détail des 38 migrations |
+| [`https://docs.timepick.app/exploitation/tests-et-qualite`](https://docs.timepick.app/exploitation/tests-et-qualite) | Documentation des suites de tests et configuration |
 
 ---
 

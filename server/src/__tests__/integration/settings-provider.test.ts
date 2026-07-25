@@ -288,7 +288,7 @@ describe('SMTP Settings API — dispatch provider data-driven (chantier email-pr
       const res = await request(testServer())
         .put('/api/admin/settings/smtp')
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ smtpHost: 'mail.example.com', smtpPort: 465, smtpSecure: true })
+        .send({ smtpHost: 'mail.example.com', smtpPort: 465, smtpSecure: true, smtpFromEmail: 'noreply@example.com' })
 
       expect(res.status).toBe(200)
       expect(settingsDb.saveSmtpSettings).toHaveBeenCalledWith(
@@ -301,7 +301,7 @@ describe('SMTP Settings API — dispatch provider data-driven (chantier email-pr
       const res = await request(testServer())
         .put('/api/admin/settings/smtp')
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ provider: 'smtp', smtpHost: 'mail.example.com', smtpPort: 465, smtpSecure: true })
+        .send({ provider: 'smtp', smtpHost: 'mail.example.com', smtpPort: 465, smtpSecure: true, smtpFromEmail: 'noreply@example.com' })
 
       expect(res.status).toBe(200)
       expect(emailProviderDb.saveEmailProviderConfig).toHaveBeenCalledWith({ provider: 'smtp' })

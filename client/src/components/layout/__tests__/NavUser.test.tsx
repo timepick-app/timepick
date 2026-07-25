@@ -97,7 +97,7 @@ describe('NavUser', () => {
     render(<NavUser onNavigate={onNavigate} />)
     screen.getByText('Documentation').click()
     expect(openSpy).toHaveBeenCalledWith(
-      'https://timepick.docs.jensen-siu.net/',
+      'https://docs.timepick.app/',
       '_blank',
       'noopener,noreferrer',
     )

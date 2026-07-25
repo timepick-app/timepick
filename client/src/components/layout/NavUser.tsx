@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 
 /** URL publique de la documentation TimePick (D8). */
-const DOCS_URL = 'https://timepick.docs.jensen-siu.net/'
+const DOCS_URL = 'https://docs.timepick.app/'
 
 interface NavUserProps {
   /** Appelé après une navigation (ferme le tiroir mobile). */

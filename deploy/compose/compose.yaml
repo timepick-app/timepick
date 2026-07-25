@@ -1,6 +1,6 @@
 # TimePick — auto-hébergement « pur Docker » : app + PostgreSQL en conteneurs liés.
-# Quickstart : `cp .env.example .env` (renseigner chaque valeur) puis `docker compose up -d`.
-# Doc : https://timepick.docs.jensen-siu.net/installation/installation-production-docker.html
+# Quickstart : `cp .env.example .env` (renseigner les valeurs obligatoires) puis `docker compose up -d`.
+# Doc : https://docs.timepick.app/installation/installation-production-docker.html
 name: timepick
 
 services:
@@ -8,7 +8,7 @@ services:
     # Tag ÉPINGLÉ — ne jamais utiliser `latest` en production (contenu mouvant,
     # redéploiement imprévisible). Mise à jour : sauvegarder la base, éditer ce
     # tag, puis `docker compose pull && docker compose up -d`.
-    image: ghcr.io/timepick-app/timepick:v0.32.0
+    image: ghcr.io/timepick-app/timepick:v0.32.2
     restart: unless-stopped
     depends_on:
       db:
@@ -24,7 +24,17 @@ services:
       JWT_SECRET: ${JWT_SECRET:?générer avec `openssl rand -hex 32` — voir .env.example}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?générer avec `openssl rand -hex 32` — voir .env.example}
       APP_URL: ${APP_URL:?URL publique de l'instance — voir .env.example}
-      EMAIL_FROM: ${EMAIL_FROM:?adresse d'expédition des emails — voir .env.example}
+      # Pré-provisionnement SMTP optionnel, lu au premier démarrage UNIQUEMENT
+      # (SMTP_HOST est le déclencheur — bloc entier ignoré s'il est absent).
+      # Ensuite la configuration email vit en base (Paramètres > Serveur
+      # d'email) — ces variables n'ont alors plus aucun effet. Voir .env.example.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-}
     volumes:
       # Images uploadées dans l'éditeur d'emails — perdues à la recréation du
       # conteneur sans ce volume (STORAGE_DRIVER=local, le défaut).

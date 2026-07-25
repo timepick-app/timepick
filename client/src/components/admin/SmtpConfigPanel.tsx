@@ -75,6 +75,14 @@ const validateSmtpForm = (
     if (values.smtpHost && (!values.smtpPort || isNaN(port) || port < 1 || port > 65535)) {
       errors.smtpPort = 'Le port doit être entre 1 et 65535'
     }
+    // smtpFromEmail requis UNIQUEMENT quand un hôte est renseigné — un hôte
+    // vide signifie « effacer la configuration » (cf. handleSave) et ne doit
+    // jamais être bloqué. Aligné sur le serveur (checkSmtpFromEmailRequired,
+    // settings.validator.ts) et sur le chemin HTTP juste en dessous
+    // (validateProviderCredentials), qui exige déjà ce champ.
+    if (values.smtpHost && !values.smtpFromEmail) {
+      errors.smtpFromEmail = "L'email de l'expéditeur est requis lorsqu'un serveur SMTP est configuré"
+    }
   } else {
     Object.assign(errors, validateProviderCredentials(values, catalog, storedProvider, storedCredentials))
   }

@@ -1,6 +1,6 @@
 {
   "name": "timepick",
-  "version": "0.32.0",
+  "version": "0.32.2",
   "license": "FSL-1.1-MIT",
   "type": "module",
   "workspaces": [

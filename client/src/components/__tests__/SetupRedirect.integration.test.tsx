@@ -111,6 +111,7 @@ describe('SetupRedirect — intégration : race de redirection setup', () => {
     // Étape 1 — SMTP : saisir un hôte minimal et continuer
     await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeEnabled());
     await user.type(screen.getByTestId('smtp-host'), 'smtp.test.com');
+    await user.type(screen.getByTestId('smtp-from-email'), 'noreply@exemple.com');
     await user.click(screen.getByTestId('smtp-continue-btn'));
 
     // Étape 2 — admin : saisir l'email et soumettre
@@ -139,6 +140,7 @@ describe('SetupRedirect — intégration : race de redirection setup', () => {
     // Étape 1 (SMTP) → étape 2 (admin)
     await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeEnabled());
     await user.type(screen.getByTestId('smtp-host'), 'smtp.test.com');
+    await user.type(screen.getByTestId('smtp-from-email'), 'noreply@exemple.com');
     await user.click(screen.getByTestId('smtp-continue-btn'));
     expect(await screen.findByRole('button', { name: 'Devenir administrateur' })).toBeInTheDocument();
 

@@ -123,6 +123,26 @@ describe('Setup SMTP API', () => {
         }),
       )
     })
+
+    it('rejette un hôte SMTP renseigné sans email expéditeur', async () => {
+      const res = await request(testServer())
+        .put('/api/setup/smtp')
+        .send({ ...validSettings, smtpFromEmail: '' })
+
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe('VALIDATION_ERROR')
+      expect(res.body.error.message).toContain('expéditeur')
+    })
+
+    it('accepte un hôte SMTP vide même sans email expéditeur (effacement)', async () => {
+      ;(settingsDb.saveSmtpSettings as jest.Mock).mockResolvedValue(undefined)
+
+      const res = await request(testServer())
+        .put('/api/setup/smtp')
+        .send({ smtpHost: '', smtpPort: 587, smtpSecure: false })
+
+      expect(res.status).toBe(200)
+    })
   })
 
   // ===================================================

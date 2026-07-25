@@ -14,7 +14,7 @@
 #   doctl apps create --spec deploy/digitalocean/app.yaml
 #   doctl apps update <APP_ID> --spec deploy/digitalocean/app.yaml   (mises à jour)
 #
-# Contrat gelé (voir https://timepick.docs.jensen-siu.net/installation/deploiement-paas) :
+# Contrat gelé (voir https://docs.timepick.app/installation/deploiement-paas) :
 #   - Image canonique multi-arch : ghcr.io/timepick-app/timepick (amd64+arm64).
 #     App Platform ne supporte QUE l'architecture AMD64 pour les images de
 #     conteneur — c'est la variante amd64 du manifest multi-arch qui est

@@ -5,14 +5,20 @@ import { getProviderMeta, HTTP_PROVIDER_IDS } from '../services/email-transport/
  * Schéma de validation pour la mise à jour des paramètres SMTP (PUT /settings/smtp)
  *
  * Champs requis : smtpHost, smtpPort, smtpSecure
- * Champs optionnels : smtpUser, smtpPassword, smtpFromName, smtpFromEmail
+ * Champs optionnels : smtpUser, smtpPassword, smtpFromName
+ * smtpFromEmail : requis UNIQUEMENT si smtpHost est renseigné — voir
+ * `checkSmtpFromEmailRequired` (superRefine ci-dessous, même stratégie que
+ * `checkProviderCredentials` plus bas). Un hôte vide reste TOUJOURS accepté :
+ * il signifie « effacer la configuration » (`deleteSmtpSettingsHandler`, cf.
+ * commentaire "empty host triggers DELETE" dans `SmtpConfigPanel.tsx`) — ce
+ * cas ne doit jamais être bloqué par cette règle.
  *
  * Le mot de passe peut être :
  * - Une valeur réelle (sera chiffrée avant stockage)
  * - Le sentinelle "****" (préserve l'ancien mot de passe)
  * - Vide "" (préserve l'ancien mot de passe)
  */
-export const smtpSettingsSchema = z.object({
+const smtpSettingsShape = z.object({
   smtpHost: z.string({
     error: () => "L'hôte SMTP doit être une chaîne de caractères"
   }).optional().default(''),
@@ -34,11 +40,40 @@ export const smtpSettingsSchema = z.object({
   smtpFromEmail: z.string().email("L'email de l'expéditeur doit être une adresse email valide").optional().or(z.literal(''))
 })
 
+/** Refine partagé — `smtpFromEmail` requis UNIQUEMENT quand `smtpHost` est
+ *  renseigné (délivrabilité), même exigence que le chemin HTTP
+ *  (`checkProviderCredentials` ci-dessous). Un `smtpHost` vide reste
+ *  TOUJOURS accepté (effacement, cf. doc ci-dessus) — d'où le test de garde
+ *  sur smtpHost avant d'exiger smtpFromEmail. Nommée + appliquée via
+ *  `.superRefine()` sur une forme dédiée (`smtpSettingsShape`), comme
+ *  `checkProviderCredentials`/`emailApiProviderShape` plus bas — ne pas
+ *  fusionner l'objet et le refine si ce schéma doit un jour être étendu via
+ *  `.extend()` (qui doit précéder `.superRefine()`, cf. avertissement sur
+ *  `smtpTestSchema`/`smtpSetupTestSchema` ci-dessous). */
+function checkSmtpFromEmailRequired(data: z.infer<typeof smtpSettingsShape>, ctx: z.RefinementCtx): void {
+  if (data.smtpHost.trim() && !data.smtpFromEmail) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['smtpFromEmail'],
+      message: "L'email de l'expéditeur est requis lorsqu'un serveur SMTP est configuré",
+    })
+  }
+}
+
+export const smtpSettingsSchema = smtpSettingsShape.superRefine(checkSmtpFromEmailRequired)
+
 /**
  * Schéma de validation pour le test de connexion SMTP (POST /settings/smtp/test)
  *
  * Mêmes champs que smtpSettingsSchema, mais le sentinelle "****" est rejeté
  * car on ne peut pas tester une connexion avec le mot de passe masqué.
+ *
+ * `smtpFromEmail` reste OPTIONNEL ici (contrairement à smtpSettingsSchema) :
+ * le transport ad-hoc de test (`sendSmtpTest`) retombe sur `recipient` comme
+ * adresse d'expéditeur quand il est vide — repli sûr et local à ce test
+ * (envoi à l'admin qui teste), sans rapport avec le risque de
+ * `noreply@example.com` en production que ce chantier corrige (celui-ci ne
+ * concerne que la PERSISTANCE de la config, via smtpSettingsSchema/PUT).
  */
 export const smtpTestSchema = z.object({
   smtpHost: z.string({

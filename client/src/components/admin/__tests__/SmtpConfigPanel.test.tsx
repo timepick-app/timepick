@@ -331,6 +331,21 @@ describe('SmtpConfigPanel', () => {
     expect(screen.getByText(/Format d'email invalide/)).toBeInTheDocument()
   })
 
+  it('shows error and blocks save when sender email is empty with a host set', () => {
+    renderPanel()
+
+    // Host déjà renseigné par défaut (sampleSettings) — on vide uniquement l'email
+    const emailInput = screen.getByTestId('smtp-from-email')
+    fireEvent.change(emailInput, { target: { value: '' } })
+
+    const saveBtn = screen.getByTestId('smtp-save-btn')
+    fireEvent.click(saveBtn)
+
+    expect(screen.getByText(/L'email de l'expéditeur est requis/)).toBeInTheDocument()
+    expect(mockSave).not.toHaveBeenCalled()
+    expect(mockClear).not.toHaveBeenCalled()
+  })
+
   it('clears validation error when invalid port field is corrected', () => {
     mockUseSmtpSettings.mockReturnValue({
       data: { ...sampleSettings, smtpPort: '99999' },

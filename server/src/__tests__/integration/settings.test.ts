@@ -158,6 +158,7 @@ describe('SMTP Settings API', () => {
           smtpHost: 'mail.example.com',
           smtpPort: 465,
           smtpSecure: true,
+          smtpFromEmail: 'noreply@example.com',
           smtpPassword: '****',
         })
 
@@ -177,6 +178,7 @@ describe('SMTP Settings API', () => {
           smtpHost: 'mail.example.com',
           smtpPort: 465,
           smtpSecure: true,
+          smtpFromEmail: 'noreply@example.com',
           smtpPassword: '',
         })
 
@@ -245,6 +247,17 @@ describe('SMTP Settings API', () => {
 
       expect(res.status).toBe(400)
       expect(res.body.error.code).toBe('VALIDATION_ERROR')
+    })
+
+    it("rejette un hôte SMTP renseigné sans email expéditeur (smtpFromEmail requis dès qu'un serveur est configuré)", async () => {
+      const res = await request(testServer())
+        .put('/api/admin/settings/smtp')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ smtpHost: 'mail.example.com', smtpPort: 465, smtpSecure: true, smtpFromEmail: '' })
+
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe('VALIDATION_ERROR')
+      expect(res.body.error.message).toContain('expéditeur')
     })
   })
 

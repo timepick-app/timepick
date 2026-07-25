@@ -117,6 +117,13 @@ export function SetupSmtpStep({ onDone, skippable = false }: Props) {
       if (!formValues.smtpPort || isNaN(port) || port < 1 || port > 65535) {
         errors.smtpPort = 'Le port doit être entre 1 et 65535'
       }
+      // smtpFromEmail requis UNIQUEMENT quand un hôte est renseigné — même
+      // règle conditionnelle que SmtpConfigPanel/le serveur
+      // (checkSmtpFromEmailRequired, settings.validator.ts) et que le chemin
+      // HTTP juste en dessous (validateProviderCredentials).
+      if (formValues.smtpHost.trim() && !formValues.smtpFromEmail) {
+        errors.smtpFromEmail = "L'email de l'expéditeur est requis lorsqu'un serveur SMTP est configuré"
+      }
     } else {
       Object.assign(errors, validateProviderCredentials(formValues, catalog, storedProvider, storedCredentials))
     }

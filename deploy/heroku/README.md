@@ -13,7 +13,7 @@ ce README.
 
 Pour le tableau complet des variables d'environnement et les contraintes runtime
 partagées par toutes les cibles PaaS (scale, migrations, healthcheck), voir la
-fiche **[Déployer sur un PaaS](https://timepick.docs.jensen-siu.net/installation/deploiement-paas)** de
+fiche **[Déployer sur un PaaS](https://docs.timepick.app/installation/deploiement-paas)** de
 la documentation TimePick — ce document ne la duplique pas, il la complète avec
 les commandes Heroku spécifiques.
 
@@ -28,7 +28,7 @@ les commandes Heroku spécifiques.
     (chantier B) — sans ça elles sont régénérées à chaque boot/redeploy : sessions
     et magic-links invalidés, mot de passe SMTP en base indéchiffrable → lockout
     admin. Sur une install Heroku déjà existante avec un `ENCRYPTION_KEY`
-    différent, suivre la [procédure disque → environnement](https://timepick.docs.jensen-siu.net/configuration/variables-environnement#migration-secrets)
+    différent, suivre la [procédure disque → environnement](https://docs.timepick.app/configuration/variables-environnement#migration-secrets)
     avant de changer la valeur.
 - **SMTP sortant** — l'infrastructure Heroku throttle/bloque uniquement le port
   **25** sortant sur les dynos Common Runtime (non levable hors Private Space,
@@ -141,7 +141,7 @@ Source : [Building Docker Images with heroku.yml](https://devcenter.heroku.com/a
 Ne posez QUE des config vars runtime — jamais `VITE_API_URL` (déjà baké au
 build, cf. contrat) ni `PORT` (injecté automatiquement par Heroku par dyno,
 lu par `process.env.PORT` côté serveur). Tableau complet et détails de chaque
-variable : [« Déployer sur un PaaS »](https://timepick.docs.jensen-siu.net/installation/deploiement-paas). Résumé
+variable : [« Déployer sur un PaaS »](https://docs.timepick.app/installation/deploiement-paas). Résumé
 des commandes :
 
 ```sh

@@ -31,7 +31,7 @@ Conséquence : une nouvelle ressource monte des **volumes NEUFS et VIDES**, mêm
 
 ### P1 — Promouvoir les secrets en variables d'env (chantier B) sur la ressource ACTUELLE
 
-Avant toute bascule, exécuter la procédure **[« Migrer une installation existante : secrets disque → environnement »](https://timepick.docs.jensen-siu.net/configuration/variables-environnement#migration-secrets)** sur l'app **actuelle** (Build Pack) : extraire `ENCRYPTION_KEY`/`JWT_SECRET` **en place**, les poser en env, Redeploy, puis vérifier `GET /api/admin/encryption-key` → `source:"env"` + **même fingerprint**, et une reconnexion par magic-link OK.
+Avant toute bascule, exécuter la procédure **[« Migrer une installation existante : secrets disque → environnement »](https://docs.timepick.app/configuration/variables-environnement#migration-secrets)** sur l'app **actuelle** (Build Pack) : extraire `ENCRYPTION_KEY`/`JWT_SECRET` **en place**, les poser en env, Redeploy, puis vérifier `GET /api/admin/encryption-key` → `source:"env"` + **même fingerprint**, et une reconnexion par magic-link OK.
 
 Effet : les secrets ne dépendent plus du volume `data`. La nouvelle ressource, configurée avec **les mêmes valeurs en env**, ne régénère rien → pas de lockout.
 
@@ -78,7 +78,7 @@ Projet TimePick → **+ Add Resource** → **Docker Image** :
 
 ### 3. Reporter la configuration (env, volumes, healthcheck) — SANS `VITE_API_URL`
 
-- **Environment Variables** : reprendre le même bloc que l'app actuelle, secrets **en env** (P1) inclus. Tableau des variables : [« Déployer sur un PaaS »](https://timepick.docs.jensen-siu.net/installation/deploiement-paas). **Retirer `VITE_API_URL`** : c'est une variable de *build*, déjà bakée à `/api` (relatif, same-origin) dans l'image GHCR ; en mode pull il n'y a plus de build, elle est sans effet.
+- **Environment Variables** : reprendre le même bloc que l'app actuelle, secrets **en env** (P1) inclus. Tableau des variables : [« Déployer sur un PaaS »](https://docs.timepick.app/installation/deploiement-paas). **Retirer `VITE_API_URL`** : c'est une variable de *build*, déjà bakée à `/api` (relatif, same-origin) dans l'image GHCR ; en mode pull il n'y a plus de build, elle est sans effet.
 - **Volumes** :
   - `uploads` : selon **P2** — Option A (s3) → aucun volume `uploads` requis ; Option B (local) → **bind mount** vers le chemin hôte existant.
   - `data` : **plus nécessaire** si les secrets sont en env (P1). (Si vous n'avez pas fait P1 — déconseillé — il faut bind-monter le chemin hôte de l'ancien volume `data`, sinon lockout.)
@@ -135,7 +135,7 @@ Aucune option n'est destructive **si l'ancienne ressource est conservée** :
 
 ## Références
 
-- Documentation TimePick : [Déploiement Coolify / VPS](https://timepick.docs.jensen-siu.net/installation/deploiement-coolify-vps) (guide complet) · [Déployer sur un PaaS](https://timepick.docs.jensen-siu.net/installation/deploiement-paas) (contraintes runtime, env vars) · [migration des secrets disque → env](https://timepick.docs.jensen-siu.net/configuration/variables-environnement#migration-secrets) (procédure P1).
+- Documentation TimePick : [Déploiement Coolify / VPS](https://docs.timepick.app/installation/deploiement-coolify-vps) (guide complet) · [Déployer sur un PaaS](https://docs.timepick.app/installation/deploiement-paas) (contraintes runtime, env vars) · [migration des secrets disque → env](https://docs.timepick.app/configuration/variables-environnement#migration-secrets) (procédure P1).
 - Coolify — Docker Registry (auth via credentials Docker Engine de l'hôte) : https://coolify.io/docs/knowledge-base/docker/registry
 - Coolify — Persistent Storage (préfixe UUID sur les volumes nommés) : https://coolify.io/docs/knowledge-base/persistent-storage
 - Bug connu pull GHCR depuis Coolify : https://github.com/coollabsio/coolify/issues/4604
