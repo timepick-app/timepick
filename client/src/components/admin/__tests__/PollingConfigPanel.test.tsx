@@ -1,7 +1,7 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { PollingConfigPanel } from '../PollingConfigPanel'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 
 // Mock des hooks - utiliser le chemin relatif depuis __tests__/ vers hooks/
 const mockUsePollingConfig = vi.fn()
@@ -222,5 +222,101 @@ describe('PollingConfigPanel', () => {
     expect(screen.getByText('(actuel: 60s)')).toBeInTheDocument()
     const input = screen.getByTestId('polling-input') as HTMLInputElement
     expect(input.value).toBe('60')
+  })
+})
+
+describe('PollingConfigPanel — garde anti-écrasement (refetch d\'arrière-plan, staleTime 5 min)', () => {
+  const POLLING_KEY = ['config', 'polling-interval']
+  const mockUpdateGuard = vi.fn()
+  // Prouve que ces tests ne déclenchent jamais un vrai fetch réseau : toute la
+  // simulation passe par `queryClient.setQueryData`, jamais par `queryFn`.
+  const unexpectedFetch = vi.fn(() => Promise.reject(new Error('unexpected fetch in test')))
+
+  // Ces tests pilotent la vraie query (`useQuery` réel, porté par un QueryClient
+  // réel) au lieu du `mockUsePollingConfig.mockReturnValue` statique des tests
+  // ci-dessus : c'est le seul moyen de simuler fidèlement, via
+  // `queryClient.setQueryData`, le refetch d'arrière-plan que déclenche
+  // `refetchOnWindowFocus` au retour d'onglet (staleTime 5 min).
+  beforeEach(() => {
+    unexpectedFetch.mockClear()
+    mockUsePollingConfig.mockImplementation(() =>
+      useQuery({
+        queryKey: POLLING_KEY,
+        queryFn: unexpectedFetch,
+        staleTime: 5 * 60 * 1000,
+      })
+    )
+    mockUseUpdatePollingConfig.mockReturnValue({
+      mutate: mockUpdateGuard,
+      isPending: false,
+    })
+  })
+
+  const renderWithClient = (queryClient: QueryClient) =>
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PollingConfigPanel />
+      </QueryClientProvider>
+    )
+
+  it("n'écrase pas une saisie non sauvegardée quand un refetch d'arrière-plan ramène une config tierce", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    queryClient.setQueryData(POLLING_KEY, { interval: 30000 }) // hydratation initiale : 30s
+
+    renderWithClient(queryClient)
+
+    const input = screen.getByTestId('polling-input') as HTMLInputElement
+    await waitFor(() => expect(input.value).toBe('30'))
+
+    // L'utilisateur modifie le formulaire sans sauvegarder
+    fireEvent.change(input, { target: { value: '50' } })
+    expect(input.value).toBe('50')
+
+    // Un autre admin modifie la config pendant que l'onglet est en arrière-plan ;
+    // au retour, refetchOnWindowFocus ramène une NOUVELLE référence (90s), différente
+    // à la fois de la saisie en cours (50s) et de la valeur initiale (30s)
+    act(() => {
+      queryClient.setQueryData(POLLING_KEY, { interval: 90000 })
+    })
+
+    // Preuve que la nouvelle référence a bien atteint le composant (sinon le test
+    // passerait aussi si le refetch n'avait jamais été traité)
+    await waitFor(() => expect(screen.getByText('(actuel: 90s)')).toBeInTheDocument())
+
+    // La saisie de l'utilisateur reste affichée — pas écrasée par le refetch tiers
+    expect(input.value).toBe('50')
+    expect(unexpectedFetch).not.toHaveBeenCalled()
+  })
+
+  it("adopte la config serveur après une sauvegarde réussie : l'instantané avance et Sauvegarder redevient désactivé", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    queryClient.setQueryData(POLLING_KEY, { interval: 30000 })
+
+    renderWithClient(queryClient)
+
+    const input = screen.getByTestId('polling-input') as HTMLInputElement
+    await waitFor(() => expect(input.value).toBe('30'))
+
+    fireEvent.change(input, { target: { value: '50' } })
+    expect(screen.getByTestId('save-polling-button')).not.toBeDisabled()
+
+    // Simule la résolution de notre propre sauvegarde : invalidation + refetch
+    // renvoyant exactement ce que le formulaire affiche déjà (50s)
+    act(() => {
+      queryClient.setQueryData(POLLING_KEY, { interval: 50000 })
+    })
+
+    await waitFor(() => expect(screen.getByTestId('save-polling-button')).toBeDisabled())
+    expect(input.value).toBe('50')
+    expect(screen.getByRole('button', { name: 'Réinitialiser' })).toBeDisabled()
+
+    // Preuve que l'instantané a réellement avancé à 50s (et pas seulement que isDirty
+    // se recalcule sur le pollingConfig live) : un refetch pristine ultérieur doit
+    // désormais être adopté, sinon le formulaire resterait figé sur 50
+    act(() => {
+      queryClient.setQueryData(POLLING_KEY, { interval: 80000 })
+    })
+    await waitFor(() => expect(input.value).toBe('80'))
+    expect(unexpectedFetch).not.toHaveBeenCalled()
   })
 })

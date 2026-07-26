@@ -98,7 +98,12 @@ router.delete('/users/:email', async (req, res) => {
  * Génère un token JWT valide pour les tests E2E
  *
  * Body: { email: string }
- * Response: { token: string, user: { id, email, firstName, lastName, role } }
+ * Response: { token: string, user: { id, email, firstName, lastName, role, hasMemberAccess } }
+ *
+ * `hasMemberAccess` est calculé à la volée via EXISTS(event_users), exactement comme le flux
+ * normal (magic-link/refresh, cf. auth.controller.ts) — jamais stocké en colonne. Le garde de
+ * forme client `isValidStoredAuthUser` (useAuth.tsx) exige ce champ ; son absence provoque une
+ * purge silencieuse de `localStorage` au montage d'AuthProvider.
  *
  * Utilisation dans les tests:
  * 1. Créer un admin: POST /api/test/users { email: "test@test.local", role: "admin" }
@@ -117,9 +122,12 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Email requis' });
     }
 
-    // Récupérer l'utilisateur
+    // Récupérer l'utilisateur (hasMemberAccess recalculé à la volée, comme le flux normal —
+    // jamais stocké en colonne, cf. auth.controller.ts / auth.middleware.ts)
     const result = await pool.query(
-      'SELECT id, email, first_name, last_name, role FROM users WHERE email = $1',
+      `SELECT id, email, first_name, last_name, role,
+              EXISTS(SELECT 1 FROM event_users WHERE user_id = users.id) AS has_member_access
+       FROM users WHERE email = $1`,
       [email]
     );
 
@@ -128,13 +136,17 @@ router.post('/login', async (req, res) => {
     }
 
     const user = result.rows[0];
+    const hasMemberAccess = Boolean(user.has_member_access);
 
     // Générer un token JWT valide (expire dans 2 heures)
     const JWT_SECRET = process.env.JWT_SECRET!;
     const exp = Math.floor(Date.now() / 1000) + 7200; // 2 heures
 
+    // role/hasMemberAccess ajoutés par parité avec le payload du token de session réel
+    // (verifyMagicLink/refreshSession) — rien ne décode ce payload aujourd'hui côté client
+    // ou serveur, mais requireAuth recalcule de toute façon ces champs depuis la DB.
     const token = jwt.sign(
-      { userId: user.id, exp },
+      { userId: user.id, role: user.role, hasMemberAccess, exp },
       JWT_SECRET
     );
 
@@ -151,7 +163,8 @@ router.post('/login', async (req, res) => {
         email: user.email,
         firstName: user.first_name,
         lastName: user.last_name,
-        role: user.role
+        role: user.role,
+        hasMemberAccess
       }
     });
   } catch (err) {

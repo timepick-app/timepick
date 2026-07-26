@@ -31,7 +31,7 @@ describe('useAdminAuth Hook', () => {
     expect(result.current.isAuthChecked).toBe(false)
   })
 
-  it('redirige vers /booking si authentifié mais rôle != admin', async () => {
+  it('redirige vers /me si authentifié mais rôle != admin', async () => {
     const mockUser = {
       id: '123',
       email: 'user@example.com',
@@ -48,7 +48,7 @@ describe('useAdminAuth Hook', () => {
     const { result } = renderHook(() => useAdminAuth(), { wrapper })
 
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/booking', { replace: true })
+      expect(mockNavigate).toHaveBeenCalledWith('/me', { replace: true })
     })
 
     expect(result.current.isAuthChecked).toBe(false)

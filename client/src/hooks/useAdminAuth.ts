@@ -10,7 +10,7 @@ import { useAuth } from './useAuth'
  * est assurée par le middleware requireAdmin sur le serveur.
  *
  * Redirige vers /auth/login si non authentifié,
- * ou vers /booking si authentifié mais pas admin.
+ * ou vers /me si authentifié mais pas admin (aligné sur AdminGuard, AC12).
  *
  * NOTE: Uses AuthProvider context (useAuth) instead of reading localStorage
  * directly to avoid race conditions and ensure a single source of truth.
@@ -40,7 +40,7 @@ export function useAdminAuth() {
     // Check if user has admin role
     if (user?.role !== 'admin') {
       hasNavigatedRef.current = true
-      navigate('/booking', { replace: true })
+      navigate('/me', { replace: true })
       return
     }
 

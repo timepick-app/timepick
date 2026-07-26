@@ -100,14 +100,14 @@ describe('Admin Page - Protection Admin & Gestion des erreurs', () => {
       });
     });
 
-    it('redirige vers /booking si utilisateur non-admin', async () => {
+    it('redirige vers /me si utilisateur non-admin', async () => {
       localStorage.setItem('auth_token', 'header.payload.signature');
       localStorage.setItem('auth_user', JSON.stringify({ id: 'u1', email: 'user@example.com', role: 'user', hasMemberAccess: true }));
 
       render(<Admin />, { wrapper: TestWrapper });
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith('/booking', { replace: true });
+        expect(mockNavigate).toHaveBeenCalledWith('/me', { replace: true });
       });
     });
 
@@ -209,7 +209,7 @@ describe('Admin Page - Protection Admin & Gestion des erreurs', () => {
       render(<Admin />, { wrapper: TestWrapper });
 
       await waitFor(() => {
-        expect(mockNavigate).not.toHaveBeenCalledWith('/booking', { replace: true });
+        expect(mockNavigate).not.toHaveBeenCalledWith('/me', { replace: true });
         expect(screen.getByTestId('admin-dashboard')).toBeInTheDocument();
       });
     });
@@ -222,7 +222,7 @@ describe('Admin Page - Protection Admin & Gestion des erreurs', () => {
       render(<Admin />, { wrapper: TestWrapper });
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith('/booking', { replace: true });
+        expect(mockNavigate).toHaveBeenCalledWith('/me', { replace: true });
       });
     });
   });

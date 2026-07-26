@@ -37,7 +37,7 @@ export function EventNotFound() {
           Cet événement n'existe pas. Vérifiez le lien et réessayez.
         </p>
 
-        <Link to="/booking">
+        <Link to="/">
           <Button variant="outline">Retour à l'accueil</Button>
         </Link>
       </div>

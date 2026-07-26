@@ -46,9 +46,20 @@ export const PollingConfigPanel = ({ className = '' }: PollingConfigPanelProps) 
 
   // Resync hors-effet : on aligne le champ sur la config fetchée dès que sa
   // référence change (montage + après mutation), sans re-rendu en cascade.
-  if (pollingConfig?.interval && pollingConfig !== syncedConfig) {
-    setSyncedConfig(pollingConfig)
-    setLocalSeconds(msToSeconds(pollingConfig.interval))
+  // Garde anti-écrasement : `refetchOnWindowFocus` (staleTime 5 min) peut ramener
+  // un refetch d'arrière-plan au retour d'onglet ; si un autre admin a modifié le
+  // réglage entre-temps, la référence change et une saisie en cours ne doit PAS
+  // être écrasée. On adopte la nouvelle valeur SSI le formulaire est vierge depuis
+  // le dernier instantané adopté (`syncedConfig` jamais posé, ou identique à la
+  // valeur qu'il portait), ou si le serveur confirme déjà ce que le formulaire
+  // affiche (cas : c'est notre propre sauvegarde qui revient).
+  const serverSeconds = pollingConfig?.interval != null ? msToSeconds(pollingConfig.interval) : undefined
+  if (serverSeconds != null && pollingConfig !== syncedConfig) {
+    const syncedSeconds = syncedConfig?.interval != null ? msToSeconds(syncedConfig.interval) : undefined
+    if (syncedConfig === undefined || localSeconds === syncedSeconds || localSeconds === serverSeconds) {
+      setSyncedConfig(pollingConfig)
+      setLocalSeconds(serverSeconds)
+    }
   }
 
   // Validation locale de la valeur saisie
@@ -78,10 +89,14 @@ export const PollingConfigPanel = ({ className = '' }: PollingConfigPanelProps) 
 
   const isDirty = pollingConfig?.interval != null && localSeconds !== msToSeconds(pollingConfig.interval)
 
-  // Gestionnaire de réinitialisation
+  // Gestionnaire de réinitialisation : abandonne les modifications locales et
+  // adopte l'état serveur courant. Fait aussi avancer l'instantané (sinon la
+  // garde de resync ci-dessus ne verrait plus jamais ce formulaire comme
+  // « vierge » face à un futur refetch d'arrière-plan tiers).
   const handleReset = () => {
     if (pollingConfig?.interval) {
       setLocalSeconds(msToSeconds(pollingConfig.interval))
+      setSyncedConfig(pollingConfig)
       setValidationError('')
     }
   }

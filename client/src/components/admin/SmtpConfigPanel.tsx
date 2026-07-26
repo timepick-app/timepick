@@ -23,7 +23,7 @@ import {
   useAdminHealth,
   useEmailProvidersCatalog,
 } from '@/hooks/useSmtpSettings'
-import type { EmailProvider, EmailSettingsPayload, SmtpSettingsPayload, ProviderMeta } from '@/services/settings.service'
+import type { EmailProvider, EmailSettingsPayload, SmtpSettings, SmtpSettingsPayload, ProviderMeta } from '@/services/settings.service'
 import { SmtpFields, validateProviderCredentials } from '@/components/smtp/SmtpFields'
 import type { SmtpFieldsValues } from '@/components/smtp/SmtpFields'
 import { EMAIL_RE } from '@/lib/email'
@@ -54,6 +54,37 @@ const credentialsEqual = (a: Record<string, string> | undefined, b: Record<strin
   if (aKeys.length !== bKeys.length) return false
   return aKeys.every(k => (a ?? {})[k] === (b ?? {})[k])
 }
+
+/**
+ * Convertit les réglages serveur en valeurs de formulaire — normalisation
+ * unique (`|| ''` / `?? false` / port par défaut) partagée par la resync,
+ * `isDirty` et `handleReset`, qui doivent rester des miroirs exacts les uns
+ * des autres (avant : trois copies indépendantes du même littéral).
+ */
+const toFormValues = (settings: SmtpSettings): FormValues => ({
+  emailProvider: settings.emailProvider || SMTP_PROVIDER,
+  credentials: settings.credentials ?? {},
+  smtpHost: settings.smtpHost || '',
+  smtpPort: settings.smtpPort || String(DEFAULT_PORT),
+  smtpSecure: settings.smtpSecure ?? false,
+  smtpUser: settings.smtpUser || '',
+  smtpPassword: settings.smtpPassword || '',
+  smtpFromName: settings.smtpFromName || '',
+  smtpFromEmail: settings.smtpFromEmail || '',
+})
+
+/** Deux FormValues sont équivalentes si chaque champ simple est strictement
+ *  égal et si `credentials` l'est au sens de `credentialsEqual`. */
+const formValuesEqual = (a: FormValues, b: FormValues): boolean =>
+     a.emailProvider === b.emailProvider
+  && credentialsEqual(a.credentials, b.credentials)
+  && a.smtpHost === b.smtpHost
+  && a.smtpPort === b.smtpPort
+  && a.smtpSecure === b.smtpSecure
+  && a.smtpUser === b.smtpUser
+  && a.smtpPassword === b.smtpPassword
+  && a.smtpFromName === b.smtpFromName
+  && a.smtpFromEmail === b.smtpFromEmail
 
 /**
  * Validate SMTP / fournisseur HTTP form values.
@@ -158,19 +189,21 @@ export const SmtpConfigPanel = ({ className }: SmtpConfigPanelProps) => {
 
   // Resync hors-effet : aligne le formulaire sur les réglages fetchés dès que
   // leur référence change (montage + après mutation), sans re-rendu en cascade.
+  // Garde anti-écrasement : `refetchOnWindowFocus` (staleTime 5 min) peut ramener
+  // un refetch d'arrière-plan au retour d'onglet ; si un autre admin a modifié la
+  // configuration entre-temps, la référence change et une saisie en cours ne doit
+  // PAS être écrasée. On adopte SSI le formulaire est vierge (jamais synchronisé,
+  // ou identique au dernier instantané adopté), ou si le serveur confirme déjà ce
+  // que le formulaire affiche (cas : c'est notre propre sauvegarde qui revient).
   if (settings && settings !== syncedSettings) {
-    setSyncedSettings(settings)
-    setFormValues({
-      emailProvider: settings.emailProvider || SMTP_PROVIDER,
-      credentials: settings.credentials ?? {},
-      smtpHost: settings.smtpHost || '',
-      smtpPort: settings.smtpPort || String(DEFAULT_PORT),
-      smtpSecure: settings.smtpSecure ?? false,
-      smtpUser: settings.smtpUser || '',
-      smtpPassword: settings.smtpPassword || '',
-      smtpFromName: settings.smtpFromName || '',
-      smtpFromEmail: settings.smtpFromEmail || '',
-    })
+    if (
+      syncedSettings === undefined ||
+      formValuesEqual(formValues, toFormValues(syncedSettings)) ||
+      formValuesEqual(formValues, toFormValues(settings))
+    ) {
+      setSyncedSettings(settings)
+      setFormValues(toFormValues(settings))
+    }
   }
 
   // Drapeau « >15s » remis à zéro hors-effet dès que la vérification n'est plus
@@ -237,20 +270,14 @@ export const SmtpConfigPanel = ({ className }: SmtpConfigPanelProps) => {
     testConnection(formValues.emailProvider !== SMTP_PROVIDER ? buildProviderPayload() : buildSmtpPayload())
   }
 
-  // Reset handler
+  // Reset handler : abandonne les modifications locales et adopte l'état
+  // serveur courant. Fait aussi avancer l'instantané (sinon la garde de
+  // resync ci-dessus ne verrait plus jamais ce formulaire comme « vierge »
+  // face à un futur refetch d'arrière-plan tiers).
   const handleReset = () => {
     if (settings) {
-      setFormValues({
-        emailProvider: settings.emailProvider || SMTP_PROVIDER,
-        credentials: settings.credentials ?? {},
-        smtpHost: settings.smtpHost || '',
-        smtpPort: settings.smtpPort || String(DEFAULT_PORT),
-        smtpSecure: settings.smtpSecure ?? false,
-        smtpUser: settings.smtpUser || '',
-        smtpPassword: settings.smtpPassword || '',
-        smtpFromName: settings.smtpFromName || '',
-        smtpFromEmail: settings.smtpFromEmail || '',
-      })
+      setFormValues(toFormValues(settings))
+      setSyncedSettings(settings)
       setValidationErrors({})
     }
   }
@@ -269,17 +296,7 @@ export const SmtpConfigPanel = ({ className }: SmtpConfigPanelProps) => {
   }
 
   const isBusy = isLoading || isSaving || isTesting || isClearing
-  const isDirty = settings != null && (
-       formValues.emailProvider !== (settings.emailProvider || SMTP_PROVIDER)
-    || !credentialsEqual(formValues.credentials, settings.credentials)
-    || formValues.smtpHost      !== (settings.smtpHost      || '')
-    || formValues.smtpPort      !== (settings.smtpPort      || String(DEFAULT_PORT))
-    || formValues.smtpSecure    !== (settings.smtpSecure    ?? false)
-    || formValues.smtpUser      !== (settings.smtpUser      || '')
-    || formValues.smtpPassword  !== (settings.smtpPassword  || '')
-    || formValues.smtpFromName  !== (settings.smtpFromName  || '')
-    || formValues.smtpFromEmail !== (settings.smtpFromEmail || '')
-  )
+  const isDirty = settings != null && !formValuesEqual(formValues, toFormValues(settings))
 
   return (
     <Card className={className} data-testid="smtp-config-panel">

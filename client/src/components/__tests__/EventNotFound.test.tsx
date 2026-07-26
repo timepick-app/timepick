@@ -24,7 +24,7 @@ describe('EventNotFound', () => {
     render(<EventNotFound />, { wrapper })
     const button = screen.getByRole('link', { name: /retour/i })
     expect(button).toBeInTheDocument()
-    expect(button).toHaveAttribute('href', '/booking')
+    expect(button).toHaveAttribute('href', '/')
   })
 
   it('affiche l\'icône de calendrier', () => {

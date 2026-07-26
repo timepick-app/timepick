@@ -5,7 +5,7 @@ import { NavigationBlockerProvider } from './contexts/NavigationBlockerContext';
 import { Toaster } from 'sonner';
 import Login from './pages/Login';
 import EmergencyLogin from './pages/EmergencyLogin';
-import Booking from './pages/Booking';
+import { RootRedirect } from './components/RootRedirect';
 import Admin from './pages/Admin';
 import EventsListPage from './pages/admin/EventsListPage';
 import { EventEditPage } from './pages/admin/EventEditPage';
@@ -51,9 +51,8 @@ function App() {
               <Route path="/login" element={<Login />} />
               <Route path="/emergency-login" element={<EmergencyLogin />} />
 
-              {/* Routes protégées par AuthProvider */}
-              <Route path="/" element={<Booking />} />
-              <Route path="/booking" element={<Booking />} />
+              {/* Racine : aiguilleur par rôle — cf. docs/2026-07-26-note-page-racine-identite-organisation.md */}
+              <Route path="/" element={<RootRedirect />} />
               {/* Routes admin — guard de route (D9 story 1.4) : AdminGuard est un
                   layout-route pur (Outlet/redirect) au-dessus des pages admin.
                   Les pages restent wrappées individuellement par AdminLayout. */}

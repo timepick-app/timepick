@@ -9,14 +9,14 @@ import type { AxiosResponse } from 'axios';
 // SetupRedirect + les vraies routes /, /login, /setup — sans mocker
 // useNavigate ni useSetupStatus. Seuls `api` (src/test/setup.ts) et `sonner`
 // sont mockés globalement. But : reproduire la race d'origine que les tests
-// unitaires (hook mocké) ne peuvent pas exercer — redirect SYNCHRONE de Booking
+// unitaires (hook mocké) ne peuvent pas exercer — redirect SYNCHRONE de RootRedirect
 // vers /login qui précède la résolution ASYNC de GET /setup/status, puis
 // sauvetage /login → /setup par SetupRedirect.
 import { SetupRedirect } from '../SetupRedirect';
 import { SetupGuard } from '../SetupGuard';
 import { AuthProvider } from '../../hooks/useAuth';
 import { SetupWizard } from '../../pages/SetupWizard';
-import Booking from '../../pages/Booking';
+import { RootRedirect } from '../RootRedirect';
 import api from '../../services/api';
 
 interface Deferred<T> {
@@ -46,7 +46,7 @@ const renderApp = (initialPath: string, queryClient: QueryClient) =>
         <AuthProvider>
           <SetupRedirect />
           <Routes>
-            <Route path="/" element={<Booking />} />
+            <Route path="/" element={<RootRedirect />} />
             <Route path="/login" element={<div>login-stub</div>} />
             <Route
               path="/setup"
@@ -70,7 +70,7 @@ describe('SetupRedirect — intégration : race de redirection setup', () => {
     localStorage.clear();
   });
 
-  it('base vierge : "/" redirige vers /login (Booking) puis vers /setup une fois needsSetup résolu', async () => {
+  it('base vierge : "/" redirige vers /login (RootRedirect) puis vers /setup une fois needsSetup résolu', async () => {
     // GET /setup/status reste EN ATTENTE → SetupRedirect ne peut pas encore agir.
     const deferred = createDeferred<AxiosResponse>();
     vi.mocked(api.get).mockReturnValue(deferred.promise as unknown as Promise<AxiosResponse>);
@@ -78,7 +78,7 @@ describe('SetupRedirect — intégration : race de redirection setup', () => {
     const queryClient = createTestQueryClient();
     renderApp('/', queryClient);
 
-    // Fenêtre de race : non authentifié, Booking a déjà renvoyé vers /login
+    // Fenêtre de race : non authentifié, RootRedirect a déjà renvoyé vers /login
     // AVANT que le statut setup n'arrive. Le wizard n'est pas encore là.
     expect(await screen.findByText('login-stub')).toBeInTheDocument();
     expect(screen.queryByText(WIZARD_HEADING)).not.toBeInTheDocument();

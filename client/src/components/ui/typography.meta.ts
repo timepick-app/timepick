@@ -9,7 +9,7 @@ export const typographyMeta: ComponentMeta = {
     {
       name: 'h1',
       description: 'Titre principal de page',
-      whenToUse: "Titre unique d'une page entière (titre AdminLayout via pageTitle, \"Calendrier des Permanences\" sur la page Booking, \"Design System\"). Une seule occurrence par page — si tu en as besoin d'un second titre fort, descends à h2 plutôt que de répéter h1.",
+      whenToUse: "Titre unique d'une page entière (titre AdminLayout via pageTitle, \"Design System\"). Une seule occurrence par page — si tu en as besoin d'un second titre fort, descends à h2 plutôt que de répéter h1.",
       cssHint: '36px → 48px (--font-size-h1, bold 700)',
     },
     {

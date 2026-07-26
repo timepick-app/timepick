@@ -80,6 +80,11 @@ export const useUpdateEvent = (options?: UseUpdateEventOptions) => {
       queryClient.invalidateQueries({ queryKey: ['events'] })
       // Invalider les détails de l'événement pour que EventFormPage reçoive les nouvelles valeurs
       queryClient.invalidateQueries({ queryKey: ['event', updatedEvent.id] })
+      // L'éligibilité aux invitations dépend de la date de fin de l'événement
+      // (`end` dépassée → envoi bloqué). Sans cette invalidation, seul l'écoulement
+      // du `staleTime` corrigeait l'état du bouton, ce qui faisait dépendre une
+      // correction d'une borne de cache au lieu de la mutation qui la cause.
+      queryClient.invalidateQueries({ queryKey: ['invitation-eligibility', updatedEvent.id] })
       // Also invalidate ALL public-event queries so the public calendar picks up the change immediately
       queryClient.invalidateQueries({
         predicate: (query) => {

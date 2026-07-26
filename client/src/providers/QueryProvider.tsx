@@ -9,9 +9,14 @@ interface QueryProviderProps {
  * QueryProvider - Fournit React Query pour la gestion d'état serveur
  *
  * Configuration:
- * - refetchOnWindowFocus: false (évite rechargement inutile)
+ * - refetchOnWindowFocus: true (données fraîches au retour d'onglet)
  * - retry: 1 (évite tentatives multiples en cas d'erreur)
  * - staleTime: 5min (données considérées fraîches 5 min)
+ *
+ * `refetchOnWindowFocus` ne refetch QUE les requêtes déjà *stale* : c'est
+ * `staleTime` qui décide. Le défaut de 5 min borne la rafale au retour — ne pas
+ * le relever sans mesurer. Mesures et angles écartés : ADR « rafraîchissement
+ * au retour d'onglet ».
  */
 export function QueryProvider({ children }: QueryProviderProps) {
   const [queryClient] = useState(
@@ -25,7 +30,7 @@ export function QueryProvider({ children }: QueryProviderProps) {
         }),
         defaultOptions: {
           queries: {
-            refetchOnWindowFocus: false,
+            refetchOnWindowFocus: true,
             retry: 1,
             staleTime: 5 * 60 * 1000, // 5 minutes
           },

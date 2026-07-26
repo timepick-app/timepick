@@ -77,22 +77,6 @@ describe('useDocumentTitle Hook', () => {
       expect(document.title).toBe('Membres - TimePick');
     });
 
-    it('sets title automatically from / route (root)', () => {
-      mockLocation.pathname = '/';
-
-      renderHook(() => useDocumentTitle());
-
-      expect(document.title).toBe('Calendrier - TimePick');
-    });
-
-    it('sets title automatically from /booking route', () => {
-      mockLocation.pathname = '/booking';
-
-      renderHook(() => useDocumentTitle());
-
-      expect(document.title).toBe('Calendrier - TimePick');
-    });
-
     it('sets title for /verify route', () => {
       mockLocation.pathname = '/verify';
 

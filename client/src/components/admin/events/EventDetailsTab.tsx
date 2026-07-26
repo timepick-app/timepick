@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, forwardRef, useImperativeHandle } from 'react'
 import { Copy, Check, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -129,16 +129,36 @@ export const EventDetailsTab = forwardRef<EventDetailsTabRef, EventDetailsTabPro
     // Derived state: toggle is ON when opensAt has a value
     const isScheduled = !!formData.opensAt
 
+    // Détecte si le formulaire a des modifications non sauvegardées.
+    // Note: isPublished n'est pas inclus car géré hors de ce formulaire (EventEditActions en édition / EventCreateBanner en création).
+    const isDirtyState = useMemo(
+      () =>
+        formData.name !== originalData.name ||
+        formData.description !== originalData.description ||
+        formData.opensAt !== (originalData.opensAt || null),
+      [formData, originalData]
+    )
+
+    // Clé serveur (`id-updatedAt`) attendue de NOTRE sauvegarde, posée par handleSave
+    // une fois la mutation résolue. Un échec n'en pose aucune, un refetch tiers en
+    // porte une autre : la version serveur n'est jamais adoptée à tort.
+    const savedKeyRef = useRef<string | null>(null)
+
     // Resync du formulaire quand l'identité de l'event change (ex: après sauvegarde réussie).
     // Ajustement pendant le rendu (pattern React) plutôt qu'un setState dans un effet : React
     // relance le rendu avec les nouvelles valeurs, sans double affichage. eventKey (id+updatedAt)
     // détecte le remplacement de l'objet event après mutation.
+    // Garde : n'adopter la version serveur que si c'est exactement celle de notre
+    // sauvegarde, ou si le formulaire est vierge (sinon un `updatedAt` tiers
+    // écraserait une saisie en cours).
     const [prevEventKey, setPrevEventKey] = useState(eventKey)
     if (eventKey !== prevEventKey) {
       setPrevEventKey(eventKey)
-      const newData = initializeFormData(event)
-      setFormData(newData)
-      setOriginalData(newData)
+      if (eventKey === savedKeyRef.current || !isDirtyState) {
+        const newData = initializeFormData(event)
+        setFormData(newData)
+        setOriginalData(newData)
+      }
     }
 
     // Notifier le parent du nom courant (onNameChange = setState parent → doit rester hors
@@ -165,18 +185,6 @@ export const EventDetailsTab = forwardRef<EventDetailsTabRef, EventDetailsTabPro
     }
 
     const { updateEvent, isUpdating } = useUpdateEvent(updateEventOptions)
-
-    /**
-     * Détecte si le formulaire a des modifications non sauvegardées
-     * Note: isPublished n'est pas inclus car géré hors de ce formulaire (EventEditActions en édition / EventCreateBanner en création)
-     */
-    const isDirtyState = useMemo(() => {
-      return (
-        formData.name !== originalData.name ||
-        formData.description !== originalData.description ||
-        formData.opensAt !== (originalData.opensAt || null)
-      )
-    }, [formData, originalData])
 
     // Notifier le parent des changements d'état dirty
     useEffect(() => {
@@ -272,7 +280,8 @@ export const EventDetailsTab = forwardRef<EventDetailsTabRef, EventDetailsTabPro
       }
 
       try {
-        await updateEvent(event.id, updateData)
+        const saved = await updateEvent(event.id, updateData)
+        savedKeyRef.current = `${saved.id}-${saved.updatedAt}`
 
         // IMPORTANT: Ne PAS mettre à jour originalData ici
         // Laisser le useEffect avec eventKey gérer la mise à jour quand l'event sera rechargé

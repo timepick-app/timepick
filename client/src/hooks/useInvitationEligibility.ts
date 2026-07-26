@@ -27,6 +27,14 @@ export const useInvitationEligibility = (eventId: string) => {
       return data.data
     },
     enabled: !!eventId,
-    staleTime: 5000 // Short cache, revalidate frequently
+    // 30 s — aligné sur `useInvitationStatus`, la requête voisine du même onglet.
+    // L'éligibilité ne dépend que de deux choses : le nombre de créneaux (invalidé
+    // explicitement par les mutations de créneaux) et le passage de la date de fin.
+    // Elle ne pilote qu'un état `disabled` de bouton — le serveur revalide de toute
+    // façon à l'envoi — donc une borne courte n'achète aucune correction, seulement
+    // des requêtes : depuis l'activation du rafraîchissement au retour d'onglet,
+    // `staleTime` est ce qui décide de refetcher, et 5 s (valeur d'origine, sans
+    // rationnel) faisait refetcher à chaque bascule d'onglet.
+    staleTime: 30_000,
   })
 }

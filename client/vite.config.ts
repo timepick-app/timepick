@@ -1,16 +1,12 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
-import { readFileSync } from 'fs'
-import { fileURLToPath } from 'url'
-import { dirname, join } from 'path'
-
-// Read version from root package.json (single source of truth)
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = dirname(__filename)
-const rootPackageJson = JSON.parse(
-  readFileSync(join(__dirname, '../package.json'), 'utf-8')
-)
+// Version depuis le package.json RACINE — source unique de vérité pour la version.
+// Import statique (pas readFileSync) : le fichier entre dans le graphe de la config,
+// donc Vite REDÉMARRE le dev server quand la racine change (bump de version) au lieu
+// de servir une valeur figée à l'évaluation initiale — 5 jours de dérive constatés
+// le 2026-07-26 (dev server du 21/07 affichant 0.30.0 alors que la racine était 0.32.2).
+import rootPackageJson from '../package.json'
 
 // https://vite.dev/config/
 export default defineConfig({

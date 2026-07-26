@@ -2,7 +2,7 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import userEvent, { type UserEvent } from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { SmtpConfigPanel } from '../SmtpConfigPanel'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import type { SmtpSettings, AdminHealthResponse, ProviderMeta } from '../../../services/settings.service'
 
 // Mock the hooks — all 6 are required by the component
@@ -865,5 +865,109 @@ describe('SmtpConfigPanel', () => {
 
       expect(screen.getByText('Opérationnel')).toBeInTheDocument()
     })
+  })
+})
+
+describe('SmtpConfigPanel — garde anti-écrasement (refetch d\'arrière-plan, staleTime 5 min)', () => {
+  const SMTP_KEY = ['settings', 'smtp']
+  const mockSaveGuard = vi.fn()
+  const mockTestGuard = vi.fn()
+  const mockClearGuard = vi.fn()
+  const mockRefetchHealthGuard = vi.fn()
+  // Prouve que ces tests ne déclenchent jamais un vrai fetch réseau : toute la
+  // simulation passe par `queryClient.setQueryData`, jamais par `queryFn`.
+  const unexpectedFetch = vi.fn(() => Promise.reject(new Error('unexpected fetch in test')))
+
+  // Ces tests pilotent la vraie query (`useQuery` réel, porté par un QueryClient
+  // réel) au lieu du `mockUseSmtpSettings.mockReturnValue` statique des tests
+  // ci-dessus : c'est le seul moyen de simuler fidèlement, via
+  // `queryClient.setQueryData`, le refetch d'arrière-plan que déclenche
+  // `refetchOnWindowFocus` au retour d'onglet (staleTime 5 min). Les 5 autres
+  // hooks restent mockés statiquement (hors sujet pour ces tests).
+  beforeEach(() => {
+    unexpectedFetch.mockClear()
+    mockUseSmtpSettings.mockImplementation(() =>
+      useQuery({
+        queryKey: SMTP_KEY,
+        queryFn: unexpectedFetch,
+        staleTime: 5 * 60 * 1000,
+      })
+    )
+    mockUseSaveSmtpSettings.mockReturnValue({ mutate: mockSaveGuard, isPending: false })
+    mockUseTestSmtpConnection.mockReturnValue({ mutate: mockTestGuard, isPending: false })
+    mockUseClearSmtpSettings.mockReturnValue({ mutate: mockClearGuard, isPending: false, error: null })
+    mockUseAdminHealth.mockReturnValue({ data: healthyHealth, isLoading: false, refetch: mockRefetchHealthGuard })
+    mockUseEmailProvidersCatalog.mockReturnValue({ data: catalogFixture, isLoading: false })
+  })
+
+  const renderWithClient = (queryClient: QueryClient) =>
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SmtpConfigPanel />
+      </QueryClientProvider>
+    )
+
+  it("n'écrase pas une saisie non sauvegardée quand un refetch d'arrière-plan ramène des réglages tiers", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    queryClient.setQueryData(SMTP_KEY, sampleSettings) // hydratation initiale
+
+    renderWithClient(queryClient)
+
+    const fromNameInput = screen.getByTestId('smtp-from-name') as HTMLInputElement
+    await waitFor(() => expect(fromNameInput.value).toBe('TimePick'))
+    expect(screen.getByText('Opérationnel')).toBeInTheDocument()
+
+    // L'utilisateur modifie le nom d'expéditeur sans sauvegarder
+    fireEvent.change(fromNameInput, { target: { value: 'Nom en cours de saisie' } })
+    expect(fromNameInput.value).toBe('Nom en cours de saisie')
+
+    // Un autre admin désactive entièrement le SMTP pendant que l'onglet est en
+    // arrière-plan ; au retour, refetchOnWindowFocus ramène une NOUVELLE référence
+    act(() => {
+      queryClient.setQueryData(SMTP_KEY, { ...sampleSettings, smtpHost: '' })
+    })
+
+    // Preuve que la nouvelle référence a bien atteint le composant : le badge
+    // dérive de `settings` en direct, indépendamment de la garde du formulaire
+    await waitFor(() => expect(screen.getByText('Non configuré')).toBeInTheDocument())
+
+    // La saisie en cours reste affichée, et le champ host du formulaire n'a pas
+    // non plus été écrasé (garde atomique sur tout le formulaire, pas champ par champ)
+    expect(fromNameInput.value).toBe('Nom en cours de saisie')
+    expect((screen.getByTestId('smtp-host') as HTMLInputElement).value).toBe('smtp.example.org')
+    expect(unexpectedFetch).not.toHaveBeenCalled()
+  })
+
+  it("adopte les réglages serveur après une sauvegarde réussie : l'instantané avance et Sauvegarder redevient désactivé", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    queryClient.setQueryData(SMTP_KEY, sampleSettings)
+
+    renderWithClient(queryClient)
+
+    const fromNameInput = screen.getByTestId('smtp-from-name') as HTMLInputElement
+    await waitFor(() => expect(fromNameInput.value).toBe('TimePick'))
+
+    fireEvent.change(fromNameInput, { target: { value: 'TimePick Renommé' } })
+    expect(screen.getByTestId('smtp-save-btn')).not.toBeDisabled()
+
+    // Simule la résolution de notre propre sauvegarde : invalidation + refetch
+    // renvoyant exactement ce que le formulaire affiche déjà
+    act(() => {
+      queryClient.setQueryData(SMTP_KEY, { ...sampleSettings, smtpFromName: 'TimePick Renommé' })
+    })
+
+    await waitFor(() => expect(screen.getByTestId('smtp-save-btn')).toBeDisabled())
+    expect(screen.getByTestId('smtp-reset-btn')).toBeDisabled()
+    expect(fromNameInput.value).toBe('TimePick Renommé')
+
+    // Preuve que l'instantané a réellement avancé (et pas seulement que isDirty se
+    // recalcule sur `settings` live, indépendant de l'instantané) : un refetch
+    // pristine ultérieur doit désormais être adopté, sinon le formulaire resterait
+    // figé sur « TimePick Renommé »
+    act(() => {
+      queryClient.setQueryData(SMTP_KEY, { ...sampleSettings, smtpFromName: 'Nom suivant' })
+    })
+    await waitFor(() => expect(fromNameInput.value).toBe('Nom suivant'))
+    expect(unexpectedFetch).not.toHaveBeenCalled()
   })
 })

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -34,10 +34,13 @@ export function AddInvitesDialog({
   const { setEventUsers, isSetting } = useSetEventUsers()
   const [selectedIds, setSelectedIds] = useState<string[]>(currentSelectedIds)
 
-  // Re-synchronise la sélection locale à chaque ouverture.
-  useEffect(() => {
+  // Resync à la transition d'ouverture seule : dépendre de `currentSelectedIds`
+  // laissait un refetch d'arrière-plan écraser la sélection en cours.
+  const [prevOpen, setPrevOpen] = useState(open)
+  if (open !== prevOpen) {
+    setPrevOpen(open)
     if (open) setSelectedIds(currentSelectedIds)
-  }, [open, currentSelectedIds])
+  }
 
   const handleSave = async () => {
     try {

@@ -18,10 +18,6 @@ const PAGE_TITLES: Record<string, string> = {
   '/verify': 'Vérification',
   '/setup': 'Installation',
 
-  // Public pages
-  '/': 'Calendrier',
-  '/booking': 'Calendrier',
-
   // Admin pages
   '/admin': 'Tableau de bord',
   '/admin/dashboard': 'Tableau de bord',

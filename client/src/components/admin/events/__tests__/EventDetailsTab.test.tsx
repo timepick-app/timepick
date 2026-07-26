@@ -1,7 +1,8 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { EventDetailsTab } from '../EventDetailsTab'
+import { EventDetailsTab, type EventDetailsTabRef } from '../EventDetailsTab'
+import { createRef } from 'react'
 import type { Event, UseUpdateEventOptions } from '@/hooks/useEvents'
 import { getEventPublicUrl } from '@/hooks/useEvents'
 // Toast is auto-mocked via global setup (vi.mock('sonner'))
@@ -99,11 +100,18 @@ describe('EventDetailsTab', () => {
     updatedAt: '2026-01-26T10:00:00Z'
   }
 
+  // updatedAt renvoyé par une sauvegarde réussie. Le composant compare cette clé
+  // à celle de l'event rechargé : les deux DOIVENT rester couplées.
+  const SAVED_AT = '2026-01-26T12:00:00Z'
+
   const mockOnSaved = vi.fn()
   const mockOnDirtyChange = vi.fn()
 
   beforeEach(() => {
     vi.clearAllMocks()
+    // Le vrai `updateEvent` résout avec l'Event mis à jour (useEvents: mutateAsync).
+    // Le composant en dérive la clé serveur attendue — le mock doit tenir ce contrat.
+    mockUpdateEvent.mockResolvedValue({ ...mockEvent, name: 'Nom sauvegardé', updatedAt: SAVED_AT })
   })
 
   it('devrait rendre le formulaire avec les valeurs pré-remplies', () => {
@@ -311,6 +319,104 @@ describe('EventDetailsTab', () => {
 
     expect(screen.getByDisplayValue('Événement Modifié')).toBeInTheDocument()
     expect((screen.getByLabelText(/description/i) as HTMLTextAreaElement).value).toContain('Nouvelle description')
+  })
+
+  it("ne réinitialise pas le formulaire quand l'event change côté serveur pendant une saisie", () => {
+    const { rerender } = render(
+      <EventDetailsTab
+        event={mockEvent}
+        onSaved={mockOnSaved}
+        onDirtyChange={mockOnDirtyChange}
+      />
+    )
+
+    fireEvent.change(screen.getByLabelText(/nom de l'événement/i), {
+      target: { value: 'Saisie en cours' },
+    })
+    expect(screen.getByLabelText(/nom de l'événement/i)).toHaveValue('Saisie en cours')
+
+    // Modification concurrente ramenée par un rafraîchissement d'arrière-plan
+    // (retour d'onglet, invalidation de cache) : updatedAt change sans que l'utilisateur
+    // ait sauvegardé. La saisie en cours doit survivre.
+    rerender(
+      <EventDetailsTab
+        event={{ ...mockEvent, name: 'Modifié ailleurs', updatedAt: '2026-01-26T12:00:00Z' }}
+        onSaved={mockOnSaved}
+        onDirtyChange={mockOnDirtyChange}
+      />
+    )
+
+    expect(screen.getByLabelText(/nom de l'événement/i)).toHaveValue('Saisie en cours')
+  })
+
+  it('adopte la version serveur après notre propre sauvegarde, formulaire modifié inclus', async () => {
+    const ref = createRef<EventDetailsTabRef>()
+    const { rerender } = render(
+      <EventDetailsTab
+        ref={ref}
+        event={mockEvent}
+        onSaved={mockOnSaved}
+        onDirtyChange={mockOnDirtyChange}
+      />
+    )
+
+    fireEvent.change(screen.getByLabelText(/nom de l'événement/i), {
+      target: { value: 'Nom sauvegardé' },
+    })
+    await act(async () => {
+      await ref.current?.save()
+    })
+    expect(mockUpdateEvent).toHaveBeenCalled()
+
+    // L'event rechargé après mutation porte un updatedAt neuf : ici la resync DOIT
+    // avoir lieu, sinon originalData reste en arrière et le formulaire reste dirty.
+    rerender(
+      <EventDetailsTab
+        ref={ref}
+        event={{ ...mockEvent, name: 'Nom sauvegardé', updatedAt: SAVED_AT }}
+        onSaved={mockOnSaved}
+        onDirtyChange={mockOnDirtyChange}
+      />
+    )
+
+    expect(screen.getByLabelText(/nom de l'événement/i)).toHaveValue('Nom sauvegardé')
+    await waitFor(() => {
+      expect(mockOnDirtyChange).toHaveBeenLastCalledWith(false)
+    })
+  })
+
+  it("une sauvegarde échouée n'autorise pas l'adoption d'une version tierce", async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    mockUpdateEvent.mockRejectedValueOnce(new Error('réseau'))
+    const ref = createRef<EventDetailsTabRef>()
+    const { rerender } = render(
+      <EventDetailsTab
+        ref={ref}
+        event={mockEvent}
+        onSaved={mockOnSaved}
+        onDirtyChange={mockOnDirtyChange}
+      />
+    )
+
+    fireEvent.change(screen.getByLabelText(/nom de l'événement/i), {
+      target: { value: 'Saisie en cours' },
+    })
+    await act(async () => {
+      expect(await ref.current?.save()).toBe(false)
+    })
+
+    // La sauvegarde a échoué : aucune clé serveur n'a été posée. Un `updatedAt`
+    // arrivant ensuite ne peut venir que d'un tiers — il ne doit rien écraser.
+    rerender(
+      <EventDetailsTab
+        ref={ref}
+        event={{ ...mockEvent, name: 'Modifié ailleurs', updatedAt: '2026-01-26T13:00:00Z' }}
+        onSaved={mockOnSaved}
+        onDirtyChange={mockOnDirtyChange}
+      />
+    )
+
+    expect(screen.getByLabelText(/nom de l'événement/i)).toHaveValue('Saisie en cours')
   })
 })
 
