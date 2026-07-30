@@ -33,6 +33,8 @@ interface MagicLinkPayload {
   eventId?: string;
   bootstrap?: boolean;
   email?: string;
+  firstName?: string;
+  lastName?: string;
 }
 
 // Schéma de validation pour generate-token
@@ -231,7 +233,11 @@ export const verifyMagicLink = async (req: Request, res: Response): Promise<void
         res.status(401).json({ error: { code: 'INVALID_TOKEN', message: 'Lien de connexion invalide.' } })
         return
       }
-      const created = await createFirstAdminAtomic(magicLinkPayload.email)
+      const created = await createFirstAdminAtomic(
+        magicLinkPayload.email,
+        magicLinkPayload.firstName,
+        magicLinkPayload.lastName,
+      )
       if (created === 'locked') {
         res.status(409).json({ error: { code: 'SETUP_IN_PROGRESS', message: 'Configuration en cours, réessayez.' } })
         return

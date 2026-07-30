@@ -67,6 +67,7 @@ export type NavEntry = NavItem | NavSection
 // --- Items admin par défaut (D2 : SidebarContent shippe la nav admin) ---------
 
 const adminSettingsSubItems: NavSubItem[] = [
+  { id: 'nav-settings-organization', label: 'Organisation', href: '/admin/settings?tab=organization' },
   { id: 'nav-settings-email', label: "Serveur d'email", href: '/admin/settings?tab=email' },
   { id: 'nav-settings-template', label: "Modèle d'email", href: '/admin/settings?tab=email-template' },
   { id: 'nav-settings-calendar', label: 'Calendrier', href: '/admin/settings?tab=calendar' },

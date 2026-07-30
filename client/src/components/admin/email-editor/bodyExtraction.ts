@@ -319,6 +319,33 @@ export function mjBodyAttrsEqual(
   )
 }
 
+/**
+ * Prédicat UNIQUE « ce bloc de coque est hérité au niveau d'édition courant »,
+ * c'est-à-dire : il n'a aucune cible de sauvegarde ici.
+ *
+ * Deux consommateurs doivent en dépendre, sans quoi ils divergent :
+ *  - `wrapBodyForEditing` ci-dessous, qui pose `data-inherited` (→ deep-lock) ;
+ *  - la garde de montage du `LockedShellInfoPanel` côté overlay.
+ *
+ * La divergence a réellement eu lieu : l'overlay gardait sur
+ * `origin !== ownerKind`, vrai au niveau template général dès que la cascade
+ * remonte à brand/hardcoded — le panneau « défini au niveau supérieur »
+ * s'ouvrait alors sur une coque parfaitement éditable. Or l'onglet Invitation
+ * écrit le propriétaire commun `template[invitation]` quelle que soit l'origine
+ * résolue : c'est une SOURCE de la cascade, pas un niveau qui hérite.
+ */
+export function isShellBlockInherited(
+  blockOrigin: string | undefined,
+  shellLock?: { ownerKind?: 'brand' | 'template' | 'event'; isSystem?: boolean },
+): boolean {
+  // Seul le niveau événement hérite bloc par bloc : une surcharge event est
+  // éditable, tout le reste de la cascade ne l'est pas depuis cet écran.
+  if (shellLock?.ownerKind === 'event') return blockOrigin !== 'event'
+  // Ailleurs, l'éditabilité ne dépend pas de l'origine : seul l'onglet
+  // Invitation (template, non système) porte la coque commune.
+  return !(shellLock?.ownerKind === 'template' && !shellLock?.isSystem)
+}
+
 export function wrapBodyForEditing(
   bodyFragment: string,
   brand: BrandShellTokens,
@@ -349,11 +376,9 @@ export function wrapBodyForEditing(
   // verrouillée (header/footer hérités → deep-lock). Niveau événement : seules
   // les sections d'origine non-événement sont héritées. Param optionnel → les
   // call-sites non mis à jour restent verrouillés (fallbackInherited=true).
-  const editableShell = shellLock?.ownerKind === 'template' && !shellLock?.isSystem
-  const isEventLevel = shellLock?.ownerKind === 'event'
-  const headerInherited = isEventLevel ? resolvedShell?.header.origin !== 'event' : !editableShell
-  const footerInherited = isEventLevel ? resolvedShell?.footer.origin !== 'event' : !editableShell
-  const fallbackInherited = !editableShell
+  const headerInherited = isShellBlockInherited(resolvedShell?.header.origin, shellLock)
+  const footerInherited = isShellBlockInherited(resolvedShell?.footer.origin, shellLock)
+  const fallbackInherited = isShellBlockInherited(undefined, shellLock)
 
   // Fallback header — MIROIR byte-identique du serveur `hardcodedHeader`
   // (shell-hardcoded-fallback.ts) = la coque commune « carte »

@@ -1,18 +1,27 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { query } from '../db';
-import { sendAdminMagicLinkEmail } from '../services/email.service';
+import { sendSetupAdminEmail } from '../services/email.service';
 import { adminEmailSchema } from '../utils/email-validation';
 import { generateBootstrapAdminLink } from '../services/setup.service';
-
-// Constantes pour la configuration du setup
-const ADMIN_MAGIC_LINK_TTL_MINUTES = 24 * 60;
 
 /**
  * Validation schema pour la création du premier admin
  */
 const createAdminSchema = z.object({
   email: adminEmailSchema,
+  // `.trim()` AVANT `.min(1)` : sinon un prénom d'espaces passe, l'email dit
+  // « Bonjour , » et le repli D4 stocke « Administrateur ».
+  firstName: z
+    .string({ error: (issue) => issue.input === undefined ? 'Le prénom est requis' : undefined })
+    .trim()
+    .min(1, 'Le prénom est requis')
+    .max(100, 'Le prénom ne peut pas dépasser 100 caractères'),
+  lastName: z
+    .string()
+    .trim()
+    .max(100, 'Le nom ne peut pas dépasser 100 caractères')
+    .optional(),
 });
 
 
@@ -68,14 +77,14 @@ export async function checkSetupNotDone(req: Request, res: Response, next: NextF
  * POST /api/setup/create-admin
  * Émet un lien bootstrap admin par email (aucun user créé ici).
  * La création réelle a lieu dans POST /api/auth/verify quand le token bootstrap est vérifié.
- * @param req - Request Express avec { email: string }
+ * @param req - Request Express avec { email: string, firstName: string, lastName?: string }
  * @param res - Response Express
  */
 export const createFirstAdmin = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { email } = createAdminSchema.parse(req.body)
-    const { link, expirationDate } = generateBootstrapAdminLink(email)
-    const sent = await sendAdminMagicLinkEmail(email, link, ADMIN_MAGIC_LINK_TTL_MINUTES, expirationDate, true, 'Administrateur', null)
+    const { email, firstName, lastName } = createAdminSchema.parse(req.body)
+    const { link, expirationDate } = generateBootstrapAdminLink(email, firstName, lastName)
+    const sent = await sendSetupAdminEmail(email, link, expirationDate, firstName, lastName)
     if (!sent) {
       res.status(500).json({ error: { code: 'EMAIL_SEND_FAILED', message: "Échec de l'envoi du lien. Vérifiez la configuration SMTP de l'étape précédente." } })
       return

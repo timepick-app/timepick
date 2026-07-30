@@ -59,8 +59,9 @@ describe('UserModal', () => {
       fireEvent.change(emailInput, { target: { value: 'invalid' } })
       fireEvent.blur(emailInput)
 
+      // Description accessible ⇒ le motif est rendu ET rattaché au champ.
       await waitFor(() => {
-        expect(screen.getByText("Format d'email invalide")).toBeInTheDocument()
+        expect(emailInput).toHaveAccessibleDescription("Format d'email invalide")
       })
     })
 
@@ -72,7 +73,9 @@ describe('UserModal', () => {
       fireEvent.click(createButton)
 
       await waitFor(() => {
-        expect(screen.getByText("L'email est requis")).toBeInTheDocument()
+        expect(screen.getByPlaceholderText('membre@example.com')).toHaveAccessibleDescription(
+          "L'email est requis",
+        )
       })
       expect(mockOnSave).not.toHaveBeenCalled()
     })
@@ -85,7 +88,7 @@ describe('UserModal', () => {
       fireEvent.click(screen.getByText('Créer'))
 
       await waitFor(() => {
-        expect(screen.getByText('Le prénom est requis')).toBeInTheDocument()
+        expect(screen.getByPlaceholderText('Jean')).toHaveAccessibleDescription('Le prénom est requis')
       })
       expect(mockOnSave).not.toHaveBeenCalled()
     })
@@ -111,6 +114,23 @@ describe('UserModal', () => {
           sendInvitation: true
         })
       })
+    })
+
+    it('échec serveur : le message est affiché dans une bannière annoncée', async () => {
+      mockOnSave.mockRejectedValue({ response: { data: { error: 'Cet email est déjà utilisé' } } })
+      render(
+        <UserModal mode="create" onSave={mockOnSave} onClose={mockOnClose} currentUser={null} />
+      )
+
+      fireEvent.change(screen.getByPlaceholderText('membre@example.com'), { target: { value: 'new@test.com' } })
+      fireEvent.change(screen.getByPlaceholderText('Jean'), { target: { value: 'New' } })
+      fireEvent.click(screen.getByText('Créer'))
+
+      // role="alert" vient de <Banner> : sans lui, l'échec serveur resterait muet
+      // pour un lecteur d'écran (l'ancien <div> n'en portait aucun).
+      await waitFor(() =>
+        expect(screen.getByRole('alert')).toHaveTextContent('Cet email est déjà utilisé')
+      )
     })
 
     it('selects admin role when clicked', async () => {

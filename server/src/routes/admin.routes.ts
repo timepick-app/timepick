@@ -71,7 +71,7 @@ router.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
   if (err instanceof MulterError) {
     const tooBig = err.code === 'LIMIT_FILE_SIZE'
     res.status(tooBig ? 413 : 400).json({
-      error: tooBig ? 'Fichier trop volumineux (max 5 MB)' : 'Erreur upload — fichier invalide',
+      error: tooBig ? 'Fichier trop volumineux (max 5 Mo)' : 'Erreur upload — fichier invalide',
     })
     return
   }

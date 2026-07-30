@@ -5,6 +5,14 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
+/** Palette Tailwind brute : famille + échelon, avec préfixe de variante (`hover:`) et suffixe d'opacité (`/50`). */
+const RAW_PALETTE =
+  '(^|[\\s:])(bg|text|border|ring|divide|fill|outline|placeholder|decoration|accent|shadow|from|via|to)' +
+  '-(red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|zinc|neutral|stone)' +
+  '-(50|100|200|300|400|500|600|700|800|900|950)([\\s/]|$)'
+const PALETTE_MESSAGE =
+  'Palette Tailwind brute dans un className : utiliser un composant ui/ (Banner, Badge, Alert) ou un token sémantique (text-destructive, bg-muted).'
+
 export default defineConfig([
   globalIgnores(['dist']),
   {
@@ -41,6 +49,21 @@ export default defineConfig([
       'react-hooks/preserve-manual-memoization': 'warn',
       // `any` toléré (surtout mocks de test) mais signalé.
       '@typescript-eslint/no-explicit-any': 'warn',
+      // Garde anti-dérive : une couleur de palette brute dans un `className`
+      // signale presque toujours une primitive `ui/` refaite à la main. En
+      // `warn` comme les règles react-hooks ci-dessus — dette incrémentale.
+      // Capte aussi des usages légitimes (icônes, `hover:`) : esquery ne lit
+      // pas l'intention, et un filet bruyant vaut mieux qu'un filet troué.
+      'no-restricted-syntax': ['warn',
+        {
+          selector: `JSXAttribute[name.name="className"] Literal[value=/${RAW_PALETTE}/]`,
+          message: PALETTE_MESSAGE,
+        },
+        {
+          selector: `JSXAttribute[name.name="className"] TemplateElement[value.raw=/${RAW_PALETTE}/]`,
+          message: PALETTE_MESSAGE,
+        },
+      ],
     },
   },
   {
@@ -51,6 +74,17 @@ export default defineConfig([
     files: ['src/components/ui/**/*.{ts,tsx}'],
     rules: {
       'react-refresh/only-export-components': 'off',
+      // C'est ICI que la palette brute est légitime : ces fichiers SONT la
+      // source des tokens (cva des primitives). Les interdire y serait absurde.
+      'no-restricted-syntax': 'off',
+    },
+  },
+  {
+    // Pages de démonstration du design system : elles affichent volontairement
+    // des exemples « incorrects » colorés pour illustrer les anti-patterns.
+    files: ['src/pages/design-system/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': 'off',
     },
   },
 ])

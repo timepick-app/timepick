@@ -81,7 +81,7 @@ export function applyShellRootLock(component: LockableComponent): void {
  * Used only when a block's `origin` differs from the current editing scope
  * (`data-inherited="true"` posted by `addInheritedAttr()` in bodyExtraction.ts).
  * A click on any node inside such a block is intercepted by the
- * `component:select-before` handler and routed to the `LockedShellInfoPanel`
+ * `component:select:before` handler and routed to the `LockedShellInfoPanel`
  * via `onLockedShellSelection({ partKind })`.
  */
 export function applyDeepLockForInheritedShell(component: LockableComponent): void {
@@ -124,7 +124,7 @@ export interface EditorInitOptions {
   onEditorUpdate?: () => void
   /** Story 26-2 / AC3 + AC4 — invoked when the user clicks any descendant of
    * a locked-shell root (root + descendants are non-selectable, but
-   * `component:select-before` still fires). The host (MjmlEditorOverlayInner)
+   * `component:select:before` still fires). The host (MjmlEditorOverlayInner)
    * uses the partKind to mount the LockedShellInfoPanel for the matching
    * resolved block (header or footer). Receives `null` when the user clicks
    * a non-locked component, so the host can dismiss any open panel. */
@@ -574,11 +574,19 @@ export function initEmailEditor(
   })
 
   // Story 26-2 / AC3 + AC4 — `selectable=false` blocks the native selection
-  // path before it fires `component:selected`. The `component:select-before`
+  // path before it fires `component:selected`. The `component:select:before`
   // event still fires and lets us route the click to the host so it can
   // mount the LockedShellInfoPanel for the corresponding partKind. Clicks
   // outside a locked-shell signal `null` to dismiss any open panel (P4).
-  editor.on('component:select-before', (model: unknown) => {
+  //
+  // SÉPARATEUR : `:` avant `before`, jamais `-`. GrapesJS n'émet que
+  // `component:select:before` (`ComponentsEvents.selectBefore`) ; un
+  // `component:select-before` s'enregistre sans erreur et ne se déclenche
+  // JAMAIS — le panneau d'héritage devient silencieusement inatteignable.
+  // Le refactor 5eebca2e (2026-06-20) a introduit exactement cette faute.
+  // Aucun test mocké ne peut l'attraper (`initEmailEditor` y est stubé) :
+  // le garde est `email-shell-parts-26-2d.spec.ts`, qui frappe l'éditeur réel.
+  editor.on('component:select:before', (model: unknown) => {
     if (!opts.onLockedShellSelection) return
     const comp = model as
       | { closest?: (sel: string) => { getAttributes?: () => Record<string, string> } | null }

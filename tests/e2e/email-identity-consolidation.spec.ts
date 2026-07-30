@@ -36,21 +36,19 @@ async function openTemplateEditor(page: Page): Promise<void> {
   await page.goto(
     '/admin/settings?tab=email-template&subtab=template-invitation',
   )
-  await page
-    .getByTestId('email-template-invitation-open-editor-btn')
-    .click()
-    .catch(async () => {
-      await page
-        .getByRole('button', { name: /modifier|ouvrir l'éditeur/i })
-        .first()
-        .click()
-    })
+  // Testid réel du panel (`EmailInvitationTemplatePanel.tsx`). L'ancien
+  // `email-template-invitation-open-editor-btn` n'a jamais existé côté client,
+  // et le `.catch()` de repli visait /modifier|ouvrir l'éditeur/i quand le
+  // libellé est « Personnaliser avec l'éditeur » : les deux branches
+  // échouaient, le test brûlait son timeout. Repli supprimé — un sélecteur
+  // faux doit échouer vite et bruyamment.
+  await page.getByTestId('invitation-open-editor-btn').click()
   await page.getByTestId('mjml-editor-inner').waitFor()
   await waitForGrapesEditorReady(page)
 }
 
 async function openEventEditor(page: Page, eventId: string): Promise<void> {
-  await page.goto(`/admin/events/${eventId}/edit?subtab=template-email#emails`)
+  await page.goto(`/admin/events/${eventId}/edit#template`)
   await page.getByTestId('event-invitation-open-editor-btn').click()
   await page.getByTestId('mjml-editor-inner').waitFor()
   await waitForGrapesEditorReady(page)
@@ -101,7 +99,12 @@ test.describe('@slow Plan 2 — identité visuelle dans l\'éditeur', () => {
     ).toHaveCount(0)
   })
 
-  test("éditeur template : modification + clic Enregistrer persiste après reload (Plan 3a Save manuel)", async ({
+  // Plan 4a (d607bf4f, 2026-05-24) — le popover n'a plus son propre bouton
+  // « Enregistrer » : il enregistre son handler auprès de l'éditeur et remonte
+  // son état dirty, de sorte que le SEUL bouton Enregistrer de l'écran (celui
+  // de l'éditeur) persiste aussi le leg identité visuelle. Ces deux tests
+  // visaient encore `email-identity-menu-save`, retiré ce jour-là.
+  test("éditeur template : modification + Enregistrer maître persiste après reload", async ({
     page,
   }) => {
     await openTemplateEditor(page)
@@ -118,17 +121,18 @@ test.describe('@slow Plan 2 — identité visuelle dans l\'éditeur', () => {
     )
     await expect(colorInput).toHaveValue(ORIGINAL_COLOR)
 
-    // Plan 3a — bouton Save désactivé tant qu'aucune modification.
-    const saveButton = page.getByTestId('email-identity-menu-save')
-    await expect(saveButton).toBeDisabled()
+    // Plan 4a — un seul bouton Enregistrer, celui de l'éditeur, désarmé tant
+    // qu'aucun leg n'est sale.
+    const masterSave = page.getByTestId('mjml-editor-save-btn')
+    await expect(masterSave).toBeDisabled()
+    await expect(page.getByTestId('email-identity-menu-save')).toHaveCount(0)
 
     await colorInput.fill(TEST_COLOR)
 
-    // Le bouton devient actif dès la première modification valide.
-    await expect(saveButton).toBeEnabled()
+    // Le dirty du popover remonte au maître, qui s'arme.
+    await expect(masterSave).toBeEnabled()
 
-    // Avant le clic Enregistrer, le serveur garde encore l'ancienne valeur
-    // — l'auto-save debouncé a été retiré dans le Plan 3a.
+    // Avant le clic, le serveur garde l'ancienne valeur — aucun auto-save.
     const preSaveRes = await page.request.get(
       `${SERVER_BASE}/api/admin/settings/email-brand`,
       { headers: { Authorization: `Bearer ${token}` } },
@@ -138,10 +142,13 @@ test.describe('@slow Plan 2 — identité visuelle dans l\'éditeur', () => {
     }
     expect(preSaveBody.data.primaryColor).toBe(ORIGINAL_COLOR)
 
-    // Clic Enregistrer → PATCH part, bouton se redésactive (snapshot
-    // resynchronisé). Pas de toast côté identité — feedback assuré par
-    // la désactivation + preview canvas (post-smoke 2026-05-23).
-    await saveButton.click()
+    // Le popover doit pouvoir être refermé sans perdre la modification : le
+    // bouton qui la persiste vit en dehors de lui.
+    await page.keyboard.press('Escape')
+    await expect(popover).toHaveCount(0)
+    await expect(masterSave).toBeEnabled()
+
+    await masterSave.click()
 
     await expect
       .poll(
@@ -156,11 +163,12 @@ test.describe('@slow Plan 2 — identité visuelle dans l\'éditeur', () => {
           }
           return body.data.primaryColor
         },
-        { timeout: 5_000 },
+        { timeout: 10_000 },
       )
       .toBe(TEST_COLOR)
 
-    await expect(saveButton).toBeDisabled()
+    // Snapshot resynchronisé : plus rien de sale, le maître se désarme.
+    await expect(masterSave).toBeDisabled()
 
     // Reload : la valeur est ré-hydratée depuis la DB.
     await openTemplateEditor(page)
@@ -170,7 +178,7 @@ test.describe('@slow Plan 2 — identité visuelle dans l\'éditeur', () => {
     ).toHaveValue(TEST_COLOR)
   })
 
-  test("Plan 3a — fermeture popover sans Save ne persiste rien ; le form re-hydrate depuis le serveur", async ({
+  test("Plan 4a — le brouillon survit à la fermeture du popover et rien ne persiste sans Enregistrer", async ({
     page,
   }) => {
     await openTemplateEditor(page)
@@ -183,15 +191,21 @@ test.describe('@slow Plan 2 — identité visuelle dans l\'éditeur', () => {
       'email-identity-menu-primary-color-input',
     )
     await colorInput.fill(TEST_COLOR)
-    await expect(
-      page.getByTestId('email-identity-menu-save'),
-    ).toBeEnabled()
+    await expect(page.getByTestId('mjml-editor-save-btn')).toBeEnabled()
 
-    // Ferme le popover sans cliquer Enregistrer (Échap).
+    // Ferme le popover sans enregistrer (Échap).
     await page.keyboard.press('Escape')
     await expect(popover).toHaveCount(0)
 
-    // Serveur inchangé — aucune persistance n'a eu lieu.
+    // Le brouillon SURVIT : `PopoverContent` est démonté à la fermeture, l'état
+    // vit donc au-dessus. Sans cela, refermer le popover jetterait
+    // silencieusement la saisie et le bouton Enregistrer maître, resté armé,
+    // ne persisterait rien.
+    await page.getByTestId('email-identity-menu-trigger').click()
+    await expect(colorInput).toHaveValue(TEST_COLOR)
+    await expect(page.getByTestId('mjml-editor-save-btn')).toBeEnabled()
+
+    // Mais rien n'a été persisté : la modification n'existe qu'en mémoire.
     const res = await page.request.get(
       `${SERVER_BASE}/api/admin/settings/email-brand`,
       { headers: { Authorization: `Bearer ${token}` } },
@@ -199,7 +213,8 @@ test.describe('@slow Plan 2 — identité visuelle dans l\'éditeur', () => {
     const body = (await res.json()) as { data: { primaryColor: string } }
     expect(body.data.primaryColor).toBe(ORIGINAL_COLOR)
 
-    // À la réouverture, le form re-hydrate depuis le serveur — modif perdue.
+    // Et un rechargement complet la perd, comme attendu d'un brouillon.
+    await openTemplateEditor(page)
     await page.getByTestId('email-identity-menu-trigger').click()
     await expect(
       page.getByTestId('email-identity-menu-primary-color-input'),

@@ -5,6 +5,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { Banner, BannerDescription } from '@/components/ui/banner'
 import { SheetShell } from './SheetShell'
 import { SelfDemotionConfirmDialog } from './SelfDemotionConfirmDialog'
 import { useEmailValidation } from '../hooks/useEmailValidation'
@@ -226,9 +227,9 @@ export const UserModal = ({ mode, user, currentUser, onSave, onClose }: UserModa
         {/* Form — submit button lives in the footer prop (outside <form>) so JS validation fires via handleSubmit */}
         <form onSubmit={handleSubmit} className="space-y-4">
           {errors.general && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm">
-              {errors.general}
-            </div>
+            <Banner variant="destructive">
+              <BannerDescription>{errors.general}</BannerDescription>
+            </Banner>
           )}
 
           <div className="space-y-1.5">
@@ -246,13 +247,16 @@ export const UserModal = ({ mode, user, currentUser, onSave, onClose }: UserModa
               disabled={mode === 'edit'}
               placeholder="membre@example.com"
               required={mode === 'create'}
+              aria-invalid={!!errors.email}
+              aria-describedby={errors.email ? 'user-email-error' : undefined}
             />
-            {errors.email && <p className="mt-1 text-sm text-destructive" role="alert">{errors.email}</p>}
+            {errors.email && <p id="user-email-error" className="mt-1 text-xs text-destructive" role="alert">{errors.email}</p>}
+            {/* R5 — avertissement non bloquant : ton neutre, pas de role="alert". */}
             {isCreateMode &&
               !errors.email &&
               emailValidation.status === 'warning' &&
               emailValidation.warningCode === 'NO_MX_RECORD' && (
-                <p className="mt-1 text-sm text-amber-600" role="alert">
+                <p className="mt-1 text-xs text-muted-foreground">
                   Ce domaine ne semble pas accepter les emails. Vérifiez la saisie.
                 </p>
               )}
@@ -273,8 +277,10 @@ export const UserModal = ({ mode, user, currentUser, onSave, onClose }: UserModa
                 placeholder="Jean"
                 maxLength={100}
                 required
+                aria-invalid={!!errors.firstName}
+                aria-describedby={errors.firstName ? 'firstName-error' : undefined}
               />
-              {errors.firstName && <p className="mt-1 text-sm text-destructive" role="alert">{errors.firstName}</p>}
+              {errors.firstName && <p id="firstName-error" className="mt-1 text-xs text-destructive" role="alert">{errors.firstName}</p>}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="lastName">Nom</Label>
@@ -307,8 +313,10 @@ export const UserModal = ({ mode, user, currentUser, onSave, onClose }: UserModa
                   onChange={e => handlePhoneChange(e.target.value)}
                   onBlur={() => phone && setErrors(prev => ({ ...prev, phone: validatePhone(phone) }))}
                   placeholder="+33 6 12 34 56 78"
+                  aria-invalid={!!errors.phone}
+                  aria-describedby={errors.phone ? 'user-phone-error' : undefined}
                 />
-                {errors.phone && <p className="mt-1 text-sm text-destructive" role="alert">{errors.phone}</p>}
+                {errors.phone && <p id="user-phone-error" className="mt-1 text-xs text-destructive" role="alert">{errors.phone}</p>}
               </div>
 
               <div className="space-y-1.5">

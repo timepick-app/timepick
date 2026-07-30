@@ -1,5 +1,6 @@
 import axios from 'axios'
 import api, { type ApiResponse } from './api'
+import type { OrganizationSettings } from './organization.service'
 
 // Public endpoints live at the server root (outside /api). Derive root baseURL from VITE_API_URL.
 const serverBaseURL = (import.meta.env.VITE_API_URL || 'http://localhost:3000/api').replace(/\/api\/?$/, '')
@@ -197,4 +198,59 @@ export const getAdminHealth = async (): Promise<AdminHealthResponse> => {
 export const getPublicHealth = async (): Promise<PublicHealthResponse> => {
   const { data } = await publicApi.get<PublicHealthResponse>('/health')
   return data
+}
+
+// Identité de l'organisation (contrat Chantier A1) — type partagé déclaré dans
+// `organization.service.ts` (source unique, consommé aussi par la façade publique).
+
+/**
+ * Payload pour PUT /api/admin/settings/organization.
+ * `homepageFacade` absent ⇒ la valeur stockée reste inchangée côté serveur.
+ */
+export interface OrganizationSettingsPayload {
+  name: string
+  description?: string
+  homepageFacade?: boolean
+}
+
+/**
+ * Fetch les réglages d'organisation courants (admin)
+ */
+export const getOrganizationSettings = async (): Promise<OrganizationSettings> => {
+  const { data } = await api.get<ApiResponse<OrganizationSettings>>('/admin/settings/organization')
+  return data.data
+}
+
+/**
+ * Sauvegarde nom / description / mode page d'accueil de l'organisation
+ */
+export const saveOrganizationSettings = async (
+  payload: OrganizationSettingsPayload,
+): Promise<OrganizationSettings> => {
+  const { data } = await api.put<ApiResponse<OrganizationSettings>>(
+    '/admin/settings/organization',
+    payload,
+  )
+  return data.data
+}
+
+/**
+ * Téléverse (et remplace) le logo de l'organisation — multipart, champ `logo`
+ */
+export const uploadOrganizationLogo = async (file: File): Promise<{ logo: string }> => {
+  const formData = new FormData()
+  formData.append('logo', file)
+  const { data } = await api.post<ApiResponse<{ logo: string }>>(
+    '/admin/settings/organization/logo',
+    formData,
+    { headers: { 'Content-Type': 'multipart/form-data' } },
+  )
+  return data.data
+}
+
+/**
+ * Supprime le logo de l'organisation courant
+ */
+export const deleteOrganizationLogo = async (): Promise<void> => {
+  await api.delete('/admin/settings/organization/logo')
 }

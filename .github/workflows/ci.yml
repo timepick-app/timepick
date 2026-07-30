@@ -2,8 +2,9 @@ name: CI
 run-name: "CI — tests & lint (${{ github.ref_name }})"
 
 # Pipeline d'intégration continue (aucune autre CI dans le repo).
-# Jobs parallèles : détection de code mort (knip), typecheck, tests client
-# (vitest) et tests serveur (jest + PostgreSQL).
+# Jobs parallèles : code mort (knip), lint, typecheck, tests client (vitest),
+# tests serveur (jest + PostgreSQL), épinglage du tag image, et cohérence
+# doc publique ⇄ code.
 
 on:
   pull_request:

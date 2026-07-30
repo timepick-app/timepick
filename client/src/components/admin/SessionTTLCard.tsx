@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
+import { Banner, BannerDescription } from '@/components/ui/banner'
 import {
   useMagicLinkConfig,
 } from '@/hooks/useMagicLinkConfig'
@@ -103,9 +104,11 @@ export const SessionTTLCard = ({ className = '' }: SessionTTLCardProps) => {
       </CardHeader>
       <CardContent className="space-y-6">
         {error && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm">
-            Erreur de chargement de la configuration. Veuillez réessayer.
-          </div>
+          <Banner variant="destructive">
+            <BannerDescription>
+              Erreur de chargement de la configuration. Veuillez réessayer.
+            </BannerDescription>
+          </Banner>
         )}
 
         <p className="text-sm text-muted-foreground">
@@ -131,7 +134,10 @@ export const SessionTTLCard = ({ className = '' }: SessionTTLCardProps) => {
           </div>
 
           {validationError && (
-            <p className="text-xs text-destructive" role="alert">
+            <p
+              id="session-ttl-reason"
+              className="text-xs text-muted-foreground text-right"
+            >
               {validationError}
             </p>
           )}
@@ -149,6 +155,7 @@ export const SessionTTLCard = ({ className = '' }: SessionTTLCardProps) => {
             <Button
               onClick={handleSave}
               disabled={!!validationError || isLoading || isPending || !isDirty}
+              aria-describedby={validationError ? 'session-ttl-reason' : undefined}
               className="min-w-[120px]"
               data-testid="save-session-ttl-button"
             >

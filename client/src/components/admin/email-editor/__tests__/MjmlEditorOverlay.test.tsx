@@ -450,6 +450,49 @@ describe('MjmlEditorOverlay — Reset flow', () => {
     expect(payload).not.toContain('STALE-EVENT-HEADER')
   })
 
+  it('reset réussi → toast.success de confirmation (accusé de réception)', async () => {
+    const refetchMock = vi.fn()
+    editorContextValue = {
+      data: makeDefaultResolvedShell(),
+      isLoading: false,
+      error: null,
+      refetch: refetchMock,
+    }
+    refetchMock.mockResolvedValue({ data: editorContextValue.data })
+    const onReset = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    await renderAndWaitForInner(makeProps({ onReset, ownerKind: 'event', ownerId: 'evt-1' }))
+
+    await user.click(screen.getByTestId('mjml-editor-reset-btn'))
+    await screen.findByTestId('mjml-editor-reset-confirm')
+    await user.click(screen.getByText('Restaurer'))
+
+    await waitFor(() =>
+      expect(toastMock.success).toHaveBeenCalledWith('Événement réinitialisé au modèle.'),
+    )
+    expect(toastMock.error).not.toHaveBeenCalled()
+  })
+
+  it('reset réussi mais refetch en erreur → un SEUL toast, et c’est l’erreur', async () => {
+    const refetchMock = vi.fn().mockResolvedValue({ error: new Error('refetch ko') })
+    editorContextValue = {
+      data: makeDefaultResolvedShell(),
+      isLoading: false,
+      error: null,
+      refetch: refetchMock,
+    }
+    const onReset = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    await renderAndWaitForInner(makeProps({ onReset, ownerKind: 'event', ownerId: 'evt-1' }))
+
+    await user.click(screen.getByTestId('mjml-editor-reset-btn'))
+    await screen.findByTestId('mjml-editor-reset-confirm')
+    await user.click(screen.getByText('Restaurer'))
+
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledTimes(1))
+    expect(toastMock.success).not.toHaveBeenCalled()
+  })
+
   it('onReset rejette → un SEUL toast.error, message non cryptique', async () => {
     editorContextValue = {
       data: makeDefaultResolvedShell(),
@@ -647,24 +690,73 @@ describe('MjmlEditorOverlay — Story 26-2 LockedShellInfoPanel routing (P4 + P1
     })
   })
 
-  it('does NOT mount the inheritance panel when origin matches ownerKind (P12 gate)', async () => {
-    editorContextValue = buildContext({ headerOrigin: 'brand' })
+  it("ne monte PAS le panneau quand le bloc est surchargé au niveau courant (event)", async () => {
+    editorContextValue = buildContext({ headerOrigin: 'event' })
     await renderAndWaitForInner(
-      makeProps({ ownerKind: 'brand', ownerId: 'brand' }),
+      makeProps({ ownerKind: 'event', ownerId: 'evt-1' }),
     )
 
     act(() => {
       registeredOnLockedShellSelection?.({ partKind: 'header' })
     })
 
-    // After the selection event, the panel must not appear — editing brand
-    // and clicking a header whose origin IS brand means the user is already
-    // at the right scope.
+    // Le bloc a une cible de sauvegarde ici : afficher « défini au niveau
+    // supérieur » serait faux.
     await waitFor(() => {
       expect(
         screen.queryByTestId('mjml-editor-locked-panel-overlay'),
       ).toBeNull()
     })
+  })
+
+  it("ne monte PAS le panneau sur l'onglet Invitation, même quand la cascade remonte plus haut", async () => {
+    // Régression du 2026-07-27 : la garde comparait `origin !== ownerKind`, donc
+    // une origine 'brand' ou 'hardcoded' ouvrait le panneau sur l'onglet
+    // Invitation — alors que cet onglet écrit le propriétaire commun
+    // `template[invitation]` et que sa coque est éditable. Le template général
+    // est une SOURCE de la cascade, pas un niveau qui hérite.
+    editorContextValue = buildContext({ headerOrigin: 'brand' })
+    await renderAndWaitForInner(
+      makeProps({ ownerKind: 'template', ownerId: 'invitation' }),
+    )
+
+    act(() => {
+      registeredOnLockedShellSelection?.({ partKind: 'header' })
+    })
+
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId('mjml-editor-locked-panel-overlay'),
+      ).toBeNull()
+    })
+  })
+
+  it("ne monte PAS le panneau dans un éditeur système, quelle que soit l'origine", async () => {
+    // Politique de la coque email, § « Portée du panneau d'héritage » : « Le
+    // panneau d'information sur le contenu hérité est exclusif au niveau
+    // événement. » Les éditeurs système passent `ownerKind='template'` et leur
+    // coque est TOUJOURS héritée (deep-lock) : gardés sur le seul prédicat
+    // d'héritage, ils montaient le panneau à chaque clic sur l'en-tête.
+    // Constaté en vrai le 2026-07-27 dans l'éditeur `magic_link_login` avant
+    // l'ajout de la garde `ownerKind === 'event'`.
+    for (const headerOrigin of ['hardcoded', 'brand', 'template'] as const) {
+      editorContextValue = buildContext({ headerOrigin })
+      const { unmount } = await renderAndWaitForInner(
+        makeProps({ ownerKind: 'template', ownerId: 'magic_link_login', mode: 'system' }),
+      )
+
+      act(() => {
+        registeredOnLockedShellSelection?.({ partKind: 'header' })
+      })
+
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId('mjml-editor-locked-panel-overlay'),
+          `origine ${headerOrigin} : aucun panneau attendu en mode système`,
+        ).toBeNull()
+      })
+      unmount()
+    }
   })
 
   it('dismisses the panel when a click outside any locked-shell signals null (P4)', async () => {

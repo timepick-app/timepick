@@ -19,12 +19,8 @@ export const FIELD_LABEL_BUTTON_TEXT_COLOR = "Couleur du texte des boutons"
 export const FIELD_LABEL_FONT_FAMILY = "Police"
 export const FIELD_LABEL_BORDER_RADIUS = "Bordure arrondie (boutons)"
 
-export const LOGO_UPLOAD_BUTTON_LABEL = "Téléverser un logo"
-export const LOGO_UPLOADING_LABEL = "Téléversement..."
 export const LOGO_REMOVE_BUTTON_LABEL = "Supprimer"
-export const LOGO_EMPTY_PLACEHOLDER = "Aucun logo configuré"
 
-export const LOGO_UPLOAD_ERROR_TOO_LARGE = "Fichier trop volumineux (max 5 MB)"
 export const LOGO_UPLOAD_ERROR_GENERIC = "Erreur lors du téléversement de l'image"
 
 export const HEX_COLOR_INVALID_LABEL = "Format invalide (ex: #ff0000)"

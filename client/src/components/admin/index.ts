@@ -1,6 +1,7 @@
 export { ExportButton } from './ExportButton'
 export { ImportUsersDialog } from './ImportUsersDialog'
 export { PollingConfigPanel } from './PollingConfigPanel'
+export { OrganizationConfigPanel } from './OrganizationConfigPanel'
 export { MagicLinkTTLCard } from './MagicLinkTTLCard'
 export { SessionTTLCard } from './SessionTTLCard'
 export { SmtpConfigPanel } from './SmtpConfigPanel'

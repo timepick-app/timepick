@@ -1,6 +1,10 @@
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
+import { usePublicOrganization } from '@/hooks/usePublicOrganization'
 import { PublicUserMenu } from './PublicUserMenu'
+
+/** Repli de marque quand l'organisation n'a pas (encore) de nom configuré. */
+const FALLBACK_BRAND_NAME = 'TimePick'
 
 /**
  * Props pour PublicNavHeader
@@ -20,9 +24,18 @@ export interface PublicNavHeaderProps {
  * When eventName is provided, displays event context (title + period)
  * instead of app branding. This maximizes viewport space for the calendar.
  *
+ * Le bloc branding par défaut porte le nom de l'organisation hébergée par
+ * l'instance (chantier A1) ; il retombe sur « TimePick » tant que le nom est
+ * vide, en chargement ou en erreur — l'en-tête ne doit jamais afficher de
+ * trou. Le mode `eventName` n'utilise pas cette identité.
+ *
  * @see Story 20-5 - Navigation Ajoutée
+ * @see docs/2026-07-26-note-page-racine-identite-organisation.md §4.3
  */
 export function PublicNavHeader({ eventName, periodFormatted, loginHref = '/login' }: PublicNavHeaderProps) {
+  const { data: organization } = usePublicOrganization()
+  const brandName = organization?.name.trim() || FALLBACK_BRAND_NAME
+
   const isAuthenticated = () => {
     const token = localStorage.getItem('auth_token')
     const user = localStorage.getItem('auth_user')
@@ -71,16 +84,19 @@ export function PublicNavHeader({ eventName, periodFormatted, loginHref = '/logi
     )
   }
 
-  // Default mode: app branding (for non-event pages)
+  // Default mode: organization branding (for non-event pages)
   return (
     <header className="sticky top-0 z-50 bg-background border-b px-4 py-3">
-      <div className="flex items-center justify-between max-w-7xl mx-auto">
-        <Link to="/" className="hover:opacity-80 transition-opacity">
-          <span className="text-lg font-semibold text-primary truncate max-w-[150px] sm:max-w-none inline-block">
-            TimePick
+      <div className="flex items-center justify-between max-w-7xl mx-auto gap-3">
+        <Link to="/" className="hover:opacity-80 transition-opacity min-w-0">
+          {/* Bornes de largeur alignées sur le titre d'événement ci-dessus : le
+              nom d'organisation est saisi par l'admin (jusqu'à 200 caractères)
+              et ne doit pas pousser le bloc d'auth hors de l'en-tête. */}
+          <span className="text-lg font-semibold text-primary truncate max-w-[150px] sm:max-w-[320px] lg:max-w-[500px] inline-block align-bottom">
+            {brandName}
           </span>
         </Link>
-        {authBlock}
+        <div className="flex-shrink-0">{authBlock}</div>
       </div>
     </header>
   )

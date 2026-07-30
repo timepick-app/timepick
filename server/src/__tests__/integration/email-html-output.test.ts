@@ -29,7 +29,7 @@ import fs from 'fs'
 import path from 'path'
 import * as cheerio from 'cheerio'
 import { query } from '../../db'
-import { renderEmail, type TemplateKey } from '../../services/render-email.service'
+import { renderEmail, renderSetupAdminEmail, type TemplateKey } from '../../services/render-email.service'
 import {
   BRAND_FACTORY_CONTENT_WRAPPER_MJML,
   INVITATION_FACTORY_HEADER_MJML,
@@ -487,6 +487,42 @@ describe('renderEmail() — HTML compilé (Story 26-0 / Epic 26.S0)', () => {
       })
 
       expect(html).toContain('Ligne un<br>Ligne deux')
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Email de setup du premier admin (2026-07-27) — corps dédié hors templates
+  // DB (renderSetupAdminEmail). Contrat : salutation NOMINATIVE (le prénom vient
+  // du formulaire du wizard via le JWT bootstrap), 2 conseils de première
+  // configuration, lien magique et expiration substitués. Rendu réel (MJML
+  // compile + sanitize) — les unit tests d'email.service mockent cette
+  // fonction, ce bloc est la seule couverture du corps MJML.
+  // ---------------------------------------------------------------------------
+  describe('renderSetupAdminEmail — email de setup du premier admin', () => {
+    it('compile le corps dédié : salutation nominative, 2 conseils, lien et expiration', async () => {
+      const { html, text } = await renderSetupAdminEmail({
+        magic_link: ADMIN_LINK,
+        expiration_date: EXPIRATION,
+        user_first_name: 'Camille',
+        user_last_name: 'Martin',
+        user_full_name: 'Camille Martin',
+      })
+
+      // Salutation nominative — jamais « Bonjour Administrateur »
+      expect(text).toContain('Bonjour Camille,')
+      expect(html).not.toContain('Administrateur')
+
+      // Exactement 2 conseils : le « Complétez votre profil » est mort avec la
+      // collecte prénom/nom au wizard.
+      expect(text).not.toContain('Complétez votre profil')
+      expect(text).toContain('membres')
+      expect(text).toContain('premier événement')
+      expect((html.match(/&bull;|•/g) ?? []).length).toBe(2)
+
+      // Variables substituées (aucun placeholder résiduel)
+      expect(html).toContain(`href="${ADMIN_LINK}"`)
+      expect(html).toContain(`Ce lien expire le ${EXPIRATION}.`)
+      expect(html).not.toContain('{{')
     })
   })
 })

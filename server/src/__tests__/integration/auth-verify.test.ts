@@ -664,7 +664,7 @@ describe('POST /api/auth/verify - Magic Link Verification', () => {
       await query(`DELETE FROM users WHERE email LIKE '${BOOTSTRAP_EMAIL_PREFIX}%@test.com'`)
     })
 
-    it('(a) token bootstrap valide sans admin existant → 200, admin créé en DB', async () => {
+    it('(a) token bootstrap sans noms → 200, admin créé avec le repli « Administrateur »', async () => {
       const email = `${BOOTSTRAP_EMAIL_PREFIX}${Date.now()}@test.com`
       await query("DELETE FROM users WHERE role = 'admin'")
 
@@ -682,10 +682,12 @@ describe('POST /api/auth/verify - Magic Link Verification', () => {
       expect(res.body.data).toHaveProperty('token')
       expect(res.body.data.user).toMatchObject({ email, role: 'admin' })
 
-      // Vérifier la création en DB
+      // Vérifier la création en DB. Repli D4 : `users.first_name` est NOT NULL,
+      // un token sans prénom doit connecter la personne, pas rendre 500.
       const dbResult = await query("SELECT * FROM users WHERE email = $1", [email])
       expect(dbResult.rows.length).toBe(1)
       expect(dbResult.rows[0].role).toBe('admin')
+      expect(dbResult.rows[0].first_name).toBe('Administrateur')
     })
 
     it('(b) token bootstrap avec admin existant → 401 SETUP_ALREADY_DONE', async () => {
@@ -715,6 +717,27 @@ describe('POST /api/auth/verify - Magic Link Verification', () => {
       // Aucune ligne supplémentaire créée
       const dbResult = await query("SELECT * FROM users WHERE role = 'admin'")
       expect(dbResult.rows.length).toBe(1)
+    })
+
+    it('(c) token bootstrap avec prénom/nom → admin créé avec ces valeurs', async () => {
+      const email = `${BOOTSTRAP_EMAIL_PREFIX}named-${Date.now()}@test.com`
+      await query("DELETE FROM users WHERE role = 'admin'")
+
+      const token = jwt.sign(
+        { bootstrap: true, email, firstName: 'Camille', lastName: 'Martin', role: 'admin' },
+        JWT_SECRET,
+        { expiresIn: '1h' }
+      )
+
+      const res = await request(testServer())
+        .post('/api/auth/verify')
+        .send({ token })
+
+      expect(res.status).toBe(200)
+      expect(res.body.data.user).toMatchObject({ firstName: 'Camille', lastName: 'Martin' })
+
+      const dbResult = await query('SELECT first_name, last_name FROM users WHERE email = $1', [email])
+      expect(dbResult.rows[0]).toMatchObject({ first_name: 'Camille', last_name: 'Martin' })
     })
   })
 

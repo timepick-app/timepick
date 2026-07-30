@@ -9,10 +9,10 @@ import {
 } from '../helpers/transaction'
 import * as emailService from '../../services/email-send.service'
 
-// POST /api/setup crée le premier admin → sendAdminMagicLinkEmail. Sans mock, un vrai email
-// (magic-link admin) part vers Mailpit. On stub au niveau fichier — aucun test n'assert l'envoi.
+// POST /api/setup crée le premier admin → sendSetupAdminEmail. Sans mock, un vrai email
+// (setup admin) part vers Mailpit. On stub au niveau fichier — aucun test n'assert l'envoi.
 beforeAll(() => {
-  jest.spyOn(emailService, 'sendAdminMagicLinkEmail').mockResolvedValue(true)
+  jest.spyOn(emailService, 'sendSetupAdminEmail').mockResolvedValue(true)
 })
 
 afterAll(() => {
@@ -81,17 +81,17 @@ describe('Setup API - Integration Tests', () => {
 
   describe('POST /api/setup/create-admin', () => {
     /**
-     * AC2.1: POST /api/setup/create-admin envoie le lien bootstrap et retourne 202 (aucun user créé)
+     * AC2.1: POST /api/setup/create-admin envoie le lien bootstrap nominatif et retourne 202 (aucun user créé)
      */
-    it('AC2.1: should send bootstrap link and return 202 without creating a user', async () => {
+    it('AC2.1: should send bootstrap link with names and return 202 without creating a user', async () => {
       const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).substring(7)}`
       const email = `first-admin-${uniqueSuffix}@test.com`
 
-      const spy = jest.spyOn(emailService, 'sendAdminMagicLinkEmail').mockResolvedValue(true)
+      const spy = jest.spyOn(emailService, 'sendSetupAdminEmail').mockResolvedValue(true)
 
       const response = await request(testServer())
         .post('/api/setup/create-admin')
-        .send({ email })
+        .send({ email, firstName: 'Camille', lastName: 'Martin' })
         .expect(202)
 
       expect(response.body).toMatchObject({
@@ -104,7 +104,7 @@ describe('Setup API - Integration Tests', () => {
 
       // L'email de bootstrap a bien été appelé une fois
       expect(spy).toHaveBeenCalledTimes(1)
-      expect(spy).toHaveBeenCalledWith(email, expect.stringContaining('/login?token='), expect.any(Number), expect.any(Date), true, 'Administrateur', null)
+      expect(spy).toHaveBeenCalledWith(email, expect.stringContaining('/login?token='), expect.any(Date), 'Camille', 'Martin')
     })
 
     /**
@@ -113,7 +113,7 @@ describe('Setup API - Integration Tests', () => {
     it('AC2.3: should return 400 for invalid email', async () => {
       const response = await request(testServer())
         .post('/api/setup/create-admin')
-        .send({ email: 'invalid-email' })
+        .send({ email: 'invalid-email', firstName: 'Camille' })
         .expect(400)
 
       expect(response.body).toMatchObject({
@@ -137,7 +137,7 @@ describe('Setup API - Integration Tests', () => {
 
       const response = await request(testServer())
         .post('/api/setup/create-admin')
-        .send({ email: `second-${uniqueSuffix}@test.com` })
+        .send({ email: `second-${uniqueSuffix}@test.com`, firstName: 'Camille' })
         .expect(404)
 
       expect(response.body).toMatchObject({ error: 'Not Found' })
@@ -180,15 +180,40 @@ describe('Setup API - Integration Tests', () => {
     })
 
     /**
+     * D5 : borne appliquée côté serveur, `maxLength` HTML seul ne protège pas
+     * l'API. Le cas « blancs » est celui qui compte : sans `.trim()` avant
+     * `.min(1)`, l'email partait en « Bonjour , » et la base sur « Administrateur ».
+     */
+    it('should return 400 when firstName is missing, blank or too long', async () => {
+      const missing = await request(testServer())
+        .post('/api/setup/create-admin')
+        .send({ email: 'no-first-name@test.com' })
+        .expect(400)
+      expect(missing.body.error).toBe('Le prénom est requis')
+
+      const tooLong = await request(testServer())
+        .post('/api/setup/create-admin')
+        .send({ email: 'long-first-name@test.com', firstName: 'a'.repeat(101) })
+        .expect(400)
+      expect(tooLong.body.error).toBe('Le prénom ne peut pas dépasser 100 caractères')
+
+      const blank = await request(testServer())
+        .post('/api/setup/create-admin')
+        .send({ email: 'blank-first-name@test.com', firstName: '   ' })
+        .expect(400)
+      expect(blank.body.error).toBe('Le prénom est requis')
+    })
+
+    /**
      * Test: retourne 500 si l'envoi email échoue
      */
     it('should return 500 if email sending fails', async () => {
-      jest.spyOn(emailService, 'sendAdminMagicLinkEmail').mockResolvedValueOnce(false)
+      jest.spyOn(emailService, 'sendSetupAdminEmail').mockResolvedValueOnce(false)
 
       const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).substring(7)}`
       const response = await request(testServer())
         .post('/api/setup/create-admin')
-        .send({ email: `fail-email-${uniqueSuffix}@test.com` })
+        .send({ email: `fail-email-${uniqueSuffix}@test.com`, firstName: 'Camille' })
         .expect(500)
 
       expect(response.body.error.code).toBe('EMAIL_SEND_FAILED')

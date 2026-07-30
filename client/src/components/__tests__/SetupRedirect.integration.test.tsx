@@ -73,7 +73,11 @@ describe('SetupRedirect — intégration : race de redirection setup', () => {
   it('base vierge : "/" redirige vers /login (RootRedirect) puis vers /setup une fois needsSetup résolu', async () => {
     // GET /setup/status reste EN ATTENTE → SetupRedirect ne peut pas encore agir.
     const deferred = createDeferred<AxiosResponse>();
-    vi.mocked(api.get).mockReturnValue(deferred.promise as unknown as Promise<AxiosResponse>);
+    vi.mocked(api.get).mockImplementation((url: string) =>
+      (url === '/setup/status'
+        ? (deferred.promise as unknown as Promise<AxiosResponse>)
+        : Promise.reject(new Error('no facade'))),
+    );
 
     const queryClient = createTestQueryClient();
     renderApp('/', queryClient);
@@ -99,23 +103,43 @@ describe('SetupRedirect — intégration : race de redirection setup', () => {
     // Statut frais en cache → SetupGuard affiche le wizard sans fetch.
     const queryClient = createTestQueryClient();
     queryClient.setQueryData(['setup-status'], { needsSetup: true });
-    // GET /setup/smtp → config vide pour le prefill de l'étape SMTP
-    vi.mocked(api.get).mockResolvedValue({
-      data: { data: { smtpHost: '', smtpPort: '587', smtpSecure: false, smtpUser: '', smtpPassword: '', smtpFromName: 'TimePick', smtpFromEmail: '' } },
-    } as unknown as AxiosResponse);
+    // GET routé par URL : organisation vide (prefill étape organisation),
+    // SMTP vide (prefill étape SMTP).
+    vi.mocked(api.get).mockImplementation((url: string) => {
+      if (url.includes('/setup/organization')) {
+        return Promise.resolve({
+          data: { data: { name: '', logo: '', description: '', homepageFacade: true } },
+        } as unknown as AxiosResponse);
+      }
+      return Promise.resolve({
+        data: { data: { smtpHost: '', smtpPort: '587', smtpSecure: false, smtpUser: '', smtpPassword: '', smtpFromName: 'TimePick', smtpFromEmail: '' } },
+      } as unknown as AxiosResponse);
+    });
     vi.mocked(api.put).mockResolvedValue({ data: {} } as unknown as AxiosResponse);
-    vi.mocked(api.post).mockResolvedValue({ data: { data: { message: 'ok' } } } as unknown as AxiosResponse);
+    // POST routé par URL : le test de connexion SMTP réussit (« Continuer »
+    // l'exige désormais), le reste répond comme avant.
+    vi.mocked(api.post).mockImplementation((url: string) =>
+      (url.includes('/setup/smtp/test')
+        ? Promise.resolve({ data: { success: true, message: 'Connexion réussie' } } as unknown as AxiosResponse)
+        : Promise.resolve({ data: { data: { message: 'ok' } } } as unknown as AxiosResponse)));
 
     renderApp('/setup', queryClient);
 
-    // Étape 1 — SMTP : saisir un hôte minimal et continuer
+    // Étape 0 — organisation : facultative et vide, « Continuer » avance sans rien écrire.
+    await waitFor(() => expect(screen.getByTestId('org-continue-btn')).toBeEnabled());
+    await user.click(screen.getByTestId('org-continue-btn'));
+
+    // Étape 1 — SMTP : saisir un hôte, prouver la connexion, puis continuer.
     await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeEnabled());
     await user.type(screen.getByTestId('smtp-host'), 'smtp.test.com');
     await user.type(screen.getByTestId('smtp-from-email'), 'noreply@exemple.com');
+    await user.click(screen.getByTestId('smtp-test-btn'));
+    await waitFor(() => expect(screen.getByTestId('smtp-continue-btn')).toBeEnabled());
     await user.click(screen.getByTestId('smtp-continue-btn'));
 
-    // Étape 2 — admin : saisir l'email et soumettre
-    await user.type(await screen.findByLabelText('Email'), 'admin@exemple.com');
+    // Étape 2 — admin : saisir prénom + email et soumettre
+    await user.type(await screen.findByLabelText('Prénom'), 'Camille');
+    await user.type(screen.getByLabelText('Email'), 'admin@exemple.com');
     await user.click(screen.getByRole('button', { name: 'Devenir administrateur' }));
 
     // P3 : le wizard affiche la confirmation d'envoi du lien bootstrap.
@@ -130,21 +154,39 @@ describe('SetupRedirect — intégration : race de redirection setup', () => {
 
     const queryClient = createTestQueryClient();
     queryClient.setQueryData(['setup-status'], { needsSetup: true });
-    vi.mocked(api.get).mockResolvedValue({
-      data: { data: { smtpHost: '', smtpPort: '587', smtpSecure: false, smtpUser: '', smtpPassword: '', smtpFromName: 'TimePick', smtpFromEmail: '' } },
-    } as unknown as AxiosResponse);
+    vi.mocked(api.get).mockImplementation((url: string) => {
+      if (url.includes('/setup/organization')) {
+        return Promise.resolve({
+          data: { data: { name: '', logo: '', description: '', homepageFacade: true } },
+        } as unknown as AxiosResponse);
+      }
+      return Promise.resolve({
+        data: { data: { smtpHost: '', smtpPort: '587', smtpSecure: false, smtpUser: '', smtpPassword: '', smtpFromName: 'TimePick', smtpFromEmail: '' } },
+      } as unknown as AxiosResponse);
+    });
     vi.mocked(api.put).mockResolvedValue({ data: {} } as unknown as AxiosResponse);
+    vi.mocked(api.post).mockResolvedValue({
+      data: { success: true, message: 'Connexion réussie' },
+    } as unknown as AxiosResponse);
 
     renderApp('/setup', queryClient);
+
+    // Étape 0 (organisation) → étape 1 (SMTP)
+    await waitFor(() => expect(screen.getByTestId('org-continue-btn')).toBeEnabled());
+    await user.click(screen.getByTestId('org-continue-btn'));
 
     // Étape 1 (SMTP) → étape 2 (admin)
     await waitFor(() => expect(screen.getByTestId('smtp-host')).toBeEnabled());
     await user.type(screen.getByTestId('smtp-host'), 'smtp.test.com');
     await user.type(screen.getByTestId('smtp-from-email'), 'noreply@exemple.com');
+    await user.click(screen.getByTestId('smtp-test-btn'));
+    await waitFor(() => expect(screen.getByTestId('smtp-continue-btn')).toBeEnabled());
     await user.click(screen.getByTestId('smtp-continue-btn'));
     expect(await screen.findByRole('button', { name: 'Devenir administrateur' })).toBeInTheDocument();
 
-    // « Précédent » → retour à l'étape SMTP (le formulaire revient, l'étape admin disparaît)
+    // « Précédent » → retour à l'étape SMTP (le formulaire revient, l'étape
+    // admin disparaît). L'étape admin n'a qu'un seul « Précédent » : le modèle
+    // de navigation est uniforme, mais un seul écran est monté à la fois.
     await user.click(screen.getByRole('button', { name: 'Précédent' }));
     expect(await screen.findByTestId('smtp-continue-btn')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Devenir administrateur' })).not.toBeInTheDocument();

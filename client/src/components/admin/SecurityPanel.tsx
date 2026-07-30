@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Banner, BannerDescription } from '@/components/ui/banner'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -143,13 +144,13 @@ function CodesDisplayModal({ codes, onClose }: CodesDisplayModalProps) {
           ))}
         </div>
 
-        <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-          <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" aria-hidden="true" />
-          <p>
+        <Banner variant="warning" role="status">
+          <AlertTriangle aria-hidden="true" />
+          <BannerDescription>
             Évitez de photographier cet écran — préférez un gestionnaire de mots de passe ou une
             note papier sécurisée.
-          </p>
-        </div>
+          </BannerDescription>
+        </Banner>
 
         {remainingMs !== null && (
           <p className="text-xs text-gray-500 text-center">

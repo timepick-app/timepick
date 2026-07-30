@@ -7,8 +7,9 @@
  * Ces tests n'exercent que la structure statique rendue.
  */
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi } from 'vitest'
-import { RichTextEditor } from '../rich-text-editor'
+import { RichTextEditor, MAX_LINK_URL_LENGTH } from '../rich-text-editor'
 
 const INITIAL_HTML = '<p>Bonjour <strong>monde</strong></p>'
 
@@ -110,5 +111,63 @@ describe('RichTextEditor — placeholder ciblé (remarque UX #1)', () => {
     await waitFor(() => {
       expect(container.querySelector('p.is-editor-empty')).not.toBeNull()
     })
+  })
+})
+
+/**
+ * Exception au RENDER-ONLY ci-dessus : le popover de lien est du Radix + un
+ * `<Input>` contrôlé, ces interactions-là passent en jsdom.
+ */
+describe('RichTextEditor — borne de longueur des liens', () => {
+  it('refuse une URL plus longue que MAX_LINK_URL_LENGTH et désactive Appliquer', async () => {
+    const user = userEvent.setup()
+    render(<RichTextEditor value={INITIAL_HTML} onChange={vi.fn()} aria-labelledby="lbl" />)
+
+    await user.click(screen.getByRole('button', { name: 'Lien' }))
+    const input = await screen.findByPlaceholderText('https://exemple.com')
+
+    const tooLong = `https://exemple.com/?t=${'x'.repeat(MAX_LINK_URL_LENGTH)}`
+    // paste : `user.type` frapperait 2000+ caractères un par un.
+    await user.click(input)
+    await user.paste(tooLong)
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        `URL trop longue : ${tooLong.length} caractères pour un maximum de ${MAX_LINK_URL_LENGTH}`,
+      )
+    })
+    expect(screen.getByRole('button', { name: 'Appliquer' })).toBeDisabled()
+  })
+
+  it('accepte une URL http(s) qui tient dans la borne', async () => {
+    const user = userEvent.setup()
+    render(<RichTextEditor value={INITIAL_HTML} onChange={vi.fn()} aria-labelledby="lbl" />)
+
+    await user.click(screen.getByRole('button', { name: 'Lien' }))
+    const input = await screen.findByPlaceholderText('https://exemple.com')
+
+    await user.click(input)
+    await user.paste(`https://exemple.com/?t=${'x'.repeat(MAX_LINK_URL_LENGTH - 23)}`)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Appliquer' })).toBeEnabled()
+    })
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it("retire le lien d'une valeur stockée dont le href dépasse la borne, sans perdre le texte", async () => {
+    // `setContent` passe par le `parseHTML` de l'extension Link, même garde.
+    const stored = `<p>Voir <a href="https://ok.example.com/a">ici</a> et <a href="https://spam.example.com/?t=${'y'.repeat(MAX_LINK_URL_LENGTH)}">la</a>.</p>`
+    const { container } = render(
+      <RichTextEditor value={stored} onChange={vi.fn()} aria-labelledby="lbl" />,
+    )
+
+    const textbox = await screen.findByRole('textbox')
+    await waitFor(() => {
+      expect(container.querySelectorAll('a')).toHaveLength(1)
+    })
+    expect(container.querySelector('a')).toHaveAttribute('href', 'https://ok.example.com/a')
+    // Le texte visible du lien refusé survit — le refus n'est jamais destructeur.
+    expect(textbox.textContent).toContain('la')
   })
 })

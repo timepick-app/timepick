@@ -359,7 +359,7 @@ describe('SMTP Settings API', () => {
     })
 
     it('retourne une erreur quand la connexion échoue', async () => {
-      mockVerify.mockRejectedValue(new Error('Connection refused'))
+      mockVerify.mockRejectedValue(Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:1026'), { code: 'ECONNREFUSED' }))
 
       const res = await request(testServer())
         .post('/api/admin/settings/smtp/test')
@@ -368,14 +368,14 @@ describe('SMTP Settings API', () => {
 
       expect(res.status).toBe(200)
       expect(res.body.success).toBe(false)
-      expect(res.body.message).toContain('Erreur:')
-      expect(res.body.message).toContain('Connection refused')
+      expect(res.body.message).toContain('Connexion refusée')
+      expect(res.body.message).toContain('ECONNREFUSED')
       expect(mockClose).toHaveBeenCalled()
     })
 
     it("retourne une erreur quand l'envoi échoue", async () => {
       mockVerify.mockResolvedValue(undefined)
-      mockSendMail.mockRejectedValue(new Error('Authentication failed'))
+      mockSendMail.mockRejectedValue(Object.assign(new Error('Invalid login: 535 Authentication failed'), { code: 'EAUTH' }))
 
       const res = await request(testServer())
         .post('/api/admin/settings/smtp/test')
@@ -384,8 +384,8 @@ describe('SMTP Settings API', () => {
 
       expect(res.status).toBe(200)
       expect(res.body.success).toBe(false)
-      expect(res.body.message).toContain('Erreur:')
-      expect(res.body.message).toContain('Authentication failed')
+      expect(res.body.message).toContain('Authentification refusée')
+      expect(res.body.message).toContain('EAUTH')
       expect(mockClose).toHaveBeenCalled()
     })
 

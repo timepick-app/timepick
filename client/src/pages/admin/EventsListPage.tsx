@@ -6,6 +6,7 @@ import { EventTable, type EventTableRow } from '@/components/admin/events/EventT
 import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/ui/typography'
 import { Badge } from '@/components/ui/badge'
+import { Banner, BannerDescription } from '@/components/ui/banner'
 import { useEvents, useAllEventsStats, useDeleteEvent, useDuplicateEvent } from '@/hooks/useEvents'
 import { useAdminAuth } from '@/hooks/useAdminAuth'
 import type { Event } from '@/hooks/useEvents'
@@ -142,9 +143,11 @@ export default function EventsListPage() {
             <div className="flex justify-end">
               <NewEventButton onClick={() => setCreateOpen(true)} />
             </div>
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
-              Erreur lors du chargement des événements : {eventsError}
-            </div>
+            <Banner variant="destructive">
+              <BannerDescription>
+                Erreur lors du chargement des événements : {eventsError}
+              </BannerDescription>
+            </Banner>
           </div>
         </AdminLayout>
         <CreateEventSheet open={createOpen} onOpenChange={setCreateOpen} />

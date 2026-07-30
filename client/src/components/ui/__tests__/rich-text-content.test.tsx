@@ -64,12 +64,14 @@ describe('RichTextContent', () => {
     expect(container.firstChild).toBeNull()
   })
 
-  it('aplatit plusieurs paragraphes en un seul <p> avec <br> (1:1)', () => {
+  it('rend une frontière de paragraphe comme une ligne vide (<br><br>)', () => {
     const { container } = render(
       <RichTextContent html="<p>premier</p><p>second</p>" />,
     )
     expect(container.querySelectorAll('p').length).toBe(1)
-    expect(container.querySelectorAll('br').length).toBe(1)
+    // Un <br> unique collerait les deux blocs : la séparation voulue par
+    // l'auteur doit rester visible côté façade.
+    expect(container.querySelectorAll('br').length).toBe(2)
     expect(container.textContent).toContain('premier')
     expect(container.textContent).toContain('second')
   })
@@ -86,7 +88,11 @@ describe('RichTextContent', () => {
     const { container } = render(
       <RichTextContent html="<p>A</p><p></p><p></p><p></p><p>B</p>" />,
     )
-    // 4 frontières de paragraphe -> 4 <br>, plafonnés à 2
+    // 5 paragraphes = 4 frontières -> 8 <br>, plafonnés à 2.
+    // Cas NON discriminant du modèle de frontière (l'ancien 1 <br> par
+    // frontière plafonnait déjà à 2 ici) : il ne garde que le plafond. La
+    // frontière elle-même est défendue par le test « ligne vide » plus haut,
+    // dont l'entrée n'a aucun paragraphe vide.
     expect(container.querySelectorAll('br').length).toBe(2)
   })
 

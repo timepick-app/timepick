@@ -80,6 +80,11 @@ export const bannerMeta: ComponentMeta = {
       title: 'Bannière pour une notification transitoire',
       description: "Pour un feedback éphémère (succès d'action), utiliser un toast (sonner), pas une Banner inline persistante.",
     },
+    {
+      title: 'Recopier les classes Tailwind d\'une bannière dans un `<div>`',
+      description:
+        "Reproduire `p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm` à la main dans un `<div>` perd l'axe `density`, les variants sémantiques, et surtout le `role=\"alert\"` que `<Banner>` pose par défaut — l'erreur devient muette pour un lecteur d'écran. Importer `<Banner>` depuis `@/components/ui/banner`.",
+    },
   ],
   examples: [
     { label: 'Import', code: 'import { Banner, BannerTitle, BannerDescription } from "@/components/ui/banner"' },

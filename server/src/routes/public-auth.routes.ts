@@ -2,6 +2,7 @@ import { Router } from 'express'
 import * as eventsController from '../controllers/events.controller'
 import * as slotsPublicController from '../controllers/slots.public.controller'
 import * as reservationsController from '../controllers/reservations.controller'
+import * as organizationController from '../controllers/organization.controller'
 import { requireAuth } from '../middleware/auth.middleware'
 
 const router = Router()
@@ -22,5 +23,9 @@ router.post('/reservations', requireAuth, reservationsController.createReservati
 router.get('/reservations', requireAuth, reservationsController.getMyReservations)
 router.delete('/reservations/:id', requireAuth, reservationsController.cancelReservation)
 router.delete('/reservations/by-slot/:slotId', requireAuth, reservationsController.cancelReservationBySlot)
+
+// Chantier A1 — identité de l'organisation (façade publique, contrat §Q4 : expose
+// UNIQUEMENT name/logo/description + booléen façade, aucune fuite d'un autre champ app_config)
+router.get('/organization', organizationController.getOrganizationHandler)
 
 export default router

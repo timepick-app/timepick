@@ -47,6 +47,12 @@ app.use(
   ),
 );
 app.use(cors({ exposedHeaders: ['Content-Disposition'] }));
+// Le jeton d'un lien magique est une session utilisable : jamais dans le log
+// d'accès (en prod Express sert le SPA, donc `GET /login?token=` y passe).
+// Token `url` surchargé plutôt que le format, pour garder la couleur de `dev`.
+morgan.token<Request>('url', (req) =>
+  (req.originalUrl || req.url || '').replace(/([?&]token=)[^&]+/gi, '$1[MASQUÉ]'),
+);
 app.use(morgan('dev'));
 app.use(express.json());
 

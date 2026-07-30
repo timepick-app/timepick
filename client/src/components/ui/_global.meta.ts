@@ -73,6 +73,90 @@ export const globalConventions: GlobalConventions = {
       ],
     },
     {
+      heading: "Canal d'un message d'erreur",
+      body: [
+        "**R7 — Le canal se choisit sur la DURÉE DE VIE de la condition, pas sur sa gravité.** Trois supports, non interchangeables : texte inline sous le champ (exception E1 ci-dessus), `<Banner variant=\"destructive\">`, `toast.error` (sonner). Deux questions tranchent, dans cet ordre — la première prime :",
+        '',
+        "1. **Le message désigne-t-il un champ précis de l'écran ?** Si oui → inline sous ce champ, TOUJOURS, quelle que soit l'origine de l'erreur (locale ou serveur). Une erreur serveur rattachable à un champ n'est pas une bannière : l'utilisateur doit voir quoi corriger, pas où chercher.",
+        "2. Sinon, **la condition persiste-t-elle à l'écran tant qu'elle n'est pas levée ?** Si oui → bannière, placée près de sa cause, lisible pendant que l'utilisateur corrige. Si non (action ponctuelle rejouable telle quelle) → toast.",
+        '',
+        "**R8 — Un seul canal par échec.** Jamais un toast ET une bannière pour la même cause : l'utilisateur croit à deux problèmes distincts.",
+        '',
+        "**R9 — Annonce accessible, selon le canal.** `<Banner>` pose `role=\"alert\"` par défaut : ne pas le redéclarer, et **ne jamais lui ajouter `aria-live=\"polite\"`** — `role=\"alert\"` implique déjà `aria-live=\"assertive\"`, les deux sur le même nœud se contredisent. Le texte inline E1 exige `role=\"alert\"` explicitement, et n'est utile que s'il est rattaché au champ (`aria-describedby` côté champ + `id` côté message) — un `role=\"alert\"` seul est annoncé une fois puis perdu dès que l'utilisateur revient sur le champ. Le toast est déjà annoncé par sonner : ne rien ajouter.",
+      ].join('\n'),
+      examples: [
+        {
+          label: 'Champ invalide — inline, rattaché au champ (E1)',
+          code: '<Input id="admin-email" aria-invalid={!!error} aria-describedby={error ? "admin-email-error" : undefined} />\n{error && <p id="admin-email-error" className="text-xs text-destructive" role="alert">{error}</p>}',
+        },
+        {
+          label: 'Chargement échoué — bannière persistante',
+          code: '<Banner variant="destructive">\n  <BannerDescription>Erreur de chargement de la configuration. Veuillez réessayer.</BannerDescription>\n</Banner>',
+        },
+        {
+          label: 'Action ponctuelle échouée — toast',
+          code: "toast.error(\"Échec de la suppression du créneau\")",
+        },
+        {
+          label: 'Incorrect — bannière pour un résultat éphémère',
+          code: '<Banner variant="destructive">\n  <BannerDescription>Créneau supprimé</BannerDescription>\n</Banner>',
+        },
+      ],
+    },
+    {
+      heading: "État de l'action pendant qu'un formulaire est invalide",
+      body: [
+        "**R10 — L'action est désactivée, pas seulement commentée.** L'action primaire d'un formulaire porte `disabled` tant qu'une condition de validité **connue au rendu** n'est pas satisfaite. Valider au clic une condition déjà calculable avant le clic est non conforme : le bouton promet une action qu'il refusera. La règle porte sur les conditions connues, pas sur la complétude — un formulaire dont tout est facultatif (étape sautable, filtre vide) n'a aucune condition, donc rien à désactiver.",
+        '',
+        "**R10 bis — Hors périmètre : indisponibilité opérationnelle.** Une action désactivée parce qu'une requête est en cours (`isPending`, `isSaving`, chargement initial des données du formulaire) n'est pas soumise à R10–R11 : le libellé du bouton porte déjà l'information transitoire (« Enregistrement… », « Chargement… ») et la condition se résout d'elle-même, sans action de l'utilisateur, dès que la requête répond — ce n'est pas une condition de validité. R10 ne se contourne pas pour autant en omettant de calculer une condition par ailleurs connue : si l'échec d'un clic déclencherait un message R7 pour une condition déjà vraie avant ce clic, cette condition était connue au rendu et devait déjà porter `disabled`. Ce qui n'est légitimement tranché qu'après l'appel (refus serveur, conflit, quota) reste hors R10 et peut se valider au clic — cf. Button, anti-pattern « Valider au clic une condition calculable au rendu ».",
+        '',
+        "**R11 — Un blocage se justifie toujours, et le motif précède l'action.** Un contrôle bloqué affiche son motif — texte `text-xs text-muted-foreground` (R5) porteur d'un `id` — **placé avant lui dans l'ordre du DOM**, et le lui rattache par `aria-describedby`. L'ordre n'est pas cosmétique : `disabled` retire le contrôle du parcours de tabulation, donc personne n'atteint le bouton au clavier et sa description n'est jamais annoncée à ce moment-là. Ce qui porte l'information est le texte rencontré en lecture linéaire juste avant l'action ; `aria-describedby` l'expose en plus comme description du bouton dans l'arbre d'accessibilité (vérifié : `button \"Continuer\" description=\"…\" disabled`), mais ne doit jamais en être le seul véhicule. Quand le motif ne peut pas être posé à côté de l'action (barre d'outils dense, action icône-seule), utiliser `aria-disabled=\"true\"` en gardant le contrôle focusable et en refusant l'activation : la description redevient atteignable au focus. Corollaire de conception : un motif qui ne fait que constater le blocage sans nommer la condition précise à satisfaire (« Formulaire incomplet », « Continuer indisponible ») n'est pas conforme, même s'il tient en une phrase — R11 exige un motif actionnable, pas seulement bref. À l'inverse, une condition dont les causes sont multiples et distinctes (ex. erreurs ligne par ligne d'un import) reste légitime : le motif rattaché par `aria-describedby` peut résumer (« N lignes en erreur, voir le détail ci-dessous ») sans dupliquer chaque cause, à condition que le détail complet reste affiché et lisible avant l'action.",
+        '',
+        "**Conteneurs de footer.** `DialogFooter`, `AlertDialogFooter` et `SheetFooter` basculent en `flex-col-reverse` sous `sm` (R4) : un enfant placé avant le bouton dans l'ordre du DOM mais À L'INTÉRIEUR de l'un de ces conteneurs s'affiche pourtant APRÈS lui en mobile — l'inversion visuelle que R11 cherche justement à éviter. Le motif n'est donc jamais un enfant du conteneur d'actions : c'est un frère qui le précède intégralement, hors du `flex-col-reverse`, quelle que soit la disposition interne du conteneur (R1, D4…).",
+        '',
+        "**Priorité sur E1.** Quand le motif R11 reprend ou dérive d'un message déjà couvert par E1 (erreur de champ affichée par ailleurs), R11 prime pour CET affichage précis : le motif qui justifie le blocage du bouton reste en `text-muted-foreground` (R5), même si le même contenu apparaît en `text-destructive` sous le champ fautif via E1. Ce ne sont pas deux rendus concurrents du même message, mais deux messages à portée différente — l'un décrit le champ, l'autre explique le bouton — qui peuvent légitimement coexister à l'écran avec des styles différents.",
+        '',
+        "**R12 — Quand révéler.** Deux portées, deux politiques — ne jamais appliquer celle du champ au motif global :",
+        '',
+        "- **R12a (par champ).** Un motif rattaché à un champ précis n'apparaît que sur les champs déjà touchés : un formulaire vierge ne rougit pas.",
+        "- **R12b (global).** Le motif qui justifie le blocage du bouton lui-même s'affiche dès qu'il existe, y compris sur un formulaire vierge et même si aucun champ n'a encore été touché. Conditionner son affichage à `touched` est une violation de R12b déguisée en application de R12a : un bouton grisé sans explication au premier rendu reste non conforme, quelle qu'en soit la justification invoquée.",
+        '',
+        "**Dérogation R11 — Repos, pas blocage.** Une expression `disabled` est une disjonction de causes, et chaque cause se juge séparément : c'est la cause ACTIVE qui doit être motivée, jamais l'expression entière. Trois régimes. Une indisponibilité opérationnelle ne se motive pas (R10 bis — le libellé du bouton porte déjà l'information). L'absence de modification depuis le dernier état persisté (`!isDirty`/`!hasUnsavedChanges`) ne se motive pas non plus : l'état inchangé des champs en est la preuve visible, « rien à faire » n'est pas « quelque chose à corriger », et R10 ne l'exige pas davantage — c'est une garde d'idempotence, pas une condition de validité. Toute invalidité de contenu, elle, reste pleinement soumise à R11 — motif affiché et rattaché, nommant CETTE cause — y compris mélangée aux deux autres dans la même expression : `disabled={!!error || isPending || !isDirty}` est conforme si et seulement si `error` porte son motif. Ce découpage par cause est ce qui rend le bouton lisible : grisé SANS motif se lit « rien à faire, ou en cours », grisé AVEC motif se lit « une erreur nommée », et l'utilisateur n'a jamais à deviner lequel des deux. Un motif qui fusionnerait les causes (« Formulaire non enregistrable ») les rendrait au contraire indistinguables et retomberait sous le corollaire de R11.",
+        '',
+        "Articulation avec R7 : **R7 dit où va le message, R10–R12 disent ce que devient l'action pendant ce temps.** Les deux se lisent ensemble — un message inline parfaitement conforme à R7 posé à côté d'un bouton resté actif reste non conforme.",
+      ].join('\n'),
+      examples: [
+        {
+          label: 'Action bloquée, motif affiché et rattaché (R10 + R11)',
+          code: '<p id="submit-reason" className="text-xs text-muted-foreground">Testez la connexion pour continuer.</p>\n<Button type="submit" disabled={reason !== null} aria-describedby={reason ? "submit-reason" : undefined}>\n  Continuer\n</Button>',
+        },
+        {
+          label: 'Motifs par champ révélés au fil de la saisie (R12a)',
+          code: 'const visibleErrors = Object.fromEntries(\n  Object.entries(errors).filter(([field]) => touched[field]),\n)',
+        },
+        {
+          label: 'Motif global jamais conditionné à `touched` (R12b)',
+          code: '// Le motif du bouton s\'affiche dès qu\'il existe, formulaire vierge compris.\nconst reason = firstError ?? (isProven ? null : \'Testez la connexion pour continuer.\')',
+        },
+        {
+          label: 'Incorrect — condition calculable au rendu, validée au clic',
+          code: '<Button type="submit" onClick={() => {\n  if (!firstName.trim()) { setError(\'Le prénom est requis\'); return }\n  submit()\n}}>Devenir administrateur</Button>',
+        },
+        {
+          label: 'Incorrect — bouton grisé sans motif affiché ni rattaché',
+          code: '<Button type="submit" disabled={!isValid}>Enregistrer</Button>',
+        },
+        {
+          label: 'Incorrect — motif constatant le blocage sans nommer la condition (R11)',
+          code: '<p id="r">Formulaire incomplet.</p>\n<Button disabled aria-describedby="r">Enregistrer</Button>',
+        },
+        {
+          label: 'Incorrect — motif enfant du footer, donc sous le bouton en mobile (R4)',
+          code: '<DialogFooter>\n  <p id="r" className="text-xs text-muted-foreground">Renseignez un nom.</p>\n  <Button disabled aria-describedby="r">Enregistrer</Button>\n</DialogFooter>',
+        },
+      ],
+    },
+    {
       heading: 'Contenu des labels de champ',
       body: [
         "**R6 — Texte pur.** Le contenu d'un `<Label>` est du texte pur. Pas d'emoji, pas de `<span>` décoratif, pas d'image. Si une icône apporte une réelle valeur sémantique (différencier visuellement deux champs de même nature dans un même bloc), utiliser un composant Lucide `aria-hidden=\"true\"` avec `className=\"h-4 w-4\"` directement comme enfant du `<Label>`, avec `className=\"flex items-center gap-2\"` sur le label.",

@@ -118,7 +118,7 @@ export function OpeningDateInput({ event }: OpeningDateInputProps) {
 
   // Mode édition
   return (
-    <div className="space-y-2 p-3 border rounded-md bg-gray-50">
+    <div className="space-y-2 p-3 border rounded-md bg-muted">
       <Label htmlFor="opening-date-input">
         Date d&apos;ouverture des inscriptions
       </Label>

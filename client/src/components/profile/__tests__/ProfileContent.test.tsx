@@ -135,6 +135,15 @@ describe('ProfileContent', () => {
     )
   })
 
+  it('téléphone invalide : message annoncé et rattaché au champ', async () => {
+    renderContent()
+    fireEvent.change(screen.getByLabelText('Téléphone'), { target: { value: '123' } })
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(/format de téléphone invalide/i)
+    )
+  })
+
   describe('ROLE-GATING — admin', () => {
     beforeEach(() => {
       authState.role = 'admin'

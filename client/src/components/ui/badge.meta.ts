@@ -73,7 +73,13 @@ export const badgeMeta: ComponentMeta = {
       wrong: '<Badge><Icon /> Avec icône</Badge>',
     },
   ],
-  antiPatterns: [],
+  antiPatterns: [
+    {
+      title: 'Recopier les classes Tailwind d\'un `Badge` dans un `<div>` ou un `<span>`',
+      description:
+        "Reproduire `bg-red-50 text-red-700 border border-red-200` (variante `destructive`) à la main prive des props `size`/`appearance`/`icon`. Attention au contresens de destination : cette palette est celle d'une **étiquette de statut**, pas d'un message — recopiée dans un `<div>` pour signaler une erreur, elle produit une fausse bannière sans `role=\"alert\"`. Pour un message, `<Banner variant=\"destructive\">` ; pour un statut, `<Badge>`.",
+    },
+  ],
   examples: [
     { label: 'Import', code: 'import { Badge } from "@/components/ui/badge"' },
     { label: 'Variante simple', code: '<Badge variant="success">Disponible</Badge>' },

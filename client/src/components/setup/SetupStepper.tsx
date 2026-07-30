@@ -4,11 +4,11 @@ import { Typography } from '@/components/ui/typography'
 import { Banner, BannerDescription } from '@/components/ui/banner'
 import type { EmailTransportSource } from '@/services/encryption-key.service'
 
-export type SetupStepKey = 'key' | 'smtp' | 'admin' | 'sent'
+export type SetupStepKey = 'key' | 'organization' | 'smtp' | 'admin' | 'sent'
 
 interface Props {
   current: SetupStepKey
-  steps: ('key' | 'smtp' | 'admin')[]
+  steps: ('key' | 'organization' | 'smtp' | 'admin')[]
   /** A1 : signal `emailDeliverable` — l'étape SMTP reste visible mais devient
    *  non bloquante ; seule la copie contextuelle en tient compte ici (le
    *  caractère « sautable » proprement dit vit dans SetupSmtpStep). */
@@ -18,11 +18,16 @@ interface Props {
   smtpTransportSource?: EmailTransportSource | null
 }
 
-const STEP_META: Record<'key' | 'smtp' | 'admin', { label: string; description: string }> = {
+const STEP_META: Record<'key' | 'organization' | 'smtp' | 'admin', { label: string; description: string }> = {
   key: {
     label: 'Clé de chiffrement',
     description:
       'Une clé de chiffrement a été générée pour protéger vos secrets (mot de passe SMTP). Notez son empreinte ; une sauvegarde complète est disponible dans votre profil après connexion.',
+  },
+  organization: {
+    label: 'Votre organisation',
+    description:
+      "Nom, logo et description affichés aux visiteurs — facultatif. Sans nom d'organisation, rien ne leur est présenté ; tout reste modifiable ensuite dans Paramètres.",
   },
   smtp: {
     label: 'Serveur SMTP',
@@ -55,11 +60,11 @@ const SKIPPABLE_ADMIN =
   'Créez le premier compte administrateur. Son lien de connexion lui sera envoyé par email — l\'envoi est déjà opérationnel, aucune configuration SMTP supplémentaire n\'est requise.'
 
 function getStepMeta(
-  key: 'key' | 'smtp' | 'admin',
+  key: 'key' | 'organization' | 'smtp' | 'admin',
   smtpSkippable: boolean,
   smtpTransportSource: EmailTransportSource | null,
 ) {
-  if (!smtpSkippable || key === 'key') return STEP_META[key]
+  if (!smtpSkippable || key === 'key' || key === 'organization') return STEP_META[key]
   if (key === 'admin') return { ...STEP_META.admin, description: SKIPPABLE_ADMIN }
   const description =
     (smtpTransportSource && SKIPPABLE_SMTP_BY_SOURCE[smtpTransportSource]) || SKIPPABLE_SMTP_GENERIC

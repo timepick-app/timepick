@@ -180,13 +180,14 @@ describe('Setup SMTP API', () => {
     })
 
     it('retourne { success: false } quand verify échoue', async () => {
-      mockVerify.mockRejectedValue(new Error('Connection refused'))
+      mockVerify.mockRejectedValue(Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:1026'), { code: 'ECONNREFUSED' }))
 
       const res = await request(testServer()).post('/api/setup/smtp/test').send(validTestParams)
 
       expect(res.status).toBe(200)
       expect(res.body.success).toBe(false)
-      expect(res.body.message).toContain('Connection refused')
+      expect(res.body.message).toContain('Connexion refusée')
+      expect(res.body.message).toContain('ECONNREFUSED')
       expect(mockClose).toHaveBeenCalled()
     })
 
@@ -287,6 +288,45 @@ describe('Setup SMTP API', () => {
       // NODE_ENV n'est pas 'production' ici → pas bloqué
       expect(res.status).toBe(200)
       expect(res.body.success).toBe(true)
+    })
+  })
+
+  // ===================================================
+  // DELETE /api/setup/smtp
+  // ===================================================
+  describe('DELETE /api/setup/smtp', () => {
+    // Contrat « rend la main au transport détecté » (clearEmailProviderConfig +
+    // invalidateTransportCache) : NON réasserté ici. Le handler est partagé mot
+    // pour mot avec la route admin, où ce contrat est déjà défendu
+    // (settings-provider.test.ts, describe DELETE /api/admin/settings/smtp), et
+    // le réasserter d'ici demanderait d'espionner des exports transpilés non
+    // redéfinissables ou de mocker `email.service` en entier — ce qui casserait
+    // les tests de `sendBrandedSmtpTest` du même fichier. Si les deux routes
+    // venaient à diverger (handler dédié au setup), c'est ce commentaire qu'il
+    // faudra retirer en même temps qu'on ajoutera la couverture ici.
+    it('retourne 204 et efface la config SMTP quand le setup n\'est pas terminé', async () => {
+      ;(settingsDb.clearSmtpSettings as jest.Mock).mockResolvedValue(undefined)
+
+      const res = await request(testServer()).delete('/api/setup/smtp')
+
+      expect(res.status).toBe(204)
+      expect(res.body).toEqual({})
+      expect(settingsDb.clearSmtpSettings).toHaveBeenCalled()
+    })
+
+    it('retourne 404 quand un admin existe déjà (checkSetupNotDone)', async () => {
+      await query(
+        "INSERT INTO users (email, first_name, role) VALUES ($1, $2, 'admin')",
+        ['test-setup-smtp-admin@example.com', 'Admin'],
+      )
+
+      try {
+        const res = await request(testServer()).delete('/api/setup/smtp')
+        expect(res.status).toBe(404)
+        expect(settingsDb.clearSmtpSettings).not.toHaveBeenCalled()
+      } finally {
+        await query("DELETE FROM users WHERE email = 'test-setup-smtp-admin@example.com'")
+      }
     })
   })
 })

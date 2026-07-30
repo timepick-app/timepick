@@ -105,6 +105,10 @@ export function ProfileContent() {
     profession.trim() !== (profile?.profession ?? '').trim() ||
     informations.trim() !== (profile?.informations ?? '').trim()
   const phoneInvalid = phone.trim() !== '' && !PHONE_REGEX.test(phone.trim())
+  // Motif R11 du bouton : seule une invalidité de contenu se motive. `!isDirty`
+  // (garde d'idempotence) et l'attente réseau relèvent de la dérogation et de
+  // R10 bis — portée distincte de l'erreur de champ affichée sous le champ (E1).
+  const submitReason = phoneInvalid ? 'Corrigez le format du téléphone pour enregistrer.' : null
 
   const displayFirstName = profile?.firstName ?? ''
   const displayLastName = profile?.lastName ?? null
@@ -241,7 +245,7 @@ export function ProfileContent() {
                 aria-describedby={phoneInvalid ? 'profile-phone-error' : undefined}
               />
               {phoneInvalid && (
-                <p id="profile-phone-error" className="text-xs text-red-600">
+                <p id="profile-phone-error" className="text-xs text-destructive" role="alert">
                   Format de téléphone invalide (10 à 20 caractères).
                 </p>
               )}
@@ -269,11 +273,20 @@ export function ProfileContent() {
                 maxLength={5000}
               />
             </div>
+            {submitReason && (
+              <p
+                id="profile-submit-reason"
+                className="text-xs text-muted-foreground text-right"
+              >
+                {submitReason}
+              </p>
+            )}
           </CardContent>
           <CardFooter className="justify-end">
             <Button
               type="submit"
               disabled={!isDirty || phoneInvalid || updateMutation.isPending || isLoading}
+              aria-describedby={submitReason ? 'profile-submit-reason' : undefined}
             >
               {updateMutation.isPending ? 'Enregistrement…' : 'Enregistrer'}
             </Button>

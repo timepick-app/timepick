@@ -161,7 +161,7 @@ test.describe('@slow per-event MJML editor — visual baseline', () => {
 
   test('event template inherited matches snapshot', async ({ page }) => {
     await page.goto(
-      `/admin/events/${inheritedEventId}/edit?subtab=template-email#emails`,
+      `/admin/events/${inheritedEventId}/edit#template`,
     )
     await page.getByTestId('event-invitation-preview-iframe').waitFor()
     await expect(page).toHaveScreenshot('event-template-inherited.png', {
@@ -171,7 +171,7 @@ test.describe('@slow per-event MJML editor — visual baseline', () => {
 
   test('event template custom matches snapshot', async ({ page }) => {
     await page.goto(
-      `/admin/events/${customEventId}/edit?subtab=template-email#emails`,
+      `/admin/events/${customEventId}/edit#template`,
     )
     await page.getByTestId('event-invitation-preview-iframe').waitFor()
     await expect(page).toHaveScreenshot('event-template-custom.png', {
@@ -217,16 +217,13 @@ test.describe('@slow E2 settings catch-up — visual baselines', () => {
     })
   })
 
-  test('settings magic-link recovery matches snapshot', async ({ page }) => {
-    await page.goto('/admin/settings?tab=email-template&subtab=emails-systeme-magic-link-recovery')
-    const recoveryPanel = page.getByTestId(
-      'email-system-template-panel-magic_link_recovery',
-    )
-    await recoveryPanel.waitFor()
-    await expect(recoveryPanel).toHaveScreenshot('settings-magic-link-recovery.png', {
-      maxDiffPixelRatio: 0.02,
-    })
-  })
+  // Le sous-onglet « magic-link recovery » n'existe plus : `4238a15e`
+  // (2026-06-16, sécurisation des codes de secours) a supprimé le template
+  // `magic_link_recovery` lui-même — migration 027, DELETE de la row et CHECK
+  // resserré de 9 à 8 valeurs — puis sa clé côté client et son sous-onglet. Un
+  // `?subtab=` inconnu retombe sur `template-invitation`, donc le test
+  // attendait indéfiniment un panneau qui ne peut plus être rendu. Sa baseline
+  // est supprimée avec lui.
 
   test('settings reservation confirmation matches snapshot', async ({ page }) => {
     await page.goto(

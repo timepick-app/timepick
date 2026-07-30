@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { AdminLayout } from '@/components/layout/AdminLayout'
 import {
   PollingConfigPanel,
+  OrganizationConfigPanel,
   MagicLinkTTLCard,
   SessionTTLCard,
   SmtpConfigPanel,
@@ -18,13 +19,14 @@ import { useCompactMode } from '@/hooks/useCompactMode'
 import { Typography } from '@/components/ui/typography'
 import { Tabs, TabsContent } from '@/components/ui/tabs'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { Calendar, LayoutTemplate, Lock, Mail } from 'lucide-react'
+import { Building2, Calendar, LayoutTemplate, Lock, Mail } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-type TabId = 'calendar' | 'auth' | 'email' | 'email-template'
-const VALID_TABS: TabId[] = ['calendar', 'auth', 'email', 'email-template']
+type TabId = 'organization' | 'calendar' | 'auth' | 'email' | 'email-template'
+const VALID_TABS: TabId[] = ['organization', 'calendar', 'auth', 'email', 'email-template']
 
 const TAB_ITEMS = [
+  { value: 'organization' as const, label: 'Organisation', icon: Building2 },
   { value: 'email' as const, label: "Serveur d'email", icon: Mail },
   { value: 'email-template' as const, label: "Modèle d'email", icon: LayoutTemplate },
   { value: 'calendar' as const, label: 'Calendrier', icon: Calendar },
@@ -62,7 +64,7 @@ export default function Settings() {
     ? 'email-template'
     : VALID_TABS.includes(rawTab as TabId)
       ? (rawTab as TabId)
-      : 'email'
+      : 'organization'
 
   const handleTabChange = (next: TabId) => {
     setSearchParams(
@@ -153,6 +155,9 @@ export default function Settings() {
         </div>
 
         <Tabs value={activeTab} onValueChange={(v) => handleTabChange(v as TabId)}>
+          <TabsContent value="organization" forceMount className={cn('mt-6', activeTab !== 'organization' && 'hidden')}>
+            <OrganizationConfigPanel />
+          </TabsContent>
           <TabsContent value="calendar" forceMount className={cn('mt-6', activeTab !== 'calendar' && 'hidden')}>
             <PollingConfigPanel />
           </TabsContent>

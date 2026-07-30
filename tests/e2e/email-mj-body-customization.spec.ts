@@ -9,6 +9,7 @@ import {
   seedShellPart,
   waitForGrapesEditorReady,
 } from './helpers/email-editor'
+import { MJ_BODY_BACKGROUND_COLOR } from '@timepick/shared'
 
 /**
  * Plan 1 du 2026-05-22 — Personnalisation du `<mj-body>` racine via GrapesJS
@@ -112,19 +113,16 @@ async function setCanvasMjBodyAttrs(
 
 async function openTemplateEditor(page: Page): Promise<void> {
   await page.goto('/admin/settings?tab=email-template&subtab=template-invitation')
-  await page
-    .getByTestId('email-template-invitation-open-editor-btn')
-    .click()
-    .catch(async () => {
-      // Fallback wording — selon la version du panel, le testid peut différer.
-      await page.getByRole('button', { name: /modifier|ouvrir l'éditeur/i }).first().click()
-    })
+  // Testid réel du panel (`EmailInvitationTemplatePanel.tsx`). Voir la note
+  // dans `email-identity-consolidation.spec.ts` : l'ancien testid n'a jamais
+  // existé et son `.catch()` de repli ne matchait pas davantage.
+  await page.getByTestId('invitation-open-editor-btn').click()
   await page.getByTestId('mjml-editor-inner').waitFor()
   await waitForGrapesEditorReady(page)
 }
 
 async function openEventEditor(page: Page, eventId: string): Promise<void> {
-  await page.goto(`/admin/events/${eventId}/edit?subtab=template-email#emails`)
+  await page.goto(`/admin/events/${eventId}/edit#template`)
   await page.getByTestId('event-invitation-open-editor-btn').click()
   await page.getByTestId('mjml-editor-inner').waitFor()
   await waitForGrapesEditorReady(page)
@@ -168,8 +166,12 @@ test.describe('@slow Plan 1 mj-body — personnalisation cascade', () => {
     // État initial : cascade vide → hardcoded defaults.
     const initial = await fetchMjBodyContext(request, token, 'template', 'invitation')
     expect(initial.origin).toBe('hardcoded')
+    // Ancre sur la SSOT `@timepick/shared` plutôt que sur un littéral : le
+    // repli hardcodé valait `#ffffff` quand cette spec a été écrite, puis
+    // `#fefefe` (3945e9b6) puis `#fafafa` (2d16d11a, 2026-06-28). Un littéral
+    // ici ne teste que la date de dernière relecture du fichier.
     expect(initial.attrs).toEqual({
-      backgroundColor: '#ffffff',
+      backgroundColor: MJ_BODY_BACKGROUND_COLOR,
       paddingTop: '0',
       paddingBottom: '0',
     })
@@ -380,11 +382,16 @@ test.describe('@slow Plan 1 mj-body — personnalisation cascade', () => {
     const resetBtn = page.getByTestId('mjml-editor-reset-btn')
     await expect(resetBtn).toBeEnabled()
 
-    const deletePromise = page.waitForResponse(
+    // Le reset event est un appel atomique unique côté serveur
+    // (`resetEventEmailTemplate` purge `events.invitation_mjml` ET toutes les
+    // rows `shell_parts` de l'event dans la même transaction), plus une
+    // orchestration client de DELETE par part. On assère l'appel réel, puis —
+    // ci-dessous — son effet de cascade, qui est le vrai contrat.
+    const resetPromise = page.waitForResponse(
       (r) =>
         r.url().includes(
-          `/api/admin/shell-parts/event/${encodeURIComponent(eventId)}/mj-body`,
-        ) && r.request().method() === 'DELETE',
+          `/api/admin/events/${encodeURIComponent(eventId)}/email-template/reset`,
+        ) && r.request().method() === 'POST',
     )
 
     await resetBtn.click()
@@ -392,8 +399,8 @@ test.describe('@slow Plan 1 mj-body — personnalisation cascade', () => {
     await expect(confirmDialog).toBeVisible()
     await confirmDialog.getByRole('button', { name: 'Restaurer', exact: true }).click()
 
-    const deleteResp = await deletePromise
-    expect(deleteResp.status()).toBe(204)
+    const resetResp = await resetPromise
+    expect(resetResp.status()).toBe(200)
 
     // Cascade reprend : origin remonte au template.
     await expect

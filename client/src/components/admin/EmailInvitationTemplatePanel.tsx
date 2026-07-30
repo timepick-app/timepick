@@ -1,5 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { AlertCircle } from 'lucide-react'
+import { Banner, BannerDescription } from '@/components/ui/banner'
 import { EmailVariablesHelp } from './EmailVariablesHelp'
 import { EmailCompatibilityWarningCard } from './email-editor/EmailCompatibilityWarningCard'
 import { useEmailTemplate } from '@/hooks/useEmailTemplate'
@@ -61,12 +63,12 @@ export const EmailInvitationTemplatePanel = ({
       </CardHeader>
       <CardContent className="space-y-6">
         {hasError && (
-          <div
-            className="p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm"
-            data-testid="invitation-load-error"
-          >
-            Erreur de chargement de l&apos;aperçu. Veuillez réessayer.
-          </div>
+          <Banner variant="destructive" data-testid="invitation-load-error">
+            <AlertCircle aria-hidden="true" />
+            <BannerDescription>
+              Erreur de chargement de l&apos;aperçu. Veuillez réessayer.
+            </BannerDescription>
+          </Banner>
         )}
 
         {isLoading && !hasError && (

@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input"
 import { inputMeta } from "@/components/ui/input.meta"
 import { Textarea } from "@/components/ui/textarea"
 import { textareaMeta } from "@/components/ui/textarea.meta"
+import { FileDropzone } from "@/components/ui/file-dropzone"
+import { fileDropzoneMeta } from "@/components/ui/file-dropzone.meta"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { selectMeta } from "@/components/ui/select.meta"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -15,6 +17,7 @@ import { radioGroupMeta } from "@/components/ui/radio-group.meta"
 import { Switch } from "@/components/ui/switch"
 import { switchMeta } from "@/components/ui/switch.meta"
 import { sliderMeta } from "@/components/ui/slider.meta"
+import { IMAGE_UPLOAD_ACCEPT, IMAGE_UPLOAD_HINT, IMAGE_UPLOAD_MAX_BYTES } from "@/lib/imageUpload"
 import { Search } from "lucide-react"
 import { ComponentDoc } from "./_shared"
 import { NativeSelectDemo, MembersMockDemo, DatePickerDemo, SliderDemo } from "./_demos"
@@ -145,6 +148,38 @@ export function FormsView() {
         guidelinesDescription="Règles d'utilisation pour les champs de saisie multi-lignes"
         antiPatternsDescription="Pièges à éviter sur les champs multi-lignes (sélection du composant, contrat backend)"
         examplesDescription="Patterns d'utilisation du composant Textarea"
+      />
+
+      {/* FileDropzone — Exemple */}
+      <Card>
+        <CardHeader>
+          <CardTitle>FileDropzone — Exemple</CardTitle>
+          <CardDescription>
+            Zone de dépôt de fichier (glisser-déposer + clic), zéro dépendance : un <code className="bg-muted px-1 rounded text-xs">{'<label>'}</code> porte le cadre et les événements de drag, l'input vit dedans en <code className="bg-muted px-1 rounded text-xs">sr-only</code> (clic et focus clavier natifs). Remplace le pattern « input caché + bouton Téléverser ».
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="space-y-2 max-w-md">
+            <Label>Logo de l'organisation</Label>
+            <FileDropzone
+              accept={IMAGE_UPLOAD_ACCEPT}
+              maxSizeBytes={IMAGE_UPLOAD_MAX_BYTES}
+              hint={IMAGE_UPLOAD_HINT}
+              onFileSelected={() => {}}
+            />
+            <Typography variant="body-xs" color="muted">
+              Déposez un fichier trop lourd ou hors allowlist pour voir l'état d'erreur.
+            </Typography>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* FileDropzone — Doc cards */}
+      <ComponentDoc
+        meta={fileDropzoneMeta}
+        guidelinesDescription="Règles d'utilisation pour la zone de dépôt de fichier"
+        antiPatternsDescription="Pièges à éviter sur l'upload de fichier (input caché, événements de drag, garde de taille)"
+        examplesDescription="Patterns d'utilisation du composant FileDropzone"
       />
 
       {/* Select — Exemple */}

@@ -41,6 +41,7 @@ import {
   normalizeShellFragment,
   stripBodyMarkers,
   tagSectionWithPartKind,
+  isShellBlockInherited,
   wrapBodyForEditing,
   HARDCODED_MJ_BODY_ATTRS_CANVAS,
   type BrandShellTokens,
@@ -928,14 +929,6 @@ export default function MjmlEditorOverlayInner({
       // cascade pour que la coque re-résolue (template/brand) s'affiche, au lieu de la
       // coque event périmée capturée dans la closure.
       const refreshed = await refetchEditorContext()
-      if (refreshed.error) {
-        // Le reset serveur a réussi (corps + coque supprimés) ; seul le rafraîchissement
-        // du canvas a échoué. On informe sans masquer : l'admin rouvre l'éditeur pour voir
-        // la coque re-héritée (sinon il verrait l'ancienne coque event, périmée).
-        toast.error(
-          "Réinitialisation effectuée, mais l'aperçu n'a pas pu être actualisé. Rouvrez l'éditeur.",
-        )
-      }
       const freshContext = refreshed?.data ?? editorContext
       const wrapper = editorRef.current
       if (wrapper && brandSettings) {
@@ -946,6 +939,29 @@ export default function MjmlEditorOverlayInner({
       }
       initialBodyRef.current = defaultBodyMjml
       setDirty(false)
+      // Accusé de réception émis EN DERNIER, une fois le canvas effectivement
+      // restauré. Émis plus haut, un échec de `setMjmlSilently` (qui appelle
+      // `editor.setComponents` sans filet) ferait cohabiter, pour un seul clic,
+      // le toast de succès et le toast d'erreur du `catch`.
+      if (refreshed.error) {
+        // Le reset serveur a réussi (corps + coque supprimés) ; seul le
+        // rafraîchissement de la cascade a échoué, donc le canvas montre encore
+        // la coque event périmée. On informe sans masquer : l'admin rouvre
+        // l'éditeur pour voir la coque re-héritée.
+        toast.error(
+          "Réinitialisation effectuée, mais l'aperçu n'a pas pu être actualisé. Rouvrez l'éditeur.",
+        )
+      } else {
+        // Sans cette ligne, « Restaurer » ne produit aucun retour — le canvas se
+        // contente de revenir au défaut. Le panel hôte est muet depuis la story
+        // 26-3 (toast déplacé ici) et la ligne avait disparu dans le refactor
+        // 5eebca2e du 2026-06-20 : l'éditeur est resté sans accusé de réception
+        // pendant tout l'intervalle.
+        // Wording au singulier « Événement » : `onReset` n'est câblé que par
+        // `EventInvitationTemplatePanel` (cf. le commentaire de gate capability
+        // sur le bouton) ; tout futur appelant hors événement devra l'adapter.
+        toast.success('Événement réinitialisé au modèle.')
+      }
     } catch (err) {
       toast.error(extractErrorMessage(err, 'Erreur lors de la restauration'))
     } finally {
@@ -1146,14 +1162,29 @@ export default function MjmlEditorOverlayInner({
 
         {selectedLockedPart &&
           editorContext &&
-          // P12 — Only mount the inheritance panel when the resolved origin
-          // differs from the current editing scope. Editing brand and
-          // clicking a header whose origin IS brand means "you're already at
-          // the right level"; mounting the panel there would surface a
-          // misleading "this is defined at a higher level" message. The
-          // direct edit path will be the Style Manager once the
-          // Personnaliser ce bloc button activates in Story 26-3.
-          editorContext[selectedLockedPart].origin !== ownerKind && (
+          // P12 — DEUX conditions, délibérément distinctes : ne pas les confondre.
+          //
+          // (a) Niveau événement UNIQUEMENT. Politique de la coque email,
+          //     § « Portée du panneau d'héritage » : « Le panneau d'information
+          //     sur le contenu hérité est **exclusif au niveau événement**. Au
+          //     niveau template général […] le clic mène directement à l'édition
+          //     canvas […] : le template général est une SOURCE dans la cascade,
+          //     pas un niveau qui hérite. » Les éditeurs système passent
+          //     `ownerKind='template'` : sans cette garde, leur coque étant
+          //     toujours héritée, le panneau s'y monterait systématiquement.
+          // (b) ET le bloc doit être effectivement hérité — même prédicat que le
+          //     deep-lock du canvas, pour que « panneau affiché » et « bloc
+          //     verrouillé » ne puissent pas diverger.
+          //
+          // `isShellBlockInherited` seul ne suffit PAS : il répond « ce bloc
+          // a-t-il une cible de sauvegarde ici ? », vrai aussi en système, et non
+          // « faut-il proposer une surcharge à ce niveau ? », qui est propre à
+          // l'événement.
+          ownerKind === 'event' &&
+          isShellBlockInherited(editorContext[selectedLockedPart].origin, {
+            ownerKind,
+            isSystem,
+          }) && (
             <div
               className="absolute top-2 right-2 w-80 max-w-[40vw] rounded-md border bg-white shadow-lg"
               data-testid="mjml-editor-locked-panel-overlay"

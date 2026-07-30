@@ -64,7 +64,7 @@ async function openEventEditor(
   eventId: string,
 ): Promise<void> {
   await page.goto(
-    `/admin/events/${eventId}/edit?subtab=template-email#emails`,
+    `/admin/events/${eventId}/edit#template`,
   )
   await page.getByTestId('event-invitation-open-editor-btn').click()
   await page.getByTestId('mjml-editor-inner').waitFor()
@@ -118,7 +118,14 @@ test.describe('@slow Story 26-4 — Email Shell reset niveau event', () => {
     await expect(page.getByTestId('mjml-editor-reset-btn')).toBeDisabled()
   })
 
-  test('clic + confirm → DELETE shell-parts event + cascade remonte au template', async ({
+  // Le reset event n'est plus une orchestration client de 3 DELETE per-part
+  // (`/api/admin/shell-parts/event/:id/:part`) comme en 26-3 : c'est un appel
+  // atomique unique côté serveur — `resetEventEmailTemplate` purge
+  // `events.invitation_mjml` ET `shell_parts WHERE owner_kind='event'` dans la
+  // même transaction. L'invariant de la policy (« efface toutes les
+  // personnalisations de l'événement en une fois ») est donc asséré sur son
+  // effet observable, pas sur la forme des requêtes.
+  test('clic + confirm → purge atomique de la coque event + cascade remonte', async ({
     page,
     request,
   }) => {
@@ -139,11 +146,11 @@ test.describe('@slow Story 26-4 — Email Shell reset niveau event', () => {
     const resetBtn = page.getByTestId('mjml-editor-reset-btn')
     await expect(resetBtn).toBeEnabled()
 
-    const deletePromise = page.waitForResponse(
+    const resetPromise = page.waitForResponse(
       (r) =>
         r.url().includes(
-          `/api/admin/shell-parts/event/${encodeURIComponent(eventId)}/header`,
-        ) && r.request().method() === 'DELETE',
+          `/api/admin/events/${encodeURIComponent(eventId)}/email-template/reset`,
+        ) && r.request().method() === 'POST',
     )
 
     await resetBtn.click()
@@ -153,13 +160,19 @@ test.describe('@slow Story 26-4 — Email Shell reset niveau event', () => {
       .getByRole('button', { name: 'Restaurer', exact: true })
       .click()
 
-    const deleteResp = await deletePromise
+    const resetResp = await resetPromise
     expect(
-      deleteResp.status(),
-      `DELETE shell-parts event/header doit retourner 204 idempotent`,
-    ).toBe(204)
+      resetResp.status(),
+      'POST email-template/reset doit retourner 200',
+    ).toBe(200)
+    // Le DTO de retour porte l'état post-purge : plus aucune personnalisation.
+    const resetBody = (await resetResp.json()) as { data: { isCustom: boolean } }
+    expect(
+      resetBody.data.isCustom,
+      'isCustom agrège corps + coque event : false prouve que les deux sont purgés',
+    ).toBe(false)
 
-    // Poll pour absorber la latence d'invalidation post-DELETE (TanStack
+    // Poll pour absorber la latence d'invalidation post-reset (TanStack
     // refetch + replica lag). beforeEach a vidé template aussi → origin
     // doit remonter au hardcoded.
     await expect

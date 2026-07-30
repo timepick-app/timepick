@@ -31,6 +31,16 @@ describe('globalConventions', () => {
     }
   })
 
+  it('documents the action-state rules R10–R12', () => {
+    const state = globalConventions.sections.find((s) =>
+      /État de l'action/i.test(s.heading),
+    )
+    expect(state).toBeDefined()
+    for (const rule of ['R10', 'R11', 'R12']) {
+      expect(state!.body).toContain(rule)
+    }
+  })
+
   it('attaches at least one example to every section', () => {
     for (const section of globalConventions.sections) {
       expect(section.examples?.length ?? 0).toBeGreaterThan(0)

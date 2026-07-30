@@ -94,6 +94,11 @@ export const buttonMeta: ComponentMeta = {
       correct: '<div className="flex flex-wrap gap-2 justify-end"><Button variant="outline">Dépublier</Button><Button>Enregistrer</Button></div>',
       wrong: '<div className="flex gap-2"><Button>Enregistrer</Button><Button variant="outline">Dépublier</Button></div>',
     },
+    {
+      rule: 'Une action dont la condition de validité est connue au rendu porte `disabled` ET affiche son motif, rattaché par `aria-describedby` — jamais un bouton resté actif qui refuse au clic. Règle de référence : section « Conventions transverses » (R10–R12) du Design System.',
+      correct: '<p id="save-reason" className="text-xs text-muted-foreground">Renseignez un nom pour enregistrer.</p>\n<Button disabled={reason !== null} aria-describedby={reason ? "save-reason" : undefined}>Enregistrer</Button>',
+      wrong: '<Button onClick={() => { if (!name.trim()) { setError(\'Le nom est requis\'); return } save() }}>Enregistrer</Button>',
+    },
   ],
   antiPatterns: [
     {
@@ -111,6 +116,10 @@ export const buttonMeta: ComponentMeta = {
     {
       title: 'Hauteurs mixtes dans une paire d\'actions (footer / barre d\'actions)',
       description: 'Dans une barre d\'actions ou un footer, tous les boutons appariés (Annuler + Valider ; Réinitialiser + Sauvegarder + Publier) partagent la même hauteur `default` (h-9). Mettre l\'action secondaire en `size="sm"` à côté d\'un primaire `default` produit deux hauteurs différentes côte à côte (régression EventPublishBanner). `sm` ne s\'applique qu\'aux toolbars de data-table et aux utilitaires répétés/inline.',
+    },
+    {
+      title: 'Valider au clic une condition calculable au rendu',
+      description: 'Un bouton qui reste actif sur un formulaire invalide, puis affiche un motif au clic, promet une action qu\'il refusera — et ne dit rien à qui ne clique pas. Toute condition de validité connue au rendu se traduit par `disabled` + motif affiché et rattaché (`aria-describedby`) : cf. « Conventions transverses », R10–R12. La validation au clic reste légitime pour ce qui n\'est connu qu\'APRÈS l\'appel (refus serveur, conflit, quota).',
     },
   ],
   examples: [

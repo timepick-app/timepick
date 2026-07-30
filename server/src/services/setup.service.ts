@@ -6,15 +6,23 @@ import { frontendBaseUrl } from '../utils/frontendUrl'
 const JWT_SECRET = process.env.JWT_SECRET!
 const BOOTSTRAP_TTL_SECONDS = 24 * 60 * 60
 
-export function generateBootstrapAdminLink(email: string): { link: string; expirationDate: Date } {
+export function generateBootstrapAdminLink(
+  email: string,
+  firstName: string,
+  lastName?: string,
+): { link: string; expirationDate: Date } {
   const exp = Math.floor(Date.now() / 1000) + BOOTSTRAP_TTL_SECONDS
-  const token = jwt.sign({ bootstrap: true, email, role: 'admin', exp }, JWT_SECRET)
+  const token = jwt.sign({ bootstrap: true, email, firstName, lastName, role: 'admin', exp }, JWT_SECRET)
   return { link: `${frontendBaseUrl()}/login?token=${token}`, expirationDate: new Date(exp * 1000) }
 }
 
 export type CreateAdminResult = { id: string } | 'locked' | 'exists'
 
-export async function createFirstAdminAtomic(email: string): Promise<CreateAdminResult> {
+export async function createFirstAdminAtomic(
+  email: string,
+  firstName?: string,
+  lastName?: string,
+): Promise<CreateAdminResult> {
   const client = await getClient()
   try {
     await client.query('BEGIN')
@@ -33,9 +41,11 @@ export async function createFirstAdminAtomic(email: string): Promise<CreateAdmin
       await client.query('ROLLBACK')
       return 'exists'
     }
+    // `users.first_name` est NOT NULL : un appel sans prénom (token bootstrap
+    // antérieur au wizard nominatif) doit connecter la personne, pas rendre 500.
     const r = await client.query(
-      "INSERT INTO users (email, first_name, role) VALUES ($1, 'Administrateur', 'admin') RETURNING id",
-      [email]
+      "INSERT INTO users (email, first_name, last_name, role) VALUES ($1, $2, $3, 'admin') RETURNING id",
+      [email, firstName?.trim() || 'Administrateur', lastName?.trim() || null]
     )
     await client.query('COMMIT')
     return { id: r.rows[0].id }

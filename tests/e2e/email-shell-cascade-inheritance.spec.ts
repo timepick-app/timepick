@@ -132,7 +132,7 @@ test.describe('@slow Story 26-4 — Email Shell cascade brand→template→event
     ).toBe('hardcoded')
 
     await page.goto(
-      `/admin/events/${eventId}/edit?subtab=template-email#emails`,
+      `/admin/events/${eventId}/edit#template`,
     )
     await page.getByTestId('event-invitation-open-editor-btn').click()
     await page.getByTestId('mjml-editor-inner').waitFor()
@@ -161,7 +161,7 @@ test.describe('@slow Story 26-4 — Email Shell cascade brand→template→event
     expect(origin).toBe('template')
 
     await page.goto(
-      `/admin/events/${eventId}/edit?subtab=template-email#emails`,
+      `/admin/events/${eventId}/edit#template`,
     )
     await page.getByTestId('event-invitation-open-editor-btn').click()
     await page.getByTestId('mjml-editor-inner').waitFor()
@@ -197,7 +197,7 @@ test.describe('@slow Story 26-4 — Email Shell cascade brand→template→event
     expect(origin).toBe('event')
 
     await page.goto(
-      `/admin/events/${eventId}/edit?subtab=template-email#emails`,
+      `/admin/events/${eventId}/edit#template`,
     )
     await page.getByTestId('event-invitation-open-editor-btn').click()
     await page.getByTestId('mjml-editor-inner').waitFor()

@@ -813,49 +813,40 @@ async function renderEmailWithBrand(
   return { html, text }
 }
 // ---------------------------------------------------------------------------
-// Email de test SMTP (2026-06-28) : même habillage qu'un email système
-// standard. On emprunte le MÊME chemin de résolution que renderEmailWithBrand
-// (resolveShellParts → cascade shell_parts depuis l'owner partagé
-// template[invitation]) plutôt que les constantes HARDCODED_* (shell « nu » du
-// test de parité 2-args). Ainsi l'email hérite du padding d'enveloppe <mj-body>
-// (30px), de la carte content-wrapper (bordures #e5e7eb + border-radius) et du
-// header de marque — ET respecte les customisations admin de la coque partagée
-// (la cascade lit la DB). On n'override que le corps (message de test).
+// Emails à corps hardcodé (hors templates DB éditables) : test SMTP (2026-06-28)
+// et setup du premier admin (2026-07-27). Ils empruntent le MÊME chemin de
+// résolution que renderEmailWithBrand (resolveShellParts → cascade shell_parts
+// depuis l'owner partagé template[invitation]) plutôt que les constantes
+// HARDCODED_* (shell « nu » du test de parité 2-args). L'email hérite ainsi du
+// padding d'enveloppe <mj-body> (30px), de la carte content-wrapper (bordures
+// #e5e7eb + border-radius) et du header de marque — ET respecte les
+// customisations admin de la coque partagée (la cascade lit la DB). Seul le
+// corps est overridé.
 //
-// Sans footer de confidentialité : le corps ne contient aucun lien, donc la
-// règle `effectiveFooter` supprime le footer automatiquement (source unique de
-// la règle footer-sans-lien, partagée avec renderEmailWithBrand).
+// Footer de confidentialité : règle `effectiveFooter` partagée avec
+// renderEmailWithBrand — présent ssi le corps contient un lien.
 //
-// Aucun paramètre : le destinataire et le transport sont gérés par la couche
-// transport (email-transport.service.ts / email-send.service.ts), qui importe
-// cette fonction et envoie le { html, text } rendu.
+// `vars` omis = aucune substitution (corps sans placeholder), ce qui préserve
+// à l'identique un `{{...}}` littéral qui viendrait d'une coque customisée.
+// compileMjml ne produisant pas de plain-text, `text` est dérivé du HTML
+// sanitisé, comme renderEmailWithBrand.
 // ---------------------------------------------------------------------------
 
-export async function renderSmtpTestEmail(): Promise<{ html: string; text: string }> {
+async function renderHardcodedBody(
+  bodyFragment: string,
+  vars?: VariablesPayload,
+): Promise<{ html: string; text: string }> {
   const brand = await loadBrandOrDefault()
-
-  // Coque commune production — owner partagé template[invitation] (promotion γ).
-  // On ne consomme que header / footer / mjBody / contentWrapper ; le corps
-  // résolu (invitation) est écarté au profit du message de test ci-dessous.
   const resolved = await resolveShellParts({
     templateKey: 'invitation',
     brand: { logoUrl: brand.logoUrl },
   })
 
-  // Corps verbatim demandé par l'utilisateur, calqué sur le style production
-  // (<mj-section padding="20px"> SANS background-color — la carte blanche vient
-  // du content-wrapper, comme les autres templates). Aucun href → effectiveFooter
-  // retourne le fragment no-op → pas de footer de confidentialité.
-  const bodyFragment = `<mj-section padding="20px"><mj-column>
-        <mj-text>Connexion SMTP réussie ! Si vous recevez cet email, votre configuration SMTP est correcte.</mj-text>
-      </mj-column></mj-section>`
-
-  const footer = effectiveFooter(bodyFragment, resolved.footer.contentMjml)
   const shell = buildShell(
     brand,
     bodyFragment,
     resolved.header.contentMjml,
-    footer,
+    effectiveFooter(bodyFragment, resolved.footer.contentMjml),
     resolved.mjBody.attrs,
     resolved.contentWrapper,
   )
@@ -865,14 +856,47 @@ export async function renderSmtpTestEmail(): Promise<{ html: string; text: strin
     throw new MjmlCompileError(compiled.errors)
   }
 
-  // compileMjml ne produit pas de version plain-text (MjmlCompileResult =
-  // { html, errors }) ; on dérive le text du HTML sanitisé, comme
-  // renderEmailWithBrand. Aucune variable à substituer (pas de placeholder
-  // dans le corps de test) — substituteVariables n'est pas nécessaire.
-  const html = sanitizeEmailHtml(compiled.html)
-  const text = htmlToText(html)
+  const html = sanitizeEmailHtml(vars ? substituteVariables(compiled.html, vars) : compiled.html)
+  return { html, text: htmlToText(html) }
+}
 
-  return { html, text }
+/** Email de test SMTP — corps sans lien, donc rendu sans footer. */
+export function renderSmtpTestEmail(): Promise<{ html: string; text: string }> {
+  return renderHardcodedBody(`<mj-section padding="20px"><mj-column>
+        <mj-text>Connexion SMTP réussie ! Si vous recevez cet email, votre configuration SMTP est correcte.</mj-text>
+      </mj-column></mj-section>`)
+}
+
+/**
+ * Email de setup du premier admin : corps DÉDIÉ, distinct du template
+ * `magic_link_login`. Cet email part exactement une fois par instance, AVANT
+ * que le moindre admin existe — un template DB éditable serait inutilisable
+ * (personne pour l'éditer avant l'envoi).
+ *
+ * Salutation nominative : le prénom vient du formulaire du wizard, transporté
+ * par le JWT bootstrap. Aucun conseil « complétez votre profil » — le prénom
+ * et le nom sont déjà saisis à ce stade.
+ */
+export function renderSetupAdminEmail(vars: {
+  magic_link: string
+  expiration_date: string
+  user_first_name: string
+  user_last_name: string
+  user_full_name: string
+}): Promise<{ html: string; text: string }> {
+  return renderHardcodedBody(
+    `<mj-section padding="20px">
+  <mj-column>
+    <mj-text padding-bottom="16px">Bonjour {{user_first_name}},</mj-text>
+    <mj-text padding-bottom="8px">votre espace vient d'être créé et vous en êtes l'administrateur. Connectez-vous pour le découvrir :</mj-text>
+    <mj-button href="{{magic_link}}" font-weight="bold" padding="20px 0">Accéder à mon espace</mj-button>
+    <mj-text padding-bottom="8px">Quelques conseils pour bien démarrer :</mj-text>
+    <mj-text padding-bottom="16px" line-height="22px">&bull; Importez ou ajoutez les membres que vous inviterez à vos événements.<br/>&bull; Créez votre premier événement et proposez des créneaux à réserver.</mj-text>
+    <mj-text color="#999999" font-size="13px" align="center" padding-top="0">Ce lien expire le {{expiration_date}}.</mj-text>
+  </mj-column>
+</mj-section>`,
+    vars,
+  )
 }
 
 // ---------------------------------------------------------------------------

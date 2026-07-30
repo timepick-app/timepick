@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import rateLimit from 'express-rate-limit'
 import { requireAdmin } from '../middleware/adminAuth'
 import { adminActionLimiter, testSendLimiter } from '../middleware/adminActionLimiter'
 import {
@@ -19,6 +20,16 @@ import {
   resetAllEmailTemplatesHandler,
   testSendEmailTemplateHandler,
 } from '../controllers/email-templates.controller'
+import {
+  getOrganizationHandler,
+  putOrganizationSettingsHandler,
+  uploadOrganizationLogoHandler,
+  deleteOrganizationLogoHandler,
+} from '../controllers/organization.controller'
+import {
+  organizationLogoUpload,
+  organizationLogoMulterErrorHandler,
+} from '../middleware/organizationLogoUpload'
 
 const router = Router()
 
@@ -48,5 +59,30 @@ router.post(
   testSendLimiter,
   testSendEmailTemplateHandler,
 )
+
+// Chantier A1 — identité de l'organisation (contrat §Q1-Q4)
+router.get('/organization', getOrganizationHandler)
+router.put('/organization', putOrganizationSettingsHandler)
+
+// Même profil que `uploadLimiter` (uploads.routes.ts:18-24) — 30 requêtes/min/IP.
+const organizationLogoLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Trop de requêtes, réessayez dans une minute' },
+})
+
+router.post(
+  '/organization/logo',
+  organizationLogoLimiter,
+  organizationLogoUpload.single('logo'),
+  uploadOrganizationLogoHandler,
+)
+router.delete('/organization/logo', deleteOrganizationLogoHandler)
+
+// Multer errors (LIMIT_FILE_SIZE, etc.) on `/organization/logo` reach here via
+// `next(err)`. Every other route above already try/catches internally.
+router.use(organizationLogoMulterErrorHandler)
 
 export default router

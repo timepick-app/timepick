@@ -29,7 +29,9 @@ import {
   invalidateTransportCache,
   getFromAddress,
   sendAdminMagicLinkEmail,
-  getEmailTransportSource
+  getEmailTransportSource,
+  describeSmtpError,
+  checkSmtpConnection
 } from '../../services/email.service'
 
 // ---------------------------------------------------------------------------
@@ -285,6 +287,36 @@ describe('email transport factory', () => {
     })
   })
 
+  // Sonde de délivrabilité : elle construit un transport quand le cache est
+  // froid, s'en sert pour un seul verify(), et doit le refermer. Les branches
+  // db/env de buildTransport() posent `pool: true` — sans cette fermeture,
+  // chaque appel (isEmailDeliverable du wizard, /health admin) laisse fuir un
+  // pool de sockets et ses timers.
+  describe('checkSmtpConnection — fermeture du transport de sonde', () => {
+    it('ferme le transport qu\'elle a construit elle-même (cache froid)', async () => {
+      mockGetSmtpSettings.mockResolvedValue(DB_SETTINGS_FULL)
+      invalidateTransportCache()
+      mockClose.mockClear()
+
+      await checkSmtpConnection(1_000)
+
+      expect(mockClose).toHaveBeenCalledTimes(1)
+    })
+
+    it('ne ferme JAMAIS le transport partagé mis en cache (cache chaud)', async () => {
+      mockGetSmtpSettings.mockResolvedValue(DB_SETTINGS_FULL)
+      invalidateTransportCache()
+      // Réchauffe le cache : getTransporter() mémorise le transport.
+      await getTransporter()
+      mockClose.mockClear()
+
+      await checkSmtpConnection(1_000)
+
+      // Le fermer casserait tous les envois suivants du même transport.
+      expect(mockClose).not.toHaveBeenCalled()
+    })
+  })
+
   // -----------------------------------------------------------------------
   // T8: Configurable sender address (AC6)
   // -----------------------------------------------------------------------
@@ -465,6 +497,81 @@ describe('email transport factory', () => {
       const result = await sendAdminMagicLinkEmail('a@b.com', 'http://link', 1440, undefined, true)
       expect(result).toBe(false)
       mockVerify.mockResolvedValue(undefined)
+    })
+  })
+
+  // -----------------------------------------------------------------------
+  // describeSmtpError — mapping code nodemailer → message français
+  // -----------------------------------------------------------------------
+
+  describe('describeSmtpError', () => {
+    it('mappe ECONNREFUSED en refus de connexion, code en suffixe', () => {
+      const err = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:1026'), { code: 'ECONNREFUSED' })
+      const message = describeSmtpError(err)
+      expect(message).toContain('Connexion refusée')
+      expect(message).toContain('ECONNREFUSED')
+    })
+
+    it('mappe ETIMEDOUT en délai dépassé, distinct du refus de connexion', () => {
+      const err = Object.assign(new Error('Connection timeout'), { code: 'ETIMEDOUT' })
+      const message = describeSmtpError(err)
+      expect(message).toContain("Délai d'attente dépassé")
+      expect(message).not.toContain('Connexion refusée')
+      expect(message).toContain('ETIMEDOUT')
+    })
+
+    it('mappe EAUTH en authentification refusée', () => {
+      const err = Object.assign(new Error('Invalid login: 535 Authentication failed'), { code: 'EAUTH' })
+      const message = describeSmtpError(err)
+      expect(message).toContain('Authentification refusée')
+      expect(message).toContain('EAUTH')
+    })
+
+    it('mappe ENOTFOUND en hôte introuvable (DNS)', () => {
+      const err = Object.assign(new Error('getaddrinfo ENOTFOUND smtp.invalid'), { code: 'ENOTFOUND' })
+      const message = describeSmtpError(err)
+      expect(message).toContain('introuvable')
+      expect(message).toContain('ENOTFOUND')
+    })
+
+    it('mappe EAI_AGAIN en hôte introuvable (DNS)', () => {
+      const err = Object.assign(new Error('getaddrinfo EAI_AGAIN smtp.invalid'), { code: 'EAI_AGAIN' })
+      const message = describeSmtpError(err)
+      expect(message).toContain('introuvable')
+      expect(message).toContain('EAI_AGAIN')
+    })
+
+    it('mappe ESOCKET (TLS) en échec de connexion sécurisée', () => {
+      const err = Object.assign(new Error('self signed certificate'), { code: 'ESOCKET' })
+      const message = describeSmtpError(err)
+      expect(message).toContain('sécurisée')
+      expect(message).toContain('ESOCKET')
+    })
+
+    it('détecte une erreur TLS par sous-chaîne quand code est absent', () => {
+      const err = new Error('unable to verify the first certificate: DEPTH_ZERO_SELF_SIGNED_CERT')
+      const message = describeSmtpError(err)
+      expect(message).toContain('sécurisée')
+    })
+
+    it('mappe EENVELOPE en adresse refusée', () => {
+      const err = Object.assign(new Error('Mail command failed'), { code: 'EENVELOPE' })
+      const message = describeSmtpError(err)
+      expect(message).toContain('refusée par le serveur')
+      expect(message).toContain('EENVELOPE')
+    })
+
+    it('conserve le message brut pour un code inconnu, sans avaler l\'information', () => {
+      const err = Object.assign(new Error('Something weird happened'), { code: 'EWEIRD' })
+      const message = describeSmtpError(err)
+      expect(message).toContain('Something weird happened')
+      expect(message).toContain('EWEIRD')
+    })
+
+    it('conserve le message brut tel quel sans code ni correspondance connue', () => {
+      const err = new Error('Something totally unclassified')
+      const message = describeSmtpError(err)
+      expect(message).toBe('Something totally unclassified')
     })
   })
 })

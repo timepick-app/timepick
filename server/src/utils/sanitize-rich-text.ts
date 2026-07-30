@@ -15,8 +15,13 @@ const DESCRIPTION_ALLOWED_ATTR = ['href', 'target', 'rel'] as const
  * Supprime tout contenu malveillant (<script>, handlers onclick, liens javascript:…)
  * tout en conservant le formatage minimal autorisé (gras, italique, liens http(s)).
  * Applique le modèle « retour = <br> » : aplatit les paragraphes en un seul <p>
- * à base de <br>, plafonné à 2 <br> consécutifs — cohérent avec l'éditeur, le
- * rendu membre et l'email.
+ * à base de <br>, plafonné à 2 <br> consécutifs.
+ *
+ * MIROIR EXACT de `flattenToLineBreaks` (client/src/lib/richText.ts) sur la
+ * frontière de bloc : elle vaut une LIGNE VIDE (`<br><br>`), jamais un `<br>`
+ * unique. Toute divergence ici est silencieuse et destructrice — le client
+ * afficherait la ligne vide d'un contenu multi-<p> legacy que cette écriture
+ * effacerait aussitôt en base.
  */
 export function sanitizeRichText(html: string): string {
   const clean = DOMPurify.sanitize(html, {
@@ -29,7 +34,7 @@ export function sanitizeRichText(html: string): string {
   })
   const hadParagraph = /<p[^>]*>/i.test(clean)
   const inner = clean
-    .replace(/<\/p>\s*<p[^>]*>/gi, '<br>')
+    .replace(/<\/p>\s*<p[^>]*>/gi, '<br><br>')
     .replace(/^\s*<p[^>]*>/i, '')
     .replace(/<\/p>\s*$/i, '')
     .trim()

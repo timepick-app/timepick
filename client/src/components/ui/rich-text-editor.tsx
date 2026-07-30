@@ -16,12 +16,17 @@ import Placeholder from '@tiptap/extension-placeholder'
 import CharacterCount from '@tiptap/extension-character-count'
 import { Extension } from '@tiptap/core'
 import type { EditorState } from '@tiptap/pm/state'
+import { DOMParser as PmDOMParser } from '@tiptap/pm/model'
 import { Bold as BoldIcon, Italic as ItalicIcon, Link as LinkIcon } from 'lucide-react'
 import { Toggle } from '@/components/ui/toggle'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
-import { normalizeStoredDescription, flattenToLineBreaks } from '@/lib/richText'
+import {
+  normalizeStoredDescription,
+  pastedHtmlToLineBreakHtml,
+  pastedTextToLineBreakHtml,
+} from '@/lib/richText'
 import { cn } from '@/lib/utils'
 
 /** Compte les `<br>` consécutifs juste avant le curseur (plafonné à 2). */
@@ -69,10 +74,31 @@ export interface RichTextEditorProps {
 }
 
 /**
- * Vérifie qu'une URL commence par http:// ou https://
+ * Longueur maximale d'un `href`. Au-delà, le lien ne fonctionne de toute façon
+ * pas de bout en bout : 2083 était le plafond d'IE, devenu la limite
+ * d'interopérabilité de fait, et les proxys / WAF bornent couramment la ligne
+ * de requête bien avant.
  */
-function isValidHttpUrl(url: string): boolean {
-  return /^https?:\/\//i.test(url.trim())
+export const MAX_LINK_URL_LENGTH = 2000
+
+/**
+ * Heuristique anti-faux-positif de Tiptap pour l'auto-liaison (rejette les IP
+ * nues et les hôtes sans point). Capturée avant tout `configure` : elle n'est
+ * pas exportée par le paquet, et `configure()` remplace l'option au lieu de la
+ * composer.
+ */
+const defaultShouldAutoLink = Link.options.shouldAutoLink
+
+/** Même contrat que les gardes posés plus bas sur l'extension Link. */
+function validateLinkUrl(url: string): string | null {
+  const trimmed = url.trim()
+  if (!/^https?:\/\//i.test(trimmed)) {
+    return "L'URL doit commencer par http:// ou https://"
+  }
+  if (trimmed.length > MAX_LINK_URL_LENGTH) {
+    return `URL trop longue : ${trimmed.length} caractères pour un maximum de ${MAX_LINK_URL_LENGTH}. Raccourcissez-la ou passez par un réducteur de lien.`
+  }
+  return null
 }
 
 /**
@@ -91,6 +117,7 @@ export function RichTextEditor({
   'aria-labelledby': ariaLabelledby,
 }: RichTextEditorProps) {
   const counterId = useId()
+  const linkErrorId = useId()
 
   // Dernier HTML émis par l'éditeur : permet d'ignorer l'écho de notre propre
   // onChange dans l'effet de synchronisation (évite un setContent qui replacerait
@@ -112,6 +139,19 @@ export function RichTextEditor({
         openOnClick: false,
         autolink: true,
         defaultProtocol: 'https',
+        // Deux options, parce que Tiptap n'a pas un point de contrôle unique
+        // sur les href. `isAllowedUri` couvre `setLink`, le collage de HTML
+        // (`parseHTML`), les règles de collage et l'autolink. `shouldAutoLink`
+        // couvre `linkOnPaste` — coller une URL par-dessus une sélection : ce
+        // chemin passe par `pasteHandler`, qui applique la mark avec `setMark`
+        // SANS consulter `isAllowedUri`. Sans cette seconde borne il poserait
+        // un href hors borne que `renderHTML` dégraderait en `href=""` : un
+        // lien mort, silencieux, qui s'enregistre sans erreur. Refusé, le
+        // collage insère l'URL en texte — donc visible, donc comptée.
+        isAllowedUri: (url, ctx) =>
+          // `href` vaut `null` par défaut, et le validateur va jusqu'au rendu.
+          (url ?? '').length <= MAX_LINK_URL_LENGTH && ctx.defaultValidate(url),
+        shouldAutoLink: (url) => url.length <= MAX_LINK_URL_LENGTH && defaultShouldAutoLink(url),
         HTMLAttributes: {
           rel: 'noopener noreferrer',
           target: '_blank',
@@ -138,9 +178,25 @@ export function RichTextEditor({
         ...(ariaLabelledby ? { 'aria-labelledby': ariaLabelledby } : {}),
         ...(maxLength !== undefined ? { 'aria-describedby': counterId } : {}),
       },
-      // Au collage (multi-paragraphes / lignes vides), on aplatit vers le modèle
-      // « retour = <br> » et on plafonne à 2 <br> consécutifs.
-      transformPastedHTML: (html) => flattenToLineBreaks(html),
+      // Presse-papiers AVEC variante HTML (site web, Word, Notion) : toute
+      // frontière de bloc devient une ligne vide, plafonnée à 2 <br>, dans un
+      // paragraphe unique.
+      transformPastedHTML: (html) => pastedHtmlToLineBreakHtml(html),
+      // Presse-papiers SANS variante HTML (bloc-notes, terminal, champ simple) :
+      // `transformPastedHTML` n'est pas appelé sur ce chemin et ProseMirror
+      // découpe le texte lui-même en vrais `<p>`, hors modèle et sans la ligne
+      // vide (son split collapse les `\n` consécutifs). On parse donc nous-mêmes,
+      // depuis le texte, avant tout découpage. Le slice retourné repasse par la
+      // normalisation `maxOpen` de ProseMirror : un collage au milieu d'une
+      // phrase reste inline.
+      clipboardTextParser: (text, $context) => {
+        const dom = document.createElement('div')
+        dom.innerHTML = pastedTextToLineBreakHtml(text)
+        return PmDOMParser.fromSchema($context.doc.type.schema).parseSlice(dom, {
+          preserveWhitespace: true,
+          context: $context,
+        })
+      },
     },
   })
 
@@ -187,8 +243,12 @@ export function RichTextEditor({
     setLinkPopoverOpen(open)
   }
 
+  const linkUrlIssue = validateLinkUrl(linkUrl)
+  // Popover vierge : pas de rouge tant que rien n'a été saisi.
+  const showLinkUrlIssue = linkUrl.trim() !== '' && linkUrlIssue !== null
+
   const handleApplyLink = () => {
-    if (!editor || !isValidHttpUrl(linkUrl)) return
+    if (!editor || linkUrlIssue !== null) return
     editor.chain().focus().extendMarkRange('link').setLink({ href: linkUrl.trim() }).run()
     setLinkPopoverOpen(false)
   }
@@ -255,6 +315,9 @@ export function RichTextEditor({
                 value={linkUrl}
                 onChange={(e) => setLinkUrl(e.target.value)}
                 placeholder="https://exemple.com"
+                aria-label="URL du lien"
+                aria-invalid={showLinkUrlIssue || undefined}
+                aria-describedby={showLinkUrlIssue ? linkErrorId : undefined}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault()
@@ -262,9 +325,9 @@ export function RichTextEditor({
                   }
                 }}
               />
-              {linkUrl.trim() && !isValidHttpUrl(linkUrl) && (
-                <p className="text-xs text-destructive">
-                  L&apos;URL doit commencer par http:// ou https://
+              {showLinkUrlIssue && (
+                <p id={linkErrorId} className="text-xs text-destructive" role="alert">
+                  {linkUrlIssue}
                 </p>
               )}
               <div className="flex gap-2">
@@ -272,7 +335,7 @@ export function RichTextEditor({
                   type="button"
                   size="sm"
                   onClick={handleApplyLink}
-                  disabled={!isValidHttpUrl(linkUrl)}
+                  disabled={linkUrlIssue !== null}
                 >
                   Appliquer
                 </Button>

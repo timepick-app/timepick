@@ -8,8 +8,6 @@
  *
  * Options:
  *   --all             Génère le CHANGELOG complet (défaut)
- *   --since=<date>    Depuis une date (ex: "2024-01-01" ou "1 week ago")
- *   --until=<date>    Jusqu'à une date
  *   --output=<path>   Fichier de sortie (défaut: docs/CHANGELOG.md)
  *   --tag-note        Génère un corps d'annotation de tag (stdout ou --output)
  *   --range=<a..b>    Plage de commits pour --tag-note (défaut: tout l'historique)
@@ -25,7 +23,6 @@
  *
  * Examples:
  *   node scripts/generate-changelog.js
- *   node scripts/generate-changelog.js --since="1 month ago"
  *   node scripts/generate-changelog.js --output CHANGELOG.md
  *   node scripts/generate-changelog.js --tag-note --range v0.30.0..HEAD --version 0.31.0 --theme "Sujet"
  *   node scripts/generate-changelog.js --tag-note --public --range v0.30.0..v0.31.0 \
@@ -57,8 +54,19 @@ function parseArgs(args) {
 
     const takeValue = (name) => {
       if (arg.startsWith(name + '=')) return arg.substring(arg.indexOf('=') + 1);
-      if (arg === name && i + 1 < args.length) return args[++i];
-      return undefined;
+      if (arg !== name) return undefined;
+
+      // Une valeur ne peut pas être un drapeau : sans ce refus, `--version
+      // --public` avalerait `--public` comme valeur et perdrait le filtrage EN
+      // SILENCE — la panne même que le garde ci-dessous existe pour empêcher.
+      // Échappatoire pour une valeur commençant réellement par `--` : `name=valeur`.
+      const next = args[i + 1];
+      if (next === undefined || next.startsWith('--')) {
+        throw new Error(`Option ${name} : valeur manquante.\nUsage : ${name} <valeur> ou ${name}=<valeur>.`);
+      }
+
+      i += 1;
+      return next;
     };
 
     if (arg === '--tag-note') {
@@ -68,6 +76,12 @@ function parseArgs(args) {
 
     if (arg === '--public') {
       parsed.public = true;
+      continue;
+    }
+
+    if (arg === '--all') {
+      // Explicite le comportement par défaut (tout l'historique). Accepté sans
+      // effet, pour que l'usage documenté ne heurte pas le garde ci-dessous.
       continue;
     }
 
@@ -84,6 +98,13 @@ function parseArgs(args) {
       parsed.excludeDirs.push(value);
     } else if ((value = takeValue('--exclude-file')) !== undefined) {
       parsed.excludeFiles.push(value);
+    } else {
+      throw new Error(
+        `Argument inconnu : ${arg}\n` +
+          'Options reconnues : --all, --output, --tag-note, --range, --version, --theme, --public, --exclude-dir, --exclude-file.\n' +
+          "Le générateur refuse plutôt que d'ignorer : un argument avalé en silence a déjà produit une note publique NON filtrée " +
+          "(l'appelant réclamait --public, le script l'ignorait, la Release partait quand même)."
+      );
     }
   }
 
@@ -435,7 +456,12 @@ function mainTagNote(args) {
 
 // Exécuter si appelé directement
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  main();
+  try {
+    main();
+  } catch (error) {
+    console.error(`❌ ${error.message}`);
+    process.exitCode = 1;
+  }
 }
 
 export { parseArgs, gitLog, parseCommit, categorizeCommits, generateMarkdown, generateTagNote, isReleaseChore, getCommitFiles, isPrivateFile, passesPublicFilter, PUBLIC_TYPES, CHANGELOG_TYPES };

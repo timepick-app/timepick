@@ -75,7 +75,7 @@ describe('Booking Integration - Zero-Surbooking Protection', () => {
   afterAll(async () => {
     // Clean up test data
     await pool.query("DELETE FROM users WHERE email LIKE 'booking-%@test.com'")
-    await pool.query("DELETE FROM slots WHERE start_time > NOW()")
+    await pool.query("DELETE FROM slots WHERE event_id = $1", [testEventId])
     await pool.query("DELETE FROM events WHERE name = 'Booking Test Event'")
     // Note: ne pas fermer pool.end() ici car cela affecterait les autres tests
   })

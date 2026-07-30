@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Slider } from '@/components/ui/slider'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
+import { Banner, BannerDescription } from '@/components/ui/banner'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { usePollingConfig, useUpdatePollingConfig, msToSeconds } from '@/hooks/usePollingConfig'
 
@@ -117,9 +118,11 @@ export const PollingConfigPanel = ({ className = '' }: PollingConfigPanelProps) 
       <CardContent className="space-y-6">
         {/* Erreur de chargement */}
         {error && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm">
-            Erreur de chargement de la configuration. Veuillez réessayer.
-          </div>
+          <Banner variant="destructive">
+            <BannerDescription>
+              Erreur de chargement de la configuration. Veuillez réessayer.
+            </BannerDescription>
+          </Banner>
         )}
 
         {/* Description de la configuration */}
@@ -180,7 +183,10 @@ export const PollingConfigPanel = ({ className = '' }: PollingConfigPanelProps) 
 
           {/* Message de validation */}
           {validationError && (
-            <p className="text-sm text-red-600" role="alert">
+            <p
+              id="polling-config-reason"
+              className="text-xs text-muted-foreground text-right"
+            >
               {validationError}
             </p>
           )}
@@ -199,6 +205,7 @@ export const PollingConfigPanel = ({ className = '' }: PollingConfigPanelProps) 
             <Button
               onClick={handleSave}
               disabled={!!validationError || isLoading || isPending || !isDirty}
+              aria-describedby={validationError ? 'polling-config-reason' : undefined}
               className="min-w-[120px]"
               data-testid="save-polling-button"
             >

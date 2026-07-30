@@ -187,22 +187,10 @@ export const EventForm = forwardRef<EventFormRef, EventFormProps>(
 
     return (
       <div className="space-y-6">
-        {/* Message d'erreur de validation avec ID pour accessibilité */}
-        {nameError && (
-          <div
-            id="name-error"
-            className="bg-red-50 border border-red-200 rounded-lg p-3 text-red-700 text-sm"
-            role="alert"
-            aria-live="polite"
-          >
-            {nameError}
-          </div>
-        )}
-
         {/* Champ Nom */}
         <div className="space-y-2">
           <Label htmlFor="event-name">
-            Nom <span className="text-red-500">*</span>
+            Nom <span className="text-destructive">*</span>
           </Label>
           <Input
             id="event-name"
@@ -213,8 +201,14 @@ export const EventForm = forwardRef<EventFormRef, EventFormProps>(
             required
             aria-invalid={nameError !== null}
             aria-describedby={nameError ? 'name-error' : undefined}
-            className={nameError ? 'border-red-500 focus-visible:ring-red-500' : undefined}
+            className={nameError ? 'border-destructive focus-visible:ring-destructive' : undefined}
           />
+          {/* E1 — erreur rattachée à ce champ : inline, pas une bannière. */}
+          {nameError && (
+            <p id="name-error" className="text-xs text-destructive" role="alert">
+              {nameError}
+            </p>
+          )}
         </div>
 
         {/* Champ Description */}

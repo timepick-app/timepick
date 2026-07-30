@@ -46,8 +46,8 @@ describe('CancellationAttentionItem', () => {
     })
     renderItem()
     expect(screen.getByText(/2 notifications d'annulation/)).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /Gala/ })).toHaveAttribute('href', '/admin/events/e1/edit#emails')
-    expect(screen.getByRole('link', { name: /AG/ })).toHaveAttribute('href', '/admin/events/e2/edit#emails')
+    expect(screen.getByRole('link', { name: /Gala/ })).toHaveAttribute('href', '/admin/events/e1/edit#template')
+    expect(screen.getByRole('link', { name: /AG/ })).toHaveAttribute('href', '/admin/events/e2/edit#template')
     expect(screen.getByRole('button', { name: /Tout renvoyer/ })).toBeInTheDocument()
   })
 

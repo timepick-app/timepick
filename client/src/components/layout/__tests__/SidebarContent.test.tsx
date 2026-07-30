@@ -95,6 +95,10 @@ describe('SidebarContent', () => {
     render(<SidebarContent />)
     fireEvent.click(screen.getByText('Paramètres').closest('button')!)
 
+    expect(screen.getByText('Organisation').closest('a')).toHaveAttribute(
+      'href',
+      '/admin/settings?tab=organization',
+    )
     expect(screen.getByText("Serveur d'email").closest('a')).toHaveAttribute(
       'href',
       '/admin/settings?tab=email',

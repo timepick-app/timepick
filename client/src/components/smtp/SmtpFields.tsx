@@ -204,9 +204,10 @@ export function SmtpFields({
               disabled={disabled}
               data-testid="smtp-host"
               aria-invalid={!!errors.smtpHost}
+              aria-describedby={errors.smtpHost ? 'smtp-host-error' : undefined}
             />
             {errors.smtpHost && (
-              <p className="text-xs text-destructive" role="alert">{errors.smtpHost}</p>
+              <p id="smtp-host-error" className="text-xs text-destructive" role="alert">{errors.smtpHost}</p>
             )}
           </div>
 
@@ -224,9 +225,10 @@ export function SmtpFields({
                 disabled={disabled}
                 data-testid="smtp-port"
                 aria-invalid={!!errors.smtpPort}
+                aria-describedby={errors.smtpPort ? 'smtp-port-error' : undefined}
               />
               {errors.smtpPort && (
-                <p className="text-xs text-destructive" role="alert">{errors.smtpPort}</p>
+                <p id="smtp-port-error" className="text-xs text-destructive" role="alert">{errors.smtpPort}</p>
               )}
             </div>
 
@@ -433,9 +435,10 @@ export function SmtpFields({
             disabled={disabled}
             data-testid="smtp-from-email"
             aria-invalid={!!errors.smtpFromEmail}
+            aria-describedby={errors.smtpFromEmail ? 'smtp-from-email-error' : undefined}
           />
           {errors.smtpFromEmail && (
-            <p className="text-xs text-destructive" role="alert">{errors.smtpFromEmail}</p>
+            <p id="smtp-from-email-error" className="text-xs text-destructive" role="alert">{errors.smtpFromEmail}</p>
           )}
         </div>
       </div>

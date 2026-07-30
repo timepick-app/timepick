@@ -4,31 +4,8 @@ import userEvent from '@testing-library/user-event'
 import { EventForm } from '../EventForm'
 import type { EventFormRef } from '../EventForm'
 
-// Mock RichTextEditor (Tiptap) — ProseMirror requiert des API de layout absentes
-// de jsdom ; on substitue un <textarea> contrôlé reflétant le contrat observable.
-vi.mock('@/components/ui/rich-text-editor', () => ({
-  RichTextEditor: ({ id, value, onChange, disabled, maxLength, placeholder, 'aria-labelledby': ariaLabelledby }: {
-    id?: string
-    value: string
-    onChange: (html: string) => void
-    disabled?: boolean
-    maxLength?: number
-    placeholder?: string
-    'aria-labelledby'?: string
-  }) => (
-    <div>
-      <textarea
-        id={id}
-        aria-labelledby={ariaLabelledby}
-        value={value}
-        disabled={disabled}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-      />
-      {maxLength !== undefined && <p>{value.length}/{maxLength} caractères</p>}
-    </div>
-  ),
-}))
+// Tiptap/ProseMirror est inutilisable sous jsdom — cf. @/test/mockRichTextEditor.
+vi.mock('@/components/ui/rich-text-editor', () => import('@/test/mockRichTextEditor'))
 
 describe('EventForm', () => {
   const defaultProps = {
@@ -317,7 +294,7 @@ describe('EventForm', () => {
     render(<EventForm {...defaultProps} nameError="Duplicate name" />)
 
     const nameInput = screen.getByLabelText(/Nom/i)
-    expect(nameInput).toHaveClass('border-red-500')
+    expect(nameInput).toHaveClass('border-destructive')
     expect(nameInput).toHaveAttribute('aria-invalid', 'true')
   })
 

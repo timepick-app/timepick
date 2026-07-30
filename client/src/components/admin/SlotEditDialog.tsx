@@ -6,6 +6,7 @@ import { Input } from '../ui/input'
 import { Textarea } from '../ui/textarea'
 import { Label } from '../ui/label'
 import { Switch } from '@/components/ui/switch'
+import { Banner, BannerDescription } from '@/components/ui/banner'
 import { useAdminSlots } from '../../hooks/useAdminSlots'
 import { useInvitationStatus } from '../../hooks/useInvitationStatus'
 import { isSlotCancelled, type Slot } from '@/types/slot'
@@ -331,9 +332,9 @@ export function SlotEditDialog({ slot, open, onOpenChange }: SlotEditDialogProps
             {/* Erreur de validation générale — dans le footer figé, toujours visible
                 au clic (le corps scrollable la cachait jusqu'ici). */}
             {validationError && (
-              <div className="rounded-md border border-red-200 bg-red-50 p-2.5">
-                <p className="text-sm text-red-600">{validationError}</p>
-              </div>
+              <Banner variant="destructive" density="compact">
+                <BannerDescription>{validationError}</BannerDescription>
+              </Banner>
             )}
 
             <div className="flex flex-wrap items-center justify-end gap-2">
@@ -389,17 +390,18 @@ export function SlotEditDialog({ slot, open, onOpenChange }: SlotEditDialogProps
         <form id="slot-form" onSubmit={handleSubmit} noValidate className="space-y-5">
           {/* Bandeau lecture seule pour un créneau annulé (soft-delete) */}
           {cancelled && (
-            <div className="rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
-              <p>
-                Annulé le {cancelledAtLabel}.
-              </p>
-              {slot.cancellationReason && (
-                <p className="mt-1">
-                  <span className="font-medium">Motif : </span>
-                  {slot.cancellationReason}
+            <Banner role="status">
+              <BannerDescription>
+                <p>
+                  Annulé le {cancelledAtLabel}.
                 </p>
-              )}
-            </div>
+                {slot.cancellationReason && (
+                  <p className="mt-1">
+                    Motif : {slot.cancellationReason}
+                  </p>
+                )}
+              </BannerDescription>
+            </Banner>
           )}
 
           {/* Groupe « Plage horaire » : début + fin + feedbacks de plage collés. */}
@@ -429,14 +431,14 @@ export function SlotEditDialog({ slot, open, onOpenChange }: SlotEditDialogProps
                   aria-label="Date et heure de fin"
                   aria-invalid={endBeforeStart || undefined}
                   aria-describedby={endBeforeStart ? 'edit-end-error' : autoAdjustNote ? 'edit-end-autoadjust' : undefined}
-                  className={cn(endBeforeStart && 'border-red-500 focus-visible:ring-red-500')}
+                  className={cn(endBeforeStart && 'border-destructive focus-visible:ring-destructive')}
                 />
               </div>
             </div>
 
             {/* Incohérence de plage : message clair sous les champs (AC3). */}
             {endBeforeStart && (
-              <p id="edit-end-error" role="alert" aria-live="polite" className="text-sm text-red-600">
+              <p id="edit-end-error" role="alert" aria-live="polite" className="text-xs text-destructive">
                 La date/heure de fin doit être après le début.
               </p>
             )}
@@ -444,7 +446,7 @@ export function SlotEditDialog({ slot, open, onOpenChange }: SlotEditDialogProps
             {/* Confirmation neutre du recalage auto de la fin (a11y : annoncée poliment).
                 Calque la grammaire du message d'erreur ci-dessus, en ton neutre. */}
             {autoAdjustNote && (
-              <p id="edit-end-autoadjust" role="status" aria-live="polite" className="text-sm text-muted-foreground">
+              <p id="edit-end-autoadjust" role="status" aria-live="polite" className="text-xs text-muted-foreground">
                 {autoAdjustNote}
               </p>
             )}
@@ -461,12 +463,12 @@ export function SlotEditDialog({ slot, open, onOpenChange }: SlotEditDialogProps
 
             {/* Avertissement non bloquant : durée anormalement longue (> 7 jours). */}
             {showLongWarning && (
-              <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                <span>
+              <Banner variant="warning" role="status">
+                <AlertTriangle aria-hidden="true" />
+                <BannerDescription>
                   Ce créneau dure {spannedDays} jours. Vérifiez la plage avant d'enregistrer.
-                </span>
-              </div>
+                </BannerDescription>
+              </Banner>
             )}
           </div>
 

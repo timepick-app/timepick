@@ -74,7 +74,7 @@ router.post(
 
 router.use((err: unknown, _req: express.Request, res: express.Response, _next: NextFunction) => {
   if (err instanceof MulterError && err.code === 'LIMIT_FILE_SIZE') {
-    return res.status(413).json({ error: 'Fichier trop volumineux (max 5 MB)' })
+    return res.status(413).json({ error: 'Fichier trop volumineux (max 5 Mo)' })
   }
   if (err instanceof MulterError) {
     console.error('[EmailUpload] Multer error:', err)

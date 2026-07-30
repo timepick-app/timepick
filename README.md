@@ -2,7 +2,7 @@
 
 Plateforme web moderne permettant d'organiser la couverture participative d'événements associatifs : les membres visualisent les créneaux disponibles, réservent leur participation et gèrent leurs réservations depuis une interface mobile-first.
 
-[![CI](https://github.com/timepick-app/timepick/actions/workflows/ci.yml/badge.svg)](https://github.com/timepick-app/timepick/actions/workflows/ci.yml) [![License: FSL-1.1-MIT](https://img.shields.io/badge/License-FSL--1.1--MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/timepick-app/timepick/actions/workflows/ci.yml/badge.svg)](https://github.com/timepick-app/timepick/actions/workflows/ci.yml) [![License: FSL-1.1-MIT](https://img.shields.io/badge/License-FSL--1.1--MIT-blue.svg)](LICENSE) [![Site officiel : timepick.app](https://img.shields.io/badge/Site_officiel-timepick.app-3f7963.svg)](https://timepick.app)
 
 
 ---
@@ -200,10 +200,10 @@ Au premier démarrage, aucun compte admin n'existe. L'application détecte autom
 
 2. **Assistant multi-étapes** :
    - **(a)** Configuration du **serveur d'email (SMTP)**
-   - **(b)** Saisie de l'email du **premier admin**
+   - **(b)** Saisie du **prénom, nom et email** du premier admin
    - **(c)** Confirmation
 
-3. **Lien d'amorçage** — `POST /api/setup/create-admin` envoie un email contenant un **lien bootstrap** (JWT, valable **24 h**). ⚠️ Le compte admin n'est **pas** créé à cette étape.
+3. **Lien d'amorçage** — `POST /api/setup/create-admin` envoie un email contenant un **lien bootstrap** (JWT, valable **24 h**) qui transporte les noms saisis. ⚠️ Le compte admin n'est **pas** créé à cette étape.
 
 4. **Création atomique** — au clic sur le lien, l'admin est créé de façon atomique (transaction PostgreSQL + advisory lock empêchant toute création simultanée d'un second admin), puis redirection vers le dashboard.
 
@@ -222,9 +222,9 @@ cd server
 npm run create-admin
 ```
 
-Le script est **interactif** — il crée un nouvel admin ou promeut un utilisateur existant. Ne pas passer d'email en argument (forme obsolète).
+Le script est **interactif** : il demande l'email, puis — seulement s'il faut créer le compte — le prénom (requis) et le nom (facultatif). Un utilisateur déjà en base est simplement promu, son identité est préservée. L'email peut être passé en argument (`npm run create-admin -- admin@exemple.com`) : il pré-remplit alors la première question.
 
-Pour les détails, voir [`https://docs.timepick.app/installation/installation-locale`](https://docs.timepick.app/installation/installation-locale).
+Pour les détails, voir [`https://docs.timepick.app/installation/installation-locale.html`](https://docs.timepick.app/installation/installation-locale.html).
 
 ---
 
@@ -341,7 +341,7 @@ npm run migrate   # applique les migrations non encore exécutées
 | `recovery_audit_log` | Journal d'audit des utilisations de codes de secours |
 | `schema_migrations` | Suivi des migrations appliquées |
 
-Pour le détail des migrations (DDL, ordre, historique), voir [`https://docs.timepick.app/reference/modele-de-donnees`](https://docs.timepick.app/reference/modele-de-donnees).
+Pour le détail des migrations (DDL, ordre, historique), voir [`https://docs.timepick.app/reference/modele-de-donnees.html`](https://docs.timepick.app/reference/modele-de-donnees.html).
 
 ---
 
@@ -384,7 +384,7 @@ Pour le détail des migrations (DDL, ordre, historique), voir [`https://docs.tim
 
 ## 🧪 Tests
 
-TimePick dispose de trois suites de tests complémentaires. Pour la configuration détaillée, les variables requises et les stratégies de test, voir [`https://docs.timepick.app/exploitation/tests-et-qualite`](https://docs.timepick.app/exploitation/tests-et-qualite).
+TimePick dispose de trois suites de tests complémentaires. Pour la configuration détaillée, les variables requises et les stratégies de test, voir [`https://docs.timepick.app/exploitation/tests-et-qualite.html`](https://docs.timepick.app/exploitation/tests-et-qualite.html).
 
 | Suite | Outil | Commande (racine) |
 |---|---|---|
@@ -438,7 +438,7 @@ TimePick dispose de trois suites de tests complémentaires. Pour la configuratio
 | `init-db` | Crée la base de données et l'extension `uuid-ossp` |
 | `migrate` | Applique toutes les migrations SQL en attente |
 | `prepare-db` | Bootstrap idempotent : migrations + provisionnement SMTP/config (utilisé au démarrage conteneur) |
-| `create-admin` | Script interactif de création d'admin ou de promotion d'un utilisateur existant |
+| `create-admin` | Script interactif : crée un admin (prénom/nom demandés) ou promeut un utilisateur existant |
 | `seed` | Peuple la base avec des données de développement |
 | `seed:500-slots` | Génère 500 créneaux pour les tests de performance |
 | `verify:mjml-strict` | Vérifie la conformité MJML des templates |
@@ -499,7 +499,7 @@ docker run -p 3000:3000 --env-file server/.env -v timepick-data:/app/server/data
 
 TimePick est déployé en production sur un VPS via **Coolify** (conteneur unique : le serveur Node sert le SPA et l'API sur le même port ; PostgreSQL managé séparément). L'intégration continue est assurée par GitHub Actions (`.github/workflows/ci.yml`).
 
-Pour le guide de déploiement complet (configuration Coolify, variables d'environnement de production, HTTPS), voir [`https://docs.timepick.app/installation/deploiement-coolify-vps`](https://docs.timepick.app/installation/deploiement-coolify-vps).
+Pour le guide de déploiement complet (configuration Coolify, variables d'environnement de production, HTTPS), voir [`https://docs.timepick.app/installation/deploiement-coolify-vps.html`](https://docs.timepick.app/installation/deploiement-coolify-vps.html).
 
 ---
 
@@ -507,10 +507,10 @@ Pour le guide de déploiement complet (configuration Coolify, variables d'enviro
 
 | Document | Description |
 |---|---|
-| [`https://docs.timepick.app/installation/installation-locale`](https://docs.timepick.app/installation/installation-locale) | Configuration initiale et première utilisation |
-| [`https://docs.timepick.app/installation/deploiement-coolify-vps`](https://docs.timepick.app/installation/deploiement-coolify-vps) | Guide de déploiement (Docker, Coolify, variables de production) |
-| [`https://docs.timepick.app/reference/modele-de-donnees`](https://docs.timepick.app/reference/modele-de-donnees) | Système de migrations SQL — détail des 38 migrations |
-| [`https://docs.timepick.app/exploitation/tests-et-qualite`](https://docs.timepick.app/exploitation/tests-et-qualite) | Documentation des suites de tests et configuration |
+| [`https://docs.timepick.app/installation/installation-locale.html`](https://docs.timepick.app/installation/installation-locale.html) | Configuration initiale et première utilisation |
+| [`https://docs.timepick.app/installation/deploiement-coolify-vps.html`](https://docs.timepick.app/installation/deploiement-coolify-vps.html) | Guide de déploiement (Docker, Coolify, variables de production) |
+| [`https://docs.timepick.app/reference/modele-de-donnees.html`](https://docs.timepick.app/reference/modele-de-donnees.html) | Système de migrations SQL — détail des 38 migrations |
+| [`https://docs.timepick.app/exploitation/tests-et-qualite.html`](https://docs.timepick.app/exploitation/tests-et-qualite.html) | Documentation des suites de tests et configuration |
 
 ---
 

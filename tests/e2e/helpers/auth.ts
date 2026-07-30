@@ -1,4 +1,4 @@
-import { Page, APIRequestContext, request as playwrightRequest } from '@playwright/test'
+import { Page } from '@playwright/test'
 
 /**
  * Test user credentials for E2E tests
@@ -128,52 +128,4 @@ export async function skipIfNotAdmin(page: Page, test: typeof import('@playwrigh
     return false
   }
   return true
-}
-
-const API_BASE_URL = process.env.API_BASE_URL ?? 'http://localhost:3000'
-
-/**
- * Resolve the first published event id from the public events API.
- *
- * Used by edit-flow E2E specs to avoid hardcoding a fixture id that may
- * not exist in the local dev/test database. GET /api/events returns only
- * published events; admin-editable drafts are excluded — seed at least one
- * published event before running these specs.
- *
- * Throws explicitly on network errors, malformed responses, or empty DB so
- * the failure mode is obvious from the beforeAll log.
- */
-export async function getFirstAvailableEventId(): Promise<string> {
-  const ctx = await playwrightRequest.newContext()
-  try {
-    const res = await ctx.get(`${API_BASE_URL}/api/events`, { timeout: 10000 })
-    if (!res.ok()) {
-      throw new Error(`GET ${API_BASE_URL}/api/events failed: ${res.status()}`)
-    }
-    let body: unknown
-    try {
-      body = await res.json()
-    } catch (err) {
-      throw new Error(
-        `GET /api/events returned non-JSON body (content-type=${res.headers()['content-type'] ?? 'unknown'}): ${(err as Error).message}`
-      )
-    }
-    const list = Array.isArray(body)
-      ? body
-      : (body as { data?: unknown } | null)?.data
-    if (!Array.isArray(list) || list.length === 0) {
-      throw new Error(
-        'No published event in DB — seed at least one published event before running edit-flow E2E specs'
-      )
-    }
-    const first = list[0] as { id?: unknown }
-    if (typeof first?.id !== 'string' || first.id.length === 0) {
-      throw new Error(
-        `Unexpected /api/events response shape: first item has no string "id" field (got ${typeof first?.id})`
-      )
-    }
-    return first.id
-  } finally {
-    await ctx.dispose()
-  }
 }

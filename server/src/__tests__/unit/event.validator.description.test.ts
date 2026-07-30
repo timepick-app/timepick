@@ -57,6 +57,17 @@ describe('createEventSchema — champ description', () => {
     })
     expect(result.description).toBe('<p>A<br><br>B</p>')
   })
+
+  // Seul cas capable de détecter une divergence de frontière avec le client :
+  // sans paragraphe vide, le plafond n'intervient pas et le nombre de <br>
+  // produit par la frontière devient observable.
+  it('une frontière de paragraphe unique vaut une LIGNE VIDE (miroir de flattenToLineBreaks)', () => {
+    const result = createEventSchema.parse({
+      name: 'x',
+      description: '<p>A</p><p>B</p>',
+    })
+    expect(result.description).toBe('<p>A<br><br>B</p>')
+  })
 })
 
 describe('updateEventSchema — champ description', () => {

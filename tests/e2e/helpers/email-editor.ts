@@ -121,6 +121,34 @@ export async function deleteShellParts(
 }
 
 /**
+ * Cleanup ciblé d'UNE surcharge, via l'API admin (`DELETE
+ * /api/admin/shell-parts/:ownerKind/:ownerId/:partKind`, 204 idempotent).
+ *
+ * À préférer à `deleteShellParts` dès que l'owner peut porter des rows qui ne
+ * viennent pas du test : au niveau `brand`, la migration 012 pose la row
+ * factory `content-wrapper` qui active la cascade γ de la carte. Un cleanup
+ * owner-wide l'efface définitivement, et tous les canevas ouverts ensuite —
+ * dans ce run comme dans les suivants — perdent leur `locked-card`.
+ */
+export async function deleteShellPart(
+  request: APIRequestContext,
+  token: string,
+  ownerKind: OwnerKind,
+  ownerId: string,
+  partKind: PartKind,
+): Promise<void> {
+  const res = await request.delete(
+    `${SERVER_BASE}/api/admin/shell-parts/${ownerKind}/${encodeURIComponent(ownerId)}/${partKind}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  if (!res.ok()) {
+    throw new Error(
+      `Cannot delete shell-part ${ownerKind}/${ownerId}/${partKind}: HTTP ${res.status()}`,
+    )
+  }
+}
+
+/**
  * Attend que GrapesJS soit prêt — i.e. que les 2 sections `locked-shell`
  * (en-tête + pied de page) soient présentes dans le wrapper, ainsi que
  * `window.__grapesEditor` exposé.

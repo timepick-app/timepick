@@ -1,5 +1,15 @@
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
-import { loginAsAdmin, TEST_ADMIN } from './helpers/auth'
+import { test, expect, type Page } from '@playwright/test'
+import { loginAsAdmin } from './helpers/auth'
+import {
+  SERVER_BASE,
+  createTestEvent,
+  deleteShellPart,
+  deleteShellParts,
+  deleteTestEvent,
+  fetchAdminToken,
+  seedShellPart,
+  waitForGrapesEditorReady,
+} from './helpers/email-editor'
 
 /**
  * Story 26-2d — runtime smokes A-E for the locked-shell inheritance panel.
@@ -17,87 +27,17 @@ import { loginAsAdmin, TEST_ADMIN } from './helpers/auth'
  *   `component:select:before` fire de la même façon.
  */
 
-const SERVER_BASE = 'http://localhost:3000'
+// Helpers d'infra (token, event, shell-parts, attente GrapesJS) : voir
+// `./helpers/email-editor`. Cette spec en avait sa propre copie ; celle de
+// `waitForGrapesEditorReady` exigeait `locked-shell === 3` — condition
+// impossible, le layout réel comptant 2 `locked-shell` (en-tête + pied) et
+// 1 `locked-card` (carte content-wrapper, classe distincte). Les 3 tests UI
+// de ce fichier expiraient donc quel que soit l'état du produit.
 
 const SAMPLE_CONTENT_HEADER =
   '<mj-section data-part-kind="header" background-color="#0066cc">' +
   '<mj-column><mj-text color="#ffffff" font-weight="bold">Test override</mj-text></mj-column>' +
   '</mj-section>'
-
-async function fetchAdminToken(request: APIRequestContext): Promise<string> {
-  await request
-    .post(`${SERVER_BASE}/api/test/users`, {
-      data: {
-        email: TEST_ADMIN.email,
-        full_name: TEST_ADMIN.fullName,
-        role: TEST_ADMIN.role,
-      },
-    })
-    .catch(() => undefined)
-  const login = await request.post(`${SERVER_BASE}/api/test/login`, {
-    data: { email: TEST_ADMIN.email },
-  })
-  if (!login.ok()) {
-    throw new Error(`Test login failed: HTTP ${login.status()}`)
-  }
-  const { token } = (await login.json()) as { token: string }
-  return token
-}
-
-async function createTestEvent(
-  request: APIRequestContext,
-  token: string,
-  name: string,
-): Promise<string> {
-  const res = await request.post(`${SERVER_BASE}/api/admin/events`, {
-    headers: { Authorization: `Bearer ${token}` },
-    data: { name },
-  })
-  if (!res.ok()) {
-    throw new Error(`Cannot create test event "${name}": HTTP ${res.status()}`)
-  }
-  const body = (await res.json()) as { data: { id: string } }
-  return body.data.id
-}
-
-async function deleteTestEvent(
-  request: APIRequestContext,
-  token: string,
-  eventId: string,
-): Promise<void> {
-  await request.delete(`${SERVER_BASE}/api/admin/events/${eventId}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-}
-
-async function deleteShellParts(
-  request: APIRequestContext,
-  ownerKind: 'brand' | 'template' | 'event',
-  ownerId: string,
-): Promise<void> {
-  await request.delete(
-    `${SERVER_BASE}/api/test/shell-parts/${ownerKind}/${encodeURIComponent(ownerId)}`,
-  )
-}
-
-/**
- * Attend que GrapesJS soit complètement initialisé et que les 3 sections
- * locked-shell soient taguées. Sans cette attente, `select()` programmatique
- * peut tomber sur un wrapper vide juste après le mount React.
- */
-async function waitForGrapesEditorReady(page: Page): Promise<void> {
-  await page.waitForFunction(
-    () => {
-      const ed = (window as unknown as { __grapesEditor?: unknown }).__grapesEditor as
-        | { getWrapper: () => { find: (sel: string) => unknown[] } }
-        | undefined
-      if (!ed) return false
-      const sections = ed.getWrapper().find('[css-class~="locked-shell"]')
-      return sections.length === 3
-    },
-    { timeout: 20000 },
-  )
-}
 
 /**
  * Sélectionne un descendant de la section locked-shell ciblée et déclenche
@@ -113,12 +53,17 @@ async function selectLockedShellDescendant(
       getAttributes: () => Record<string, string>
       components: () => { models: Comp[] }
     }
-    const ed = (window as unknown as {
-      __grapesEditor: {
-        getWrapper: () => { find: (sel: string) => Comp[] }
-        select: (c: Comp) => void
-      }
-    }).__grapesEditor
+    // `__grapesEditor` est un crochet de test posé sur `window` par
+    // `grapesConfig.ts` en DEV : aucun typage global ne le déclare et aucune
+    // validation runtime n'aurait de sens ici (si le crochet manque, le
+    // `waitForGrapesEditorReady` de l'appelant a déjà échoué). Assertion
+    // nommée plutôt qu'inlinée dans l'accès.
+    type GrapesTestHook = {
+      getWrapper: () => { find: (sel: string) => Comp[] }
+      select: (c: Comp) => void
+    }
+    const win = window as unknown as { __grapesEditor: GrapesTestHook }
+    const ed = win.__grapesEditor
     const sections = ed.getWrapper().find('[css-class~="locked-shell"]')
     const section = sections.find(
       (s) => s.getAttributes()['data-part-kind'] === kind,
@@ -133,10 +78,10 @@ async function selectLockedShellDescendant(
 }
 
 // ============================================================================
-// Smoke A — Override creation event-level (chemin nominal)
+// Smoke A — Panneau d'héritage au niveau événement (les 2 branches de la garde)
 // ============================================================================
 
-test.describe('Story 26-2d — Smoke A (event-level header override)', () => {
+test.describe("Story 26-2d — Smoke A (panneau d'héritage niveau event)", () => {
   let token: string
   let eventId: string
 
@@ -155,122 +100,67 @@ test.describe('Story 26-2d — Smoke A (event-level header override)', () => {
     await loginAsAdmin(page)
   })
 
-  test('header click opens panel, customize succeeds, re-click stays silent', async ({
+  test('bloc hérité → panneau ouvert et informatif ; bloc surchargé → panneau muet', async ({
     page,
+    request,
   }) => {
-    await page.goto(`/admin/events/${eventId}/edit?subtab=template-email#emails`)
+    await page.goto(`/admin/events/${eventId}/edit#template`)
     await page.getByTestId('event-invitation-preview-iframe').waitFor()
     await page.getByTestId('event-invitation-open-editor-btn').click()
     await page.getByTestId('mjml-editor-inner').waitFor()
     await waitForGrapesEditorReady(page)
 
-    // STEP 1 — select header descendant → panel must open with origin=template
-    // (no shell_parts row for this event yet).
+    // BRANCHE 1 — aucune row shell_parts pour cet event : le bloc est hérité,
+    // le clic doit être intercepté et monter le panneau. C'est CE chemin que le
+    // nom d'event GrapesJS pilote (`component:select:before`) : avec un nom
+    // erroné, le handler ne se déclenche jamais et le panneau reste invisible
+    // sans la moindre erreur — le silence exact que ce smoke existe pour rompre.
     await selectLockedShellDescendant(page, 'header')
     const panel = page.getByTestId('mjml-editor-locked-panel-overlay')
     await expect(panel).toBeVisible({ timeout: 5000 })
-    // The cascade origin for an event without override resolves to whichever
-    // upper level holds the content (template / brand / hardcoded). The only
-    // invariant for AC5 is "not the current ownerKind" — that's what gates
-    // the panel from opening.
+    // L'origine résolue remonte à n'importe quel niveau supérieur (template /
+    // brand / hardcoded) ; l'invariant est « pas le niveau courant ».
     const initialOrigin = await page
       .getByTestId('locked-shell-info-panel-header')
       .getAttribute('data-origin')
     expect(initialOrigin).not.toBe('event')
 
-    // STEP 2 — customize: PUT shell-parts → toast success → panel closes →
-    // editor-context refetch → origin becomes 'event'.
-    const putPromise = page.waitForResponse(
-      (r) =>
-        r.url().includes(`/api/admin/shell-parts/event/${eventId}/header`) &&
-        r.request().method() === 'PUT',
+    // Le panneau est INFORMATIF : la création d'une surcharge depuis ce panneau
+    // a été retirée (bouton désactivé par 5eebca2e, puis supprimé par 33db2fc3
+    // au profit d'un message lisible). Asserter son absence fige la décision :
+    // si le bouton revient, c'est un choix produit qui doit se voir ici.
+    await expect(
+      page.getByTestId('locked-shell-customize-btn-header'),
+    ).toHaveCount(0)
+    await expect(panel).toContainText("n'est pas encore disponible")
+
+    // BRANCHE 2 — une fois la surcharge posée au niveau event, le bloc n'est
+    // plus hérité : le même clic ne doit RIEN monter.
+    await seedShellPart(
+      request,
+      token,
+      'event',
+      eventId,
+      'header',
+      SAMPLE_CONTENT_HEADER,
     )
-    const refetchPromise = page.waitForResponse(
-      (r) =>
-        r.url().includes('/api/admin/editor-context') &&
-        r.request().method() === 'GET',
-    )
-    await page.getByTestId('locked-shell-customize-btn-header').click()
-
-    const putResp = await putPromise
-    expect(putResp.status()).toBe(200)
-    const putBody = (await putResp.json()) as {
-      data: { ownerKind: string; partKind: string }
-    }
-    expect(putBody.data.ownerKind).toBe('event')
-    expect(putBody.data.partKind).toBe('header')
-
-    await expect(panel).toBeHidden({ timeout: 5000 })
-    await refetchPromise
-
-    // STEP 3 — re-click header → panel does NOT open (origin === ownerKind).
-    await selectLockedShellDescendant(page, 'header')
-    await page.waitForTimeout(300) // give React a tick to potentially re-render
-    await expect(panel).toBeHidden()
-  })
-})
-
-// ============================================================================
-// Smoke B — Toast error (chemin résilience)
-// ============================================================================
-
-test.describe('Story 26-2d — Smoke B (toast.error on server 400)', () => {
-  let token: string
-  let eventId: string
-
-  test.beforeAll(async ({ request }) => {
-    token = await fetchAdminToken(request)
-    eventId = await createTestEvent(request, token, 'Smoke B — 26-2d')
-  })
-
-  test.afterAll(async ({ request }) => {
-    await deleteShellParts(request, 'event', eventId)
-    await deleteTestEvent(request, token, eventId)
-  })
-
-  test.beforeEach(async ({ page, request }) => {
-    await deleteShellParts(request, 'event', eventId)
-    await loginAsAdmin(page)
-  })
-
-  test('server 400 surfaces a toast.error without crashing the editor', async ({
-    page,
-  }) => {
-    test.setTimeout(60000)
-    await page.route('**/api/admin/shell-parts/**', (route) => {
-      if (route.request().method() === 'PUT') {
-        return route.fulfill({
-          status: 400,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            error: { message: 'Contenu MJML invalide (test injection)' },
-          }),
-        })
-      }
-      return route.continue()
-    })
-
-    await page.goto(`/admin/events/${eventId}/edit?subtab=template-email#emails`)
-    await page.getByTestId('event-invitation-preview-iframe').waitFor()
+    await page.reload()
     await page.getByTestId('event-invitation-open-editor-btn').click()
     await page.getByTestId('mjml-editor-inner').waitFor()
     await waitForGrapesEditorReady(page)
 
     await selectLockedShellDescendant(page, 'header')
-    await expect(page.getByTestId('mjml-editor-locked-panel-overlay')).toBeVisible()
-    await page.getByTestId('locked-shell-customize-btn-header').click()
-
-    // Sonner toasts carry `data-sonner-toast` + `data-type="error"` when fired
-    // via `toast.error()`. The message comes from the server payload via
-    // `extractErrorMessage` (`response.data.error.message`).
-    const toast = page.locator('[data-sonner-toast]').filter({
-      hasText: 'Contenu MJML invalide (test injection)',
-    })
-    await expect(toast).toBeVisible({ timeout: 10000 })
-
-    // No white-screen: the editor inner still mounted.
-    await expect(page.getByTestId('mjml-editor-inner')).toBeVisible()
+    // Laisse un tick à React pour monter le panneau s'il devait s'ouvrir.
+    await expect(page.getByTestId('locked-shell-info-panel-header')).toHaveCount(0)
+    await expect(panel).toBeHidden()
   })
+
+  // Smoke B (« server 400 surfaces a toast.error ») a été retiré le 2026-07-27 :
+  // son unique déclencheur était le bouton « Personnaliser ce bloc » du panneau,
+  // supprimé du produit par 33db2fc3. Il ne restait aucun chemin client capable
+  // de PUT une shell-part depuis ce panneau, donc plus rien à éprouver. Le
+  // contrat « une erreur serveur produit un toast et ne casse pas l'éditeur »
+  // reste couvert pour la voie de sauvegarde par `MjmlEditorOverlay.test.tsx`.
 })
 
 // ============================================================================
@@ -388,12 +278,17 @@ test.describe('Story 26-2d — Smoke E (brand-level header override via API)', (
     token = await fetchAdminToken(request)
   })
 
+  // Cleanup ciblé sur le SEUL part que ce test crée. Un cleanup owner-wide
+  // (`deleteShellParts(request, 'brand', '1')`) effacerait aussi la row
+  // factory `content-wrapper` posée par la migration 012 : la carte
+  // `locked-card` disparaîtrait de tous les canevas, dans ce run et dans tous
+  // les suivants, la suite cessant d'être idempotente.
   test.beforeEach(async ({ request }) => {
-    await deleteShellParts(request, 'brand', '1')
+    await deleteShellPart(request, token, 'brand', '1', 'header')
   })
 
   test.afterAll(async ({ request }) => {
-    await deleteShellParts(request, 'brand', '1')
+    await deleteShellPart(request, token, 'brand', '1', 'header')
   })
 
   test('PUT /api/admin/shell-parts/brand/1/header creates the brand-level override', async ({

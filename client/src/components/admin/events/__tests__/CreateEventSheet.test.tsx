@@ -33,35 +33,8 @@ vi.mock('@/components/ui/sheet', () => ({
   SheetFooter: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }))
 
-// RichTextEditor : ProseMirror incompatible avec jsdom (même mock que EventForm.test.tsx)
-vi.mock('@/components/ui/rich-text-editor', () => ({
-  RichTextEditor: ({
-    id,
-    value,
-    onChange,
-    disabled,
-    placeholder,
-    'aria-labelledby': ariaLabelledby,
-  }: {
-    id?: string
-    value: string
-    onChange: (html: string) => void
-    disabled?: boolean
-    placeholder?: string
-    'aria-labelledby'?: string
-  }) => (
-    <div>
-      <textarea
-        id={id}
-        aria-labelledby={ariaLabelledby}
-        value={value}
-        disabled={disabled}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-      />
-    </div>
-  ),
-}))
+// Tiptap/ProseMirror est inutilisable sous jsdom — cf. @/test/mockRichTextEditor.
+vi.mock('@/components/ui/rich-text-editor', () => import('@/test/mockRichTextEditor'))
 
 // useMediaQuery : jsdom ne fournit pas window.matchMedia → mock desktop par défaut
 vi.mock('@/hooks/useMediaQuery', () => ({

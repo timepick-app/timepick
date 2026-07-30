@@ -1,7 +1,9 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PublicNavHeader } from '../PublicNavHeader'
+import type { OrganizationSettings } from '@/services/organization.service'
 
 // Mock localStorage
 const localStorageMock = {
@@ -13,6 +15,20 @@ const localStorageMock = {
 Object.defineProperty(global, 'localStorage', {
   value: localStorageMock,
 })
+
+// Le service est mocké, PAS le hook : on exerce le vrai `usePublicOrganization`
+// (clé de cache + repli) à travers un QueryClientProvider de test.
+const mockGetPublicOrganization = vi.hoisted(() => vi.fn())
+vi.mock('@/services/organization.service', () => ({
+  getPublicOrganization: () => mockGetPublicOrganization(),
+}))
+
+const NO_IDENTITY: OrganizationSettings = {
+  name: '',
+  logo: '',
+  description: '',
+  homepageFacade: true,
+}
 
 // Mock PublicUserMenu to simplify testing
 vi.mock('../PublicUserMenu', () => ({
@@ -27,13 +43,16 @@ vi.mock('@/components/ui/button', () => ({
 }))
 
 /**
- * Helper to render component with router context
+ * Helper to render component with router + query context
  */
 function renderWithRouter(props?: { eventName?: string; periodFormatted?: string | null; loginHref?: string }) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <MemoryRouter>
-      <PublicNavHeader {...props} />
-    </MemoryRouter>
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <PublicNavHeader {...props} />
+      </MemoryRouter>
+    </QueryClientProvider>
   )
 }
 
@@ -41,6 +60,7 @@ describe('PublicNavHeader', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorageMock.getItem.mockReturnValue(null)
+    mockGetPublicOrganization.mockResolvedValue(NO_IDENTITY)
   })
 
   describe('Default mode (no event context)', () => {
@@ -69,6 +89,45 @@ describe('PublicNavHeader', () => {
         const appName = screen.getByRole('link', { name: /timepick/i })
         expect(appName).toHaveAttribute('href', '/')
       })
+    })
+
+    it("affiche le nom de l'organisation quand il est configuré (A1)", async () => {
+      mockGetPublicOrganization.mockResolvedValue({ ...NO_IDENTITY, name: 'Chorale du Marais' })
+      renderWithRouter()
+
+      expect(await screen.findByText('Chorale du Marais')).toBeInTheDocument()
+      expect(screen.queryByText('TimePick')).not.toBeInTheDocument()
+    })
+
+    it('repli « TimePick » quand le nom est une chaîne blanche', async () => {
+      mockGetPublicOrganization.mockResolvedValue({ ...NO_IDENTITY, name: '   ' })
+      renderWithRouter()
+
+      await waitFor(() => {
+        expect(screen.getByText('TimePick')).toBeInTheDocument()
+      })
+    })
+
+    it("repli « TimePick » quand l'endpoint public échoue", async () => {
+      mockGetPublicOrganization.mockRejectedValue(new Error('network'))
+      renderWithRouter()
+
+      await waitFor(() => {
+        expect(mockGetPublicOrganization).toHaveBeenCalled()
+      })
+      expect(screen.getByText('TimePick')).toBeInTheDocument()
+    })
+
+    it("borne la largeur d'un nom d'organisation long (le bloc auth reste visible)", async () => {
+      // Le nom vient de l'admin (jusqu'à 200 caractères) : sans borne il
+      // pousserait « Se connecter » hors de l'en-tête sur desktop.
+      const longName = "Association des Parents d'Élèves de l'École Jean Jaurès de Montreuil"
+      mockGetPublicOrganization.mockResolvedValue({ ...NO_IDENTITY, name: longName })
+      renderWithRouter()
+
+      const brand = await screen.findByText(longName)
+      expect(brand).toHaveClass('truncate', 'max-w-[150px]', 'sm:max-w-[320px]', 'lg:max-w-[500px]')
+      expect(screen.getByRole('link', { name: /se connecter/i })).toBeInTheDocument()
     })
   })
 

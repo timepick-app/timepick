@@ -1,5 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { AlertCircle } from 'lucide-react'
+import { Banner, BannerDescription } from '@/components/ui/banner'
 import { useEmailTemplate } from '@/hooks/useEmailTemplate'
 import { EmailVariablesHelp } from './EmailVariablesHelp'
 import {
@@ -85,13 +87,15 @@ export const EmailSystemTemplatePanel = ({
       </CardHeader>
       <CardContent className="space-y-6">
         {hasError && (
-          <div
-            role="alert"
-            className="p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm"
+          <Banner
+            variant="destructive"
             data-testid={`system-template-load-error-${templateKey}`}
           >
-            Erreur de chargement de l&apos;aperçu. Veuillez réessayer.
-          </div>
+            <AlertCircle aria-hidden="true" />
+            <BannerDescription>
+              Erreur de chargement de l&apos;aperçu. Veuillez réessayer.
+            </BannerDescription>
+          </Banner>
         )}
 
         {isLoading && !hasError && (

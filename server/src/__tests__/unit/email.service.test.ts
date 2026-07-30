@@ -29,9 +29,19 @@ const mockTemplateNotFoundError = class extends Error {
     this.name = 'TemplateNotFoundError'
   }
 }
+type SetupAdminEmailVars = {
+  magic_link: string
+  expiration_date: string
+  user_first_name: string
+  user_last_name: string
+  user_full_name: string
+}
+const mockRenderSetupAdminEmail =
+  jest.fn<(vars: SetupAdminEmailVars) => Promise<{ html: string; text: string }>>()
 jest.mock('../../services/render-email.service', () => ({
   __esModule: true,
   renderEmail: (...args: any[]) => mockRenderEmail(...args),
+  renderSetupAdminEmail: (vars: SetupAdminEmailVars) => mockRenderSetupAdminEmail(vars),
   HEALTHCHECK_STUB_VARIABLES: {},
   TemplateNotFoundError: mockTemplateNotFoundError,
 }))
@@ -40,6 +50,7 @@ jest.mock('../../services/render-email.service', () => ({
 import {
   sendSlotCancellationEmail,
   sendAdminMagicLinkEmail,
+  sendSetupAdminEmail,
   sendWelcomeInvitation,
   sendUserMagicLinkEmail,
   sendEventInvitation,
@@ -457,6 +468,38 @@ describe('wired functions — renderEmail contracts', () => {
     expect(mockSendMail).toHaveBeenCalledWith(
       expect.objectContaining({ subject: expect.stringContaining('administration') })
     )
+  })
+
+  // #1bis sendSetupAdminEmail — email de setup dédié (wizard d'installation)
+  it('sendSetupAdminEmail calls renderSetupAdminEmail (not renderEmail) with ctx=admin link, formatted expiration, prénom/nom, sujet dédié', async () => {
+    mockRenderSetupAdminEmail.mockResolvedValue({ html: '<html>setup</html>', text: 'setup text' })
+    const sent = await sendSetupAdminEmail(
+      'first-admin@test.com',
+      'http://app/login?token=bootstrap',
+      new Date('2026-07-28T14:30:00'),
+      'Camille',
+      'Martin'
+    )
+    expect(sent).toBe(true)
+    expect(mockRenderEmail).not.toHaveBeenCalled()
+    expect(mockRenderSetupAdminEmail).toHaveBeenCalledTimes(1)
+    const vars = mockRenderSetupAdminEmail.mock.calls[0][0]
+    expect(vars.magic_link).toContain('ctx=admin')
+    expect(vars.expiration_date).toBe('28 juillet 2026 a 14h30')
+    expect(vars.user_first_name).toBe('Camille')
+    expect(vars.user_full_name).toBe('Camille Martin')
+    expect(mockSendMail).toHaveBeenCalledWith(
+      expect.objectContaining({ subject: 'Bienvenue sur TimePick — configurez votre espace' })
+    )
+  })
+
+  it('sendSetupAdminEmail returns false when rendering fails', async () => {
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+    mockRenderSetupAdminEmail.mockRejectedValueOnce(new Error('mjml boom'))
+    const sent = await sendSetupAdminEmail('a@b.com', 'http://link', new Date())
+    expect(sent).toBe(false)
+    expect(mockSendMail).not.toHaveBeenCalled()
+    errSpy.mockRestore()
   })
 
   // #2 sendUserMagicLinkEmail

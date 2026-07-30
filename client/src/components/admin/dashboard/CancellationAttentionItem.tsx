@@ -49,7 +49,7 @@ export function CancellationAttentionItem() {
         {events.map((event) => (
           <li key={event.eventId}>
             <Link
-              to={`/admin/events/${event.eventId}/edit#emails`}
+              to={`/admin/events/${event.eventId}/edit#template`}
               className="inline-flex items-center gap-1 text-sm text-amber-800 hover:underline"
             >
               {event.eventName} · {event.pendingCount} en attente

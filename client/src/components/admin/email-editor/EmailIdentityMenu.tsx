@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Palette, Upload, Trash2, RotateCcw } from 'lucide-react'
+import { Palette, Trash2, RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { FileDropzone } from '@/components/ui/file-dropzone'
 import {
   Popover,
   PopoverContent,
@@ -39,6 +40,7 @@ import {
   FONT_FAMILY_ALLOWLIST,
   HEX_COLOR_REGEX,
 } from '@/lib/email-brand-constants'
+import { IMAGE_UPLOAD_ACCEPT, IMAGE_UPLOAD_HINT, IMAGE_UPLOAD_MAX_BYTES } from '@/lib/imageUpload'
 import api from '@/services/api'
 import type { MjmlEditorOwnerKind } from './MjmlEditorOverlay'
 import {
@@ -56,12 +58,8 @@ import {
   HEX_COLOR_INVALID_LABEL,
   IDENTITY_MENU_BUTTON_LABEL,
   IDENTITY_MENU_TITLE,
-  LOGO_EMPTY_PLACEHOLDER,
   LOGO_REMOVE_BUTTON_LABEL,
-  LOGO_UPLOADING_LABEL,
-  LOGO_UPLOAD_BUTTON_LABEL,
   LOGO_UPLOAD_ERROR_GENERIC,
-  LOGO_UPLOAD_ERROR_TOO_LARGE,
   MAX_BUTTON_RADIUS,
   RADIUS_CLAMPED_TOOLTIP,
 } from './EmailIdentityMenu.constants'
@@ -84,8 +82,6 @@ export type BrandPreviewOverrides = Partial<
 type BrandSaveResult = { status: 'ok' | 'ko' | 'skip' }
 
 export type BrandSaveHandler = () => Promise<BrandSaveResult>
-
-const MAX_LOGO_SIZE_BYTES = 5 * 1024 * 1024
 
 function snapshotFromSettings(settings: EmailBrandSettings): IdentityFormState {
   return {
@@ -175,7 +171,6 @@ function EmailIdentityMenuTemplate({
   const [buttonTextHexInvalid, setButtonTextHexInvalid] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const snapshotRef = useRef<IdentityFormState | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Plan 4a review P1 — `formRef` suit `form` à chaque render. Le handler
   // `registerSaveHandler` lit `formRef.current` à l'invocation (au lieu de
@@ -385,16 +380,10 @@ function EmailIdentityMenuTemplate({
     [updateField],
   )
 
+  // Taille et format sont déjà validés par FileDropzone : ne reste ici que
+  // l'échec serveur.
   const handleLogoUpload = useCallback(
-    async (event: React.ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0]
-      if (!file) return
-
-      if (file.size > MAX_LOGO_SIZE_BYTES) {
-        toast.error(LOGO_UPLOAD_ERROR_TOO_LARGE)
-        return
-      }
-
+    async (file: File) => {
       setIsUploading(true)
       try {
         const formData = new FormData()
@@ -410,7 +399,6 @@ function EmailIdentityMenuTemplate({
         toast.error(LOGO_UPLOAD_ERROR_GENERIC)
       } finally {
         setIsUploading(false)
-        if (fileInputRef.current) fileInputRef.current.value = ''
       }
     },
     [updateField],
@@ -502,55 +490,43 @@ function EmailIdentityMenuTemplate({
             </div>
 
             <div className="space-y-2">
-              <Label className="text-xs font-medium">{FIELD_LABEL_LOGO}</Label>
-              <div className="space-y-2">
-                {form.logoUrl ? (
-                  <img
-                    src={form.logoUrl}
-                    alt="Logo"
-                    className="h-12 w-auto rounded border object-contain"
-                    data-testid="email-identity-menu-logo-preview"
-                  />
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    {LOGO_EMPTY_PLACEHOLDER}
-                  </p>
-                )}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleLogoUpload}
-                  className="hidden"
-                  data-testid="email-identity-menu-logo-input"
-                />
-                <div className="flex flex-wrap items-center gap-2">
+              <Label id="email-identity-menu-logo-label" className="text-xs font-medium">
+                {FIELD_LABEL_LOGO}
+              </Label>
+              <FileDropzone
+                testId="email-identity-menu-logo"
+                aria-labelledby="email-identity-menu-logo-label"
+                onFileSelected={handleLogoUpload}
+                accept={IMAGE_UPLOAD_ACCEPT}
+                maxSizeBytes={IMAGE_UPLOAD_MAX_BYTES}
+                isUploading={isUploading}
+                disabled={isBusy}
+                hint={IMAGE_UPLOAD_HINT}
+                preview={
+                  form.logoUrl ? (
+                    <img
+                      src={form.logoUrl}
+                      alt=""
+                      className="h-12 w-auto rounded border object-contain"
+                      data-testid="email-identity-menu-logo-preview"
+                    />
+                  ) : undefined
+                }
+              >
+                {form.logoUrl && (
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="outline-destructive"
                     size="sm"
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={handleRemoveLogo}
                     disabled={isBusy}
-                    data-testid="email-identity-menu-logo-upload"
+                    data-testid="email-identity-menu-logo-remove"
                   >
-                    <Upload className="h-3.5 w-3.5 mr-1" aria-hidden="true" />
-                    {isUploading ? LOGO_UPLOADING_LABEL : LOGO_UPLOAD_BUTTON_LABEL}
+                    <Trash2 aria-hidden="true" />
+                    {LOGO_REMOVE_BUTTON_LABEL}
                   </Button>
-                  {form.logoUrl && (
-                    <Button
-                      type="button"
-                      variant="outline-destructive"
-                      size="sm"
-                      onClick={handleRemoveLogo}
-                      disabled={isBusy}
-                      data-testid="email-identity-menu-logo-remove"
-                    >
-                      <Trash2 className="h-3.5 w-3.5 mr-1" aria-hidden="true" />
-                      {LOGO_REMOVE_BUTTON_LABEL}
-                    </Button>
-                  )}
-                </div>
-              </div>
+                )}
+              </FileDropzone>
             </div>
 
             <div className="space-y-2">
@@ -578,13 +554,15 @@ function EmailIdentityMenuTemplate({
                   disabled={isBusy}
                   placeholder="#000000"
                   aria-invalid={primaryHexInvalid}
+                  aria-describedby={primaryHexInvalid ? 'email-identity-menu-primary-color-error' : undefined}
                   data-testid="email-identity-menu-primary-color-input"
                   className="w-32"
                 />
               </div>
               {primaryHexInvalid && (
                 <p
-                  className="text-xs text-red-600"
+                  id="email-identity-menu-primary-color-error"
+                  className="text-xs text-destructive"
                   role="alert"
                   data-testid="email-identity-menu-primary-color-error"
                 >
@@ -618,13 +596,15 @@ function EmailIdentityMenuTemplate({
                   disabled={isBusy}
                   placeholder="#ffffff"
                   aria-invalid={buttonTextHexInvalid}
+                  aria-describedby={buttonTextHexInvalid ? 'email-identity-menu-button-text-color-error' : undefined}
                   data-testid="email-identity-menu-button-text-color-input"
                   className="w-32"
                 />
               </div>
               {buttonTextHexInvalid && (
                 <p
-                  className="text-xs text-red-600"
+                  id="email-identity-menu-button-text-color-error"
+                  className="text-xs text-destructive"
                   role="alert"
                   data-testid="email-identity-menu-button-text-color-error"
                 >

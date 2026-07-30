@@ -55,16 +55,29 @@ export function getEncryptionKeyMismatch(): boolean {
  * Updates transportHealthy cache. Returns false if no transport can be built.
  */
 export async function checkSmtpConnection(timeoutMs = 10_000): Promise<boolean> {
+  // Sonde : un transport construit ici (cachedTransporter absent) n'est PAS
+  // mis en cache — la mise en cache appartient à getTransporter(), qui seul
+  // décide de la durée de vie du transport partagé. On doit donc le fermer
+  // nous-mêmes dans un finally, sinon chaque appel (isEmailDeliverable côté
+  // wizard, health/admin) laisse fuir un pool de sockets + ses timers : les
+  // branches db/env de buildTransport() construisent avec `pool: true`.
+  const builtLocally = !cachedTransporter
   const transporter = cachedTransporter ?? await buildTransport()
   if (!transporter) {
     transportHealthy = false
     return false
   }
-  const check = transporter.verify().then(() => true).catch(() => false)
-  const timeout = new Promise<false>(resolve => setTimeout(() => resolve(false), timeoutMs))
-  const result = await Promise.race([check, timeout])
-  transportHealthy = result
-  return result
+  try {
+    const check = transporter.verify().then(() => true).catch(() => false)
+    const timeout = new Promise<false>(resolve => setTimeout(() => resolve(false), timeoutMs))
+    const result = await Promise.race([check, timeout])
+    transportHealthy = result
+    return result
+  } finally {
+    if (builtLocally) {
+      try { transporter.close() } catch { /* ignore close errors */ }
+    }
+  }
 }
 
 /**
@@ -267,6 +280,61 @@ export function getTransportStatus(): { healthy: boolean | null } {
   return { healthy: transportHealthy }
 }
 
+/**
+ * Traduit une erreur SMTP (nodemailer/Node) en message français actionnable,
+ * en conservant le code technique en suffixe entre parenthèses pour que
+ * l'ops garde sa diagnosticabilité (modèle : `http-transport.ts` —
+ * « Authentification refusée (401) »). Lit `err.code` en priorité et
+ * retombe sur une détection par sous-chaîne du message quand `code` est
+ * absent.
+ *
+ * Exportée et utilisée par `sendSmtpTest`, atteinte à la fois par le wizard
+ * (setup-smtp.controller) et par le panneau admin (settings.controller) :
+ * les deux écrans reçoivent désormais le même message français — la chaîne
+ * machine brute de nodemailer n'était pas plus à sa place dans l'un que
+ * dans l'autre.
+ */
+export function describeSmtpError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err)
+  // `err.code` sans cast : `in` narrowing, on ne garde que si c'est une chaîne.
+  const code = err && typeof err === 'object' && 'code' in err && typeof err.code === 'string' ? err.code : undefined
+
+  // Timeout AVANT refus de connexion : un délai dépassé peut aussi trahir
+  // un pare-feu qui absorbe les paquets silencieusement plutôt qu'un simple
+  // refus — la distinction est volontaire, demandée explicitement par le plan.
+  if (code === 'ETIMEDOUT' || /greeting never received|connection timeout|etimedout/i.test(message)) {
+    return `Délai d'attente dépassé : le serveur SMTP n'a pas répondu à temps. Vérifiez l'hôte et le port, ou un pare-feu qui bloquerait silencieusement la connexion (${code ?? 'ETIMEDOUT'})`
+  }
+
+  if (code === 'ECONNREFUSED' || /econnrefused|connection refused/i.test(message)) {
+    return `Connexion refusée : le serveur a répondu mais rien n'écoute sur ce port. Vérifiez l'hôte et le port SMTP (${code ?? 'ECONNREFUSED'})`
+  }
+
+  if (code === 'EAUTH' || /invalid login|authentication failed/i.test(message)) {
+    return `Authentification refusée : vérifiez l'identifiant et le mot de passe SMTP (${code ?? 'EAUTH'})`
+  }
+
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN' || /enotfound|eai_again|getaddrinfo/i.test(message)) {
+    return `Nom d'hôte SMTP introuvable (échec de résolution DNS) : vérifiez l'adresse du serveur (${code ?? 'ENOTFOUND'})`
+  }
+
+  if (
+    code === 'ESOCKET'
+    || /self.signed certificate|err_tls_cert_altname_invalid|depth_zero_self_signed_cert/i.test(message)
+  ) {
+    return `Échec de la connexion sécurisée (TLS) : vérifiez le réglage « connexion sécurisée » et le port SMTP (${code ?? 'ESOCKET'})`
+  }
+
+  if (code === 'EENVELOPE') {
+    return `Adresse d'expéditeur ou de destinataire refusée par le serveur SMTP (${code})`
+  }
+
+  // Code inconnu : on ne l'avale jamais — message brut conservé tel quel,
+  // sans le préfixe « Erreur: » redondant ; code technique ajouté en
+  // suffixe s'il existe et n'apparaît pas déjà dans le message.
+  return code && !message.includes(code) ? `${message} (${code})` : message
+}
+
 export interface SmtpTestParams {
   smtpHost: string
   smtpPort: number
@@ -305,7 +373,7 @@ export async function sendSmtpTest(
     })
     return { success: true, message: 'Connexion réussie' }
   } catch (err) {
-    return { success: false, message: `Erreur: ${err instanceof Error ? err.message : 'Erreur inconnue'}` }
+    return { success: false, message: describeSmtpError(err) }
   } finally {
     transport.close()
   }

@@ -4,6 +4,7 @@ import {
   renderEmail,
   TemplateNotFoundError,
   renderSmtpTestEmail,
+  renderSetupAdminEmail,
   type TemplateKey,
 } from './render-email.service';
 import { type SlotDiff } from '../utils/slot-diff'
@@ -27,7 +28,8 @@ import {
 // ---------------------------------------------------------------------------
 
 interface LogRenderEmailFailureParams {
-  templateKey: TemplateKey
+  /** `'setup_admin'` : email de setup hors système de templates DB. */
+  templateKey: TemplateKey | 'setup_admin'
   eventId?: string
   slotId?: string
   error: unknown
@@ -138,6 +140,54 @@ export const sendAdminMagicLinkEmail = async (
     html,
   })
   if (sent && process.env.NODE_ENV !== 'production') console.log('[EmailService] Admin magic link sent to %s', email)
+  return sent
+}
+
+/**
+ * Email de setup du premier administrateur (wizard d'installation). Corps
+ * dédié — cf. renderSetupAdminEmail. Son sujet est inline : hors buildSubject,
+ * réservé aux TemplateKey test-sendables.
+ */
+export const sendSetupAdminEmail = async (
+  email: string,
+  link: string,
+  expirationDate: Date,
+  firstName?: string,
+  lastName?: string,
+): Promise<boolean> => {
+  const formattedExpiration = format(expirationDate, "d MMMM yyyy 'a' HH'h'mm", { locale: fr })
+  const linkWithCtx = withAdminCtx(link)
+
+  let html: string
+  let text: string
+  try {
+    const rendered = await renderSetupAdminEmail({
+      ...emailNameVariables(firstName, lastName),
+      magic_link: linkWithCtx,
+      expiration_date: formattedExpiration,
+    })
+    html = rendered.html
+    text = rendered.text
+  } catch (err) {
+    logRenderEmailFailure({ templateKey: 'setup_admin', error: err, recipient: email })
+    return false
+  }
+
+  const transporter = await getTransporter()
+  if (!transporter) {
+    console.error('[EmailService] No SMTP transport — setup admin email not sent to', email)
+    return false
+  }
+
+  const from = await getFromAddress()
+  const sent = await sendMailWithFallback(transporter, {
+    from,
+    to: email,
+    subject: 'Bienvenue sur TimePick — configurez votre espace',
+    text,
+    html,
+  })
+  if (sent && process.env.NODE_ENV !== 'production') console.log('[EmailService] Setup admin email sent to %s', email)
   return sent
 }
 

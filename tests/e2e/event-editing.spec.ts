@@ -1,5 +1,11 @@
-import { test, expect } from '@playwright/test'
-import { loginAsAdmin, getFirstAvailableEventId } from './helpers/auth'
+import { test, expect, type APIRequestContext } from '@playwright/test'
+import { loginAsAdmin } from './helpers/auth'
+import {
+  SERVER_BASE,
+  createTestEvent,
+  deleteTestEvent,
+  fetchAdminToken,
+} from './helpers/email-editor'
 
 /**
  * E2E Tests: Event Editing Flow
@@ -18,20 +24,47 @@ import { loginAsAdmin, getFirstAvailableEventId } from './helpers/auth'
  * PREREQUISITES:
  * - Server running on localhost:3000
  * - Client running on localhost:5173
- * - Test database with admin user AND at least one existing event
+ * - Test database with an admin user
  *
  * @see Story 18.5: Unification Création/Édition
  * @see tech-spec-draft-event-refactor.md
  */
 
-// Test event ID — resolved at runtime to the first event returned by
-// GET /api/events. Avoids hardcoding a fixture id that may not exist
-// in the local dev DB (see post-e26-e2e-baseline-recovery spec).
+// Fixture possédée par la spec. Elle visait auparavant le premier événement
+// publié renvoyé par `GET /api/events` (`getFirstAvailableEventId`) : la suite
+// ne pouvait donc pas tourner sur une base sans événement publié, et surtout
+// « should save changes » RENOMMAIT cet événement arbitraire en
+// « … (Modified E2E) » — destructif sur toute base de travail. La spec crée et
+// publie désormais le sien, et le supprime à la fin.
 let TEST_EVENT_ID: string
+let adminToken: string
+
+async function publishEvent(
+  request: APIRequestContext,
+  token: string,
+  eventId: string,
+): Promise<void> {
+  const res = await request.put(`${SERVER_BASE}/api/admin/events/${eventId}/publish`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok()) {
+    throw new Error(`Cannot publish test event ${eventId}: HTTP ${res.status()}`)
+  }
+}
 
 test.describe('Event Editing Flow - Current Behavior', () => {
-  test.beforeAll(async () => {
-    TEST_EVENT_ID = await getFirstAvailableEventId()
+  test.beforeAll(async ({ request }) => {
+    adminToken = await fetchAdminToken(request)
+    TEST_EVENT_ID = await createTestEvent(
+      request,
+      adminToken,
+      `E2E Event Editing ${Date.now()}`,
+    )
+    await publishEvent(request, adminToken, TEST_EVENT_ID)
+  })
+
+  test.afterAll(async ({ request }) => {
+    await deleteTestEvent(request, adminToken, TEST_EVENT_ID)
   })
 
   test.beforeEach(async ({ page }) => {
@@ -233,18 +266,15 @@ test.describe('Event Editing Flow - Current Behavior', () => {
       await expect(page).toHaveURL(/\/admin\/events\/?(\?.*)?$/, { timeout: 10000 })
     })
   })
-})
 
-/**
- * SMOKE TEST: Quick validation that edit page loads
- */
-test('SMOKE: Event edit page loads', async ({ page }) => {
-  await loginAsAdmin(page)
-  await page.goto(`/admin/events/${TEST_EVENT_ID}/edit`)
-
-  // If this fails, check:
-  // 1. Server is running
-  // 2. Client is running
-  // 3. Test event exists in database
-  await expect(page.locator('body')).toBeVisible()
+  /**
+   * SMOKE TEST: Quick validation that edit page loads.
+   * Vit DANS le describe : il consomme `TEST_EVENT_ID`, que l'`afterAll` du
+   * describe supprime. À l'extérieur, il s'exécuterait après ce cleanup et
+   * naviguerait vers un événement inexistant.
+   */
+  test('SMOKE: Event edit page loads', async ({ page }) => {
+    await page.goto(`/admin/events/${TEST_EVENT_ID}/edit`)
+    await expect(page.locator('body')).toBeVisible()
+  })
 })
