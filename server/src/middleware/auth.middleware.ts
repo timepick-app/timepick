@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express'
 import jwt from 'jsonwebtoken'
+import { ERROR_CODES } from '@timepick/shared'
 import { query } from '../db'
 
 const JWT_SECRET = process.env.JWT_SECRET!
@@ -25,8 +26,12 @@ export const requireAuth = async (
 ): Promise<void> => {
   const authHeader = req.headers.authorization
 
+  // Les cinq réponses de ce middleware portent `SESSION_INVALID`, volontairement
+  // hors liste blanche : leurs messages sont des phrases de journal, et
+  // l'utilisateur doit lire la phrase de l'appelant, qui lui dit ce qu'il
+  // advient de son travail. Voir le commentaire du code dans le contrat partagé.
   if (!authHeader?.startsWith('Bearer ')) {
-    res.status(401).json({ error: "Token d'authentification requis" })
+    res.status(401).json({ error: "Token d'authentification requis", code: ERROR_CODES.SESSION_INVALID })
     return
   }
 
@@ -42,7 +47,7 @@ export const requireAuth = async (
     )
 
     if (result.rows.length === 0) {
-      res.status(401).json({ error: 'Utilisateur non trouvé' })
+      res.status(401).json({ error: 'Utilisateur non trouvé', code: ERROR_CODES.SESSION_INVALID })
       return
     }
 
@@ -51,14 +56,14 @@ export const requireAuth = async (
     next()
   } catch (err) {
     if (err instanceof jwt.TokenExpiredError) {
-      res.status(401).json({ error: 'Token expiré' })
+      res.status(401).json({ error: 'Token expiré', code: ERROR_CODES.SESSION_INVALID })
       return
     }
     if (err instanceof jwt.JsonWebTokenError) {
-      res.status(401).json({ error: 'Token invalide' })
+      res.status(401).json({ error: 'Token invalide', code: ERROR_CODES.SESSION_INVALID })
       return
     }
-    res.status(401).json({ error: 'Token invalide ou expiré' })
+    res.status(401).json({ error: 'Token invalide ou expiré', code: ERROR_CODES.SESSION_INVALID })
   }
 }
 

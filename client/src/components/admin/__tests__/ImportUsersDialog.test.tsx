@@ -1,4 +1,3 @@
-import { toast } from 'sonner'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { Mock } from 'vitest'
@@ -7,6 +6,17 @@ import { ImportUsersDialog } from '../ImportUsersDialog'
 import api from '@/services/api'
 
 vi.mock('@/services/api', () => ({ default: { post: vi.fn() } }))
+
+// Le mock global (client/src/test/setup.ts) n'expose que des vi.fn() anonymes,
+// inobservables depuis le test — re-mock local pour asserter les appels (et,
+// pour l'essentiel de ce fichier, leur ABSENCE : R8, un seul canal).
+const { toastError, toastWarning } = vi.hoisted(() => ({
+  toastError: vi.fn(),
+  toastWarning: vi.fn(),
+}))
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), error: toastError, warning: toastWarning, info: vi.fn(), dismiss: vi.fn() },
+}))
 
 const wrapper = ({ children }: { children: React.ReactNode }) => (
   <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>
@@ -42,7 +52,9 @@ describe('ImportUsersDialog', () => {
     })
   })
 
-  it('422 (avec summary) → rapport réaffiché + toast erreur lignes', async () => {
+  // R8 — un seul canal : la liste inline (rapport ligne par ligne, `role="alert"`)
+  // annonce déjà cet échec ; plus de toast en double (canal déplacé, pas de lot C).
+  it('422 (avec summary) → rapport réaffiché en ligne, sans toast', async () => {
     ;(api.post as unknown as Mock)
       .mockResolvedValueOnce({ data: { summary: { total: 1, created: 1, updated: 0, invited: 0, errors: 0 }, rows: [] } })
       .mockRejectedValueOnce({ response: { data: { summary: { total: 1, created: 0, updated: 0, invited: 0, errors: 1 }, rows: [{ line: 2, email: 'x', action: 'error', error: 'Téléphone invalide' }] } } })
@@ -51,10 +63,14 @@ describe('ImportUsersDialog', () => {
     await waitFor(() => expect(screen.getByText(/Confirmer l'import/)).toBeEnabled())
     fireEvent.click(screen.getByText(/Confirmer l'import/))
     expect(await screen.findByText(/Ligne 2/)).toBeInTheDocument()
-    expect(toast.error).toHaveBeenCalledWith("L'import a échoué : corrigez les lignes en erreur")
+    expect(toastError).not.toHaveBeenCalled()
   })
 
-  it('500 (sans summary) → message serveur, pas « lignes en erreur »', async () => {
+  // L'endpoint d'import répond en forme plate, sans code (`{ error: "phrase" }`) :
+  // son message n'atteint donc pas l'écran, c'est la phrase de l'appelant qui
+  // s'affiche. Ce qui reste vérifié ici est la discrimination qui compte — un 500
+  // n'est pas un rapport de lignes en erreur.
+  it('500 (sans summary) → phrase de repli, pas « lignes en erreur »', async () => {
     ;(api.post as unknown as Mock)
       .mockResolvedValueOnce({ data: { summary: { total: 1, created: 1, updated: 0, invited: 0, errors: 0 }, rows: [] } })
       .mockRejectedValueOnce({ response: { data: { error: "Erreur lors de l'import" } } })
@@ -62,8 +78,13 @@ describe('ImportUsersDialog', () => {
     fireEvent.change(screen.getByTestId('import-file-input'), { target: { files: [csvFile()] } })
     await waitFor(() => expect(screen.getByText(/Confirmer l'import/)).toBeEnabled())
     fireEvent.click(screen.getByText(/Confirmer l'import/))
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Erreur lors de l'import"))
-    expect(toast.error).not.toHaveBeenCalledWith("L'import a échoué : corrigez les lignes en erreur")
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(
+        "L'import a échoué. Aucun membre n'a été importé, corrigez le fichier et réessayez.",
+      ),
+    )
+    expect(toastError).not.toHaveBeenCalledWith("L'import a échoué : corrigez les lignes en erreur")
+    expect(toastError).not.toHaveBeenCalledWith("Erreur lors de l'import")
   })
 
   it('avertissement invitations (Bug 6) → toast.warning si invited < created', async () => {
@@ -75,16 +96,21 @@ describe('ImportUsersDialog', () => {
     await waitFor(() => expect(screen.getByRole('checkbox')).toBeInTheDocument())
     fireEvent.click(screen.getByRole('checkbox'))
     fireEvent.click(screen.getByText(/Confirmer l'import/))
-    await waitFor(() => expect(toast.warning).toHaveBeenCalled())
-    expect((toast.warning as unknown as Mock).mock.calls[0][0]).toContain('2 invitation(s) non envoyée(s)')
+    await waitFor(() => expect(toastWarning).toHaveBeenCalled())
+    expect(toastWarning.mock.calls[0][0]).toContain('2 invitation(s) non envoyée(s)')
   })
 
-  it("erreur d'analyse fichier (M5) → toast erreur + pas d'aperçu", async () => {
+  it("erreur d'analyse fichier (M5) → phrase de repli, pas d'aperçu", async () => {
     ;(api.post as unknown as Mock)
       .mockRejectedValueOnce({ response: { data: { error: 'En-tête « email » manquant' } } })
     render(<ImportUsersDialog />, { wrapper })
     fireEvent.change(screen.getByTestId('import-file-input'), { target: { files: [csvFile()] } })
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('En-tête « email » manquant'))
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(
+        "L'analyse du fichier a échoué. Aucune donnée n'a été importée, choisissez un autre fichier.",
+      ),
+    )
+    expect(toastError).not.toHaveBeenCalledWith('En-tête « email » manquant')
     expect(screen.queryByText(/Aperçu de l'import/)).toBeNull()
   })
 })

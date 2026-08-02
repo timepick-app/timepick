@@ -1,6 +1,7 @@
 import { Request, Response } from 'express'
 import { slotService } from '../services/slot.service'
 import { createSlotSchema, updateSlotSchema, deleteSlotBodySchema } from '../validators/slot.validator'
+import { ERROR_CODES } from '@timepick/shared'
 
 export const slotsController = {
   /**
@@ -17,7 +18,7 @@ export const slotsController = {
       res.status(201).json({ data: slot })
     } catch (error: any) {
       if (error.name === 'ZodError') {
-        res.status(400).json({ error: error.issues[0].message })
+        res.status(400).json({ error: error.issues[0].message, code: ERROR_CODES.VALIDATION_ERROR })
       } else {
         console.error('Error creating slot:', error)
         res.status(500).json({ error: 'Erreur lors de la création du créneau' })
@@ -50,7 +51,7 @@ export const slotsController = {
       res.json({ data: slot })
     } catch (error: any) {
       if (error.name === 'NotFoundError') {
-        res.status(404).json({ error: error.message })
+        res.status(404).json({ error: error.message, code: error.code })
       } else {
         console.error('Error fetching slot:', error)
         res.status(500).json({ error: 'Erreur lors de la récupération du créneau' })
@@ -72,14 +73,14 @@ export const slotsController = {
       res.json({ data: result.slot, notified: result.notified, failed: result.failed })
     } catch (error: any) {
       if (error.name === 'ZodError') {
-        res.status(400).json({ error: error.issues[0].message })
+        res.status(400).json({ error: error.issues[0].message, code: ERROR_CODES.VALIDATION_ERROR })
       } else if (error.name === 'NotFoundError') {
-        res.status(404).json({ error: error.message })
+        res.status(404).json({ error: error.message, code: error.code })
       } else if (error.name === 'ConflictError') {
-        res.status(409).json({ error: error.message })
+        res.status(409).json({ error: error.message, code: error.code })
       } else {
         console.error('Error updating slot:', error)
-        res.status(500).json({ error: error.message || 'Erreur lors de la mise à jour du créneau' })
+        res.status(500).json({ error: 'Erreur lors de la mise à jour du créneau' })
       }
     }
   },
@@ -106,11 +107,11 @@ export const slotsController = {
       res.status(200).json({ data: result })
     } catch (error: any) {
       if (error.name === 'ZodError') {
-        res.status(400).json({ error: error.issues[0].message })
+        res.status(400).json({ error: error.issues[0].message, code: ERROR_CODES.VALIDATION_ERROR })
       } else if (error.name === 'NotFoundError') {
-        res.status(404).json({ error: error.message })
+        res.status(404).json({ error: error.message, code: error.code })
       } else if (error.name === 'ConflictError') {
-        res.status(409).json({ error: error.message })
+        res.status(409).json({ error: error.message, code: error.code })
       } else {
         console.error('Error cancelling slot:', error)
         res.status(500).json({ error: "Erreur lors de l'annulation du créneau" })

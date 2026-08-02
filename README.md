@@ -137,7 +137,7 @@ Initialiser la base et appliquer les migrations :
 ```bash
 cd server
 npm run init-db   # crée la base + l'extension uuid-ossp
-npm run migrate   # applique les 38 migrations SQL
+npm run migrate   # applique les migrations SQL en attente
 ```
 
 > ℹ️ La création de l'extension `uuid-ossp` peut nécessiter des droits élevés selon l'installation PostgreSQL. En cas d'erreur `permission denied to create extension`, accorder le privilège (`psql -c "ALTER USER <user> SUPERUSER"`) ou pré-installer l'extension.
@@ -509,7 +509,7 @@ Pour le guide de déploiement complet (configuration Coolify, variables d'enviro
 |---|---|
 | [`https://docs.timepick.app/installation/installation-locale.html`](https://docs.timepick.app/installation/installation-locale.html) | Configuration initiale et première utilisation |
 | [`https://docs.timepick.app/installation/deploiement-coolify-vps.html`](https://docs.timepick.app/installation/deploiement-coolify-vps.html) | Guide de déploiement (Docker, Coolify, variables de production) |
-| [`https://docs.timepick.app/reference/modele-de-donnees.html`](https://docs.timepick.app/reference/modele-de-donnees.html) | Système de migrations SQL — détail des 38 migrations |
+| [`https://docs.timepick.app/reference/modele-de-donnees.html`](https://docs.timepick.app/reference/modele-de-donnees.html) | Système de migrations SQL — politique, runner et historique |
 | [`https://docs.timepick.app/exploitation/tests-et-qualite.html`](https://docs.timepick.app/exploitation/tests-et-qualite.html) | Documentation des suites de tests et configuration |
 
 ---

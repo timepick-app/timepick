@@ -3,6 +3,7 @@ import { NotFoundError } from '../errors/NotFoundError'
 import { ConflictError } from '../errors/ConflictError'
 import { sendReservationEmail, sendUnregistrationEmail } from './email.service'
 import { formatSlotEmailDate, formatSlotEmailTime } from '../utils/slotEmailFormat'
+import { ERROR_CODES } from '@timepick/shared'
 import type { Booking, BookingCreated } from '@timepick/shared'
 
 // Booking : forme wire unifiée (source unique @timepick/shared). Historiquement
@@ -98,7 +99,7 @@ export const reservationService = {
 
       if (slotResult.rows.length === 0) {
         await client.query('ROLLBACK')
-        throw new NotFoundError('Créneau non trouvé')
+        throw new NotFoundError('Créneau non trouvé', ERROR_CODES.SLOT_NOT_FOUND)
       }
 
       const slot = slotResult.rows[0]
@@ -192,7 +193,7 @@ export const reservationService = {
     )
 
     if (result.rows.length === 0) {
-      throw new NotFoundError('Réservation non trouvée')
+      throw new NotFoundError('Réservation non trouvée', ERROR_CODES.BOOKING_NOT_FOUND)
     }
 
     const deletedBooking = result.rows[0]

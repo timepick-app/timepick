@@ -46,6 +46,28 @@ const ensureNoPublishedEvents = async () => {
   return parseInt(result.rows[0].count) === 0;
 };
 
+interface MagicLinkTokenPayload {
+  userId?: string;
+  role?: string;
+  redirectAfterLogin?: string;
+  exp?: number;
+}
+
+// Décode le lien magique tel que le membre le REÇOIT, lu dans l'espion d'envoi (armé
+// par le beforeEach du describe). Depuis la migration 043, la base ne porte plus que
+// l'empreinte sha256 du jeton : elle ne peut plus servir de source ici — et le test y
+// gagne, il lit le lien réellement envoyé plutôt qu'une colonne.
+const decodeSentMagicLink = (role: 'admin' | 'user' = 'user'): MagicLinkTokenPayload => {
+  const send = (role === 'admin'
+    ? emailService.sendAdminMagicLinkEmail
+    : emailService.sendUserMagicLinkEmail) as jest.Mock;
+  const calls = send.mock.calls;
+  expect(calls.length).toBeGreaterThan(0);
+  const link = calls[calls.length - 1][1] as string;
+  const token = new URL(link).searchParams.get('token') as string;
+  return jwt.verify(token, JWT_SECRET) as MagicLinkTokenPayload;
+};
+
 describe('POST /api/auth/login - Public Magic Link Request', () => {
   // Stub l'envoi de magic-link pour éviter de vrais emails vers Mailpit.
   // beforeEach/afterEach (et NON beforeAll) : le test « Échec du service email » fait un
@@ -138,13 +160,13 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
       expect(res.status).toBe(200);
       expect(res.body.data.message).toContain('Si cet email est enregistré');
 
-      // Vérifier que le token a été stocké en base
+      // Vérifier que l'empreinte du token a été stockée en base
       const dbResult = await pool.query(
-        'SELECT magic_link_token, token_expires_at FROM users WHERE id = $1',
+        'SELECT token_hash, expires_at FROM magic_link_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
         [user.id]
       );
-      expect(dbResult.rows[0].magic_link_token).toBeTruthy();
-      expect(dbResult.rows[0].token_expires_at).toBeTruthy();
+      expect(dbResult.rows[0].token_hash).toBeTruthy();
+      expect(dbResult.rows[0].expires_at).toBeTruthy();
     });
 
     it('génère une expiration de 30min pour un user (membre)', async () => {
@@ -156,11 +178,11 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
         .send({ email: user.email });
 
       const result = await pool.query(
-        'SELECT token_expires_at FROM users WHERE id = $1',
+        'SELECT expires_at FROM magic_link_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
         [user.id]
       );
 
-      const expiresAt = Math.floor(new Date(result.rows[0].token_expires_at).getTime() / 1000);
+      const expiresAt = Math.floor(new Date(result.rows[0].expires_at).getTime() / 1000);
       const expectedExp = now + (7 * 24 * 60 * 60); // 7 days (DEFAULT_USER_TTL)
       expect(expiresAt).toBeGreaterThanOrEqual(expectedExp - 2); // -2s de marge
       expect(expiresAt).toBeLessThanOrEqual(expectedExp + 2); // +2s de marge
@@ -175,13 +197,7 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
         .post('/api/auth/login')
         .send({ email: user.email });
 
-      const result = await pool.query(
-        'SELECT magic_link_token FROM users WHERE id = $1',
-        [user.id]
-      );
-
-      const token = result.rows[0].magic_link_token;
-      const payload = jwt.verify(token, JWT_SECRET) as any;
+      const payload = decodeSentMagicLink();
 
       expect(payload.redirectAfterLogin).toBe('/me');
       expect(payload.role).toBe('user');
@@ -199,11 +215,11 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
         .send({ email: adminUser.email });
 
       const result = await pool.query(
-        'SELECT token_expires_at FROM users WHERE id = $1',
+        'SELECT expires_at FROM magic_link_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
         [adminUser.id]
       );
 
-      const expiresAt = Math.floor(new Date(result.rows[0].token_expires_at).getTime() / 1000);
+      const expiresAt = Math.floor(new Date(result.rows[0].expires_at).getTime() / 1000);
       const expectedExp = now + (24 * 60 * 60); // 24 heures
       expect(expiresAt).toBeGreaterThanOrEqual(expectedExp - 2);
       expect(expiresAt).toBeLessThanOrEqual(expectedExp + 2);
@@ -216,13 +232,7 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
         .post('/api/auth/login')
         .send({ email: adminUser.email });
 
-      const result = await pool.query(
-        'SELECT magic_link_token FROM users WHERE id = $1',
-        [adminUser.id]
-      );
-
-      const token = result.rows[0].magic_link_token;
-      const payload = jwt.verify(token, JWT_SECRET) as any;
+      const payload = decodeSentMagicLink('admin');
 
       expect(payload.redirectAfterLogin).toBe('/admin');
       expect(payload.role).toBe('admin');
@@ -242,13 +252,7 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
           .post('/api/auth/login')
           .send({ email: user.email });
 
-        const result = await pool.query(
-          'SELECT magic_link_token FROM users WHERE id = $1',
-          [user.id]
-        );
-
-        const token = result.rows[0].magic_link_token;
-        const payload = jwt.verify(token, JWT_SECRET) as any;
+        const payload = decodeSentMagicLink();
 
         // Un événement publié existe, mais le redirect reste /me (D5).
         expect(payload.redirectAfterLogin).toBe('/me');
@@ -278,12 +282,12 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
 
       expect(res.status).toBe(200);
 
-      // Vérifier que le token a été stocké pour le bon user
+      // Vérifier que l'empreinte du token a été stockée pour le bon user
       const result2 = await pool.query(
-        'SELECT magic_link_token FROM users WHERE id = $1',
+        'SELECT token_hash FROM magic_link_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
         [user.id]
       );
-      expect(result2.rows[0].magic_link_token).toBeTruthy();
+      expect(result2.rows[0].token_hash).toBeTruthy();
 
       // Nettoyer
       await pool.query("DELETE FROM users WHERE email LIKE $1", [`${email.toLowerCase()}%`]);
@@ -312,10 +316,10 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
       expect(res.status).toBe(200);
 
       const result2 = await pool.query(
-        'SELECT magic_link_token FROM users WHERE id = $1',
+        'SELECT token_hash FROM magic_link_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
         [user.id]
       );
-      expect(result2.rows[0].magic_link_token).toBeTruthy();
+      expect(result2.rows[0].token_hash).toBeTruthy();
 
       // Nettoyer
       await pool.query("DELETE FROM users WHERE email LIKE $1", [`${email.toLowerCase()}%`]);
@@ -380,23 +384,6 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
     });
   });
   describe('next threading — préservation de la destination à travers le login', () => {
-    interface MagicLinkTokenPayload {
-      userId?: string;
-      role?: string;
-      redirectAfterLogin?: string;
-      exp?: number;
-    }
-
-    // Décode le magic_link_token JWT stocké en DB pour un user (pattern du fichier).
-    const decodeMagicLinkToken = async (userId: string): Promise<MagicLinkTokenPayload> => {
-      const result = await pool.query(
-        'SELECT magic_link_token FROM users WHERE id = $1',
-        [userId]
-      );
-      const token = result.rows[0].magic_link_token;
-      return jwt.verify(token, JWT_SECRET) as MagicLinkTokenPayload;
-    };
-
     it('(a) next sûr → redirectAfterLogin préserve /me/events/:uuid', async () => {
       const eventUuid = '11111111-2222-3333-4444-555555555555';
       const user = await createTestUser({ role: 'user' });
@@ -405,7 +392,7 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
         .post('/api/auth/login')
         .send({ email: user.email, next: `/me/events/${eventUuid}` });
 
-      const payload = await decodeMagicLinkToken(user.id);
+      const payload = decodeSentMagicLink();
       expect(payload.redirectAfterLogin).toBe(`/me/events/${eventUuid}`);
     });
 
@@ -416,7 +403,7 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
         .post('/api/auth/login')
         .send({ email: user.email, next: 'https://evil.com' });
 
-      const payload = await decodeMagicLinkToken(user.id);
+      const payload = decodeSentMagicLink();
       expect(payload.redirectAfterLogin).toBe('/me');
     });
 
@@ -427,7 +414,7 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
         .post('/api/auth/login')
         .send({ email: user.email, next: '//evil.com' });
 
-      const payload = await decodeMagicLinkToken(user.id);
+      const payload = decodeSentMagicLink();
       expect(payload.redirectAfterLogin).toBe('/me');
     });
 
@@ -438,7 +425,7 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
         .post('/api/auth/login')
         .send({ email: user.email });
 
-      const payload = await decodeMagicLinkToken(user.id);
+      const payload = decodeSentMagicLink();
       expect(payload.redirectAfterLogin).toBe('/me');
     });
   });

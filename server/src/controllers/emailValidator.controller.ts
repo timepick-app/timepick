@@ -1,3 +1,4 @@
+import { ERROR_CODES } from '@timepick/shared'
 import type { Request, Response } from 'express'
 import { validateEmail } from '../services/emailValidator.service'
 
@@ -14,7 +15,7 @@ export const validateUserEmail = async (req: Request, res: Response): Promise<vo
   const raw = req.query.email
   if (typeof raw !== 'string' || raw.trim().length === 0) {
     res.status(400).json({
-      error: { code: 'MISSING_EMAIL', message: "Paramètre 'email' requis" },
+      error: { code: ERROR_CODES.MISSING_EMAIL, message: "Paramètre 'email' requis" },
     })
     return
   }

@@ -10,6 +10,9 @@ const SelectGroup = SelectPrimitive.Group
 
 const SelectValue = SelectPrimitive.Value
 
+// Anneau de focus (WCAG 1.4.11, seuil 3:1) : même correctif que Button (cf.
+// components/ui/button.tsx) — jeton --ring à pleine opacité, plus de `/50`.
+// Calcul verrouillé par __tests__/focusRingContrast.test.ts.
 const SelectTrigger = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Trigger>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger> & {
@@ -19,7 +22,7 @@ const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      "flex w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-3 text-field text-muted-foreground shadow-sm ring-offset-background data-[placeholder]:text-muted-foreground focus:outline-none focus:border-ring focus:ring-ring/50 focus:ring-[3px] focus:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
+      "flex w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-3 text-field text-muted-foreground shadow-sm ring-offset-background data-[placeholder]:text-muted-foreground focus:outline-none focus:border-ring focus:ring-ring focus:ring-[3px] focus:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
       size === "sm" ? "h-8" : "h-9",
       className
     )}

@@ -1,3 +1,4 @@
+import { ERROR_CODES } from '@timepick/shared'
 import express, { Router, Request, Response, NextFunction } from 'express'
 import multer, { MulterError } from 'multer'
 import rateLimit from 'express-rate-limit'
@@ -5,7 +6,6 @@ import { requireAdmin } from '../middleware/adminAuth'
 import {
   processEmailImage,
   UnsupportedImageError,
-  ImageProcessingError,
 } from '../services/email-upload.service'
 
 const router = Router()
@@ -30,11 +30,11 @@ router.post(
   upload.single('image'),
   async (req: Request, res: Response): Promise<void> => {
     if (!req.file) {
-      res.status(400).json({ error: 'Aucun fichier reçu' })
+      res.status(400).json({ error: 'Aucun fichier reçu. Sélectionnez un fichier, puis réessayez.', code: ERROR_CODES.NO_FILE_RECEIVED })
       return
     }
     if (req.file.size === 0) {
-      res.status(400).json({ error: 'Fichier vide' })
+      res.status(400).json({ error: 'Ce fichier est vide. Choisissez un autre fichier.', code: ERROR_CODES.EMPTY_FILE })
       return
     }
 
@@ -59,11 +59,7 @@ router.post(
       })
     } catch (err) {
       if (err instanceof UnsupportedImageError) {
-        res.status(415).json({ error: err.message })
-        return
-      }
-      if (err instanceof ImageProcessingError) {
-        res.status(500).json({ error: err.message })
+        res.status(415).json({ error: err.message, code: ERROR_CODES.UNSUPPORTED_IMAGE })
         return
       }
       console.error('[EmailUpload] Unexpected error:', err)
@@ -74,11 +70,11 @@ router.post(
 
 router.use((err: unknown, _req: express.Request, res: express.Response, _next: NextFunction) => {
   if (err instanceof MulterError && err.code === 'LIMIT_FILE_SIZE') {
-    return res.status(413).json({ error: 'Fichier trop volumineux (max 5 Mo)' })
+    return res.status(413).json({ error: 'Fichier trop volumineux (max 5 Mo)', code: ERROR_CODES.FILE_TOO_LARGE })
   }
   if (err instanceof MulterError) {
     console.error('[EmailUpload] Multer error:', err)
-    return res.status(400).json({ error: 'Erreur upload — fichier invalide' })
+    return res.status(400).json({ error: 'Erreur upload — fichier invalide', code: ERROR_CODES.UPLOAD_INVALID_FILE })
   }
   console.error('[EmailUpload] Unhandled error:', err)
   return res.status(500).json({ error: 'Erreur upload' })

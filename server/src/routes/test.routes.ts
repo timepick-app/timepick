@@ -150,11 +150,9 @@ router.post('/login', async (req, res) => {
       JWT_SECRET
     );
 
-    // Stocker le token en base (comme le flux normal)
-    await pool.query(
-      `UPDATE users SET magic_link_token = $1, token_expires_at = to_timestamp($2) WHERE id = $3`,
-      [token, exp, user.id]
-    );
+    // Rien à stocker : ce jeton est une SESSION (en-tête Authorization), pas un lien
+    // magique — aucun appelant ne le passe à /api/auth/verify. L'écriture historique
+    // dans users.magic_link_token était du décor, et la colonne n'existe plus (042).
 
     res.json({
       token,

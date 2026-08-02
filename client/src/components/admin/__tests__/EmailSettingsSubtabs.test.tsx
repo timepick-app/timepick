@@ -237,6 +237,9 @@ const invitationDto: InvitationTemplate = {
   defaultBodyMjml:
     '<!-- timepick:body --><mj-section><mj-text>{{magic_link}} {{expiration_date}}</mj-text></mj-section><!-- /timepick:body -->',
   updatedAt: '2026-05-01T10:00:00Z',
+  subject: null,
+  defaultSubject: 'Inscription participation - {{event_name}}',
+  subjectVariables: [],
 }
 
 const SYSTEM_DEFAULTS: Record<SystemTemplateKey, { intro: string; sig: string }> = {
@@ -279,6 +282,9 @@ function makeSystemDto(key: SystemTemplateKey): SystemTemplate {
     defaultIntroText: factory.intro,
     defaultSignatureText: factory.sig,
     updatedAt: '2026-05-01T10:00:00Z',
+    subject: null,
+    defaultSubject: 'Confirmation de réservation - {{event_name}}',
+    subjectVariables: [],
   }
 }
 

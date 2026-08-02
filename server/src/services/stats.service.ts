@@ -1,5 +1,6 @@
 import { query } from '../db'
 import { NotFoundError } from '../errors/NotFoundError'
+import { ERROR_CODES } from '@timepick/shared'
 
 /**
  * Type EventStats pour les réponses API (camelCase)
@@ -43,7 +44,7 @@ export const statsService = {
     )
 
     if (eventCheck.rows.length === 0) {
-      throw new NotFoundError('Événement non trouvé')
+      throw new NotFoundError('Événement non trouvé', ERROR_CODES.EVENT_NOT_FOUND)
     }
 
     // Calculer les statistiques

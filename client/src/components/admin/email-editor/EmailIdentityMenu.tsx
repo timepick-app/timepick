@@ -57,6 +57,7 @@ import {
   FIELD_LABEL_BUTTON_TEXT_COLOR,
   HEX_COLOR_INVALID_LABEL,
   IDENTITY_MENU_BUTTON_LABEL,
+  IDENTITY_MENU_BUTTON_LABEL_SHORT,
   IDENTITY_MENU_TITLE,
   LOGO_REMOVE_BUTTON_LABEL,
   LOGO_UPLOAD_ERROR_GENERIC,
@@ -436,23 +437,55 @@ function EmailIdentityMenuTemplate({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
+      {/* PALIERS DE LA BARRE D'OUTILS. Ce bouton est un descendant de la barre de
+          l'éditeur, qui porte `group/toolbar` et publie son palier en
+          `data-toolbar-tier` : les variantes `group-data-[toolbar-tier=…]/toolbar:`
+          y résolvent sans plomberie. Le palier est MESURÉ par la barre, il n'y a
+          plus aucun seuil en pixels — voir `useToolbarTier`.
+
+          Ici : libellé entier au palier entier, raccourci aux paliers court et
+          resserré, icône seule au palier icônes — le libellé n'est alors que
+          MASQUÉ (`sr-only`), jamais retiré, pour que le nom accessible du bouton
+          reste « Identité » au lieu de disparaître.
+
+          PAS DE `title`, délibérément. Le nom accessible de ce bouton vient de
+          son CONTENU ; une infobulle portant le même texte n'est pas consommée
+          par le calcul du nom et retombe en description accessible, ce qui fait
+          annoncer deux fois la même chaîne. C'est le défaut corrigé sur
+          « Fermer » le 2026-08-01, et aucun texte d'infobulle ne resterait
+          différent du nom à TOUS les paliers, puisque le nom suit le libellé
+          visible. Ce qui est perdu à l'état raccourci l'est peu : « Identité »
+          est un mot porteur, et le popover qui s'ouvre nomme sa propre section.
+
+          Le commentaire est HORS de `PopoverTrigger` : `asChild` passe par
+          `React.Children.only`, et on ne lui laisse pas d'ambiguïté sur son
+          enfant unique. */}
       <PopoverTrigger asChild>
         <Button
           type="button"
           variant="ghost"
           size="sm"
+          className="group-data-[toolbar-tier=icones]/toolbar:w-8 group-data-[toolbar-tier=icones]/toolbar:px-0"
           data-testid="email-identity-menu-trigger"
           aria-expanded={open}
         >
-          <Palette className="h-4 w-4 mr-1" aria-hidden="true" />
-          {IDENTITY_MENU_BUTTON_LABEL}
+          <Palette
+            className="mr-1 h-4 w-4 group-data-[toolbar-tier=icones]/toolbar:mr-0"
+            aria-hidden="true"
+          />
+          <span className="sr-only group-data-[toolbar-tier=court]/toolbar:not-sr-only group-data-[toolbar-tier=resserre]/toolbar:not-sr-only group-data-[toolbar-tier=entier]/toolbar:hidden">
+            {IDENTITY_MENU_BUTTON_LABEL_SHORT}
+          </span>
+          <span className="hidden group-data-[toolbar-tier=entier]/toolbar:inline">
+            {IDENTITY_MENU_BUTTON_LABEL}
+          </span>
         </Button>
       </PopoverTrigger>
       <PopoverContent
         align="start"
         side="bottom"
         sideOffset={8}
-        className="w-[360px] z-50"
+        className="w-[360px]"
         data-testid="email-identity-menu-popover"
         // Sans preventDefault, Échap remonte au Radix Dialog parent
         // (MjmlEditorOverlay) et ferme l'éditeur entier. preventDefault

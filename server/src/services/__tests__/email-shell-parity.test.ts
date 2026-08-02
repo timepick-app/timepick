@@ -68,6 +68,11 @@ function normalize(mjml: string): string {
     .replace(/\s+data-locked-label="[^"]*"/g, '')
     .replace(/\s+data-part-kind="[^"]*"/g, '')
     .replace(/\s+data-inherited="[^"]*"/g, '')
+    // `data-inherited-label` (2026-07-30) porte le libellé de la pastille
+    // « Hérité du modèle / de la marque / Contenu d'origine » du canvas. Attribut
+    // séparé de `data-inherited` à dessein : la passe de verrou teste
+    // `data-inherited === 'true'`, une valeur d'origine y casserait le deep-lock.
+    .replace(/\s+data-inherited-label="[^"]*"/g, '')
     .replace(/\s+/g, ' ')
     // Collapse whitespace between adjacent tags (`> <` → `><`). Indentation in
     // the source templates is cosmetic — semantically identical in MJML — so

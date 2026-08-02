@@ -46,6 +46,7 @@ import {
 } from '@/lib/email-system-template-constants'
 import type {
   InvitationTemplate,
+  SubjectPatch,
   SystemTemplate,
   TemplateKey,
 } from '@/services/email-templates.service'
@@ -138,9 +139,11 @@ export const EmailSettingsSubtabs = ({
   // n'est émis qu'APRÈS un PATCH confirmé (anti silent-failure, audit toasts
   // 2026-06-07 / D1). mutateAsync propage la rejection → l'overlay surface
   // l'erreur, jamais de toast succès mensonger.
-  const handleSaveInvitation = async (bodyMjml: string) => {
+  const handleSaveInvitation = async (bodyMjml: string, subject?: SubjectPatch) => {
     const missing = findMissingCriticalVariables(bodyMjml)
-    await patchMutation.mutateAsync({ bodyMjml })
+    // Corps et objet dans la MÊME requête (A10). Le fragment objet est vide
+    // quand rien n'a changé de ce côté — la colonne n'est alors pas touchée.
+    await patchMutation.mutateAsync({ bodyMjml, ...subject })
     if (missing.length > 0) {
       const tokens = missing.map((n) => `{{${n}}}`).join(', ')
       toast.warning(
@@ -374,6 +377,12 @@ export const EmailSettingsSubtabs = ({
             initialBodyMjml={invitationTpl.bodyMjml}
             defaultBodyMjml={invitationTpl.defaultBodyMjml}
             variables={INVITATION_VARIABLES}
+            subjectLine={{
+              subject: invitationTpl.subject,
+              fallbackSubject: invitationTpl.defaultSubject,
+              level: 'template',
+              variables: invitationTpl.subjectVariables,
+            }}
             onSave={handleSaveInvitation}
           />
         ) : (
@@ -390,6 +399,16 @@ export const EmailSettingsSubtabs = ({
             variables={SYSTEM_TEMPLATE_VARIABLES[systemKey]}
             systemIntroText={systemTpl.introText}
             systemSignatureText={systemTpl.signatureText}
+            subjectLine={{
+              subject: systemTpl.subject,
+              fallbackSubject: systemTpl.defaultSubject,
+              level: 'template',
+              // Présents pour magic_link_login SEUL ; leur absence est ce qui
+              // masque le sélecteur de variante sur les sept autres.
+              subjectAdmin: systemTpl.subjectAdmin,
+              fallbackSubjectAdmin: systemTpl.defaultSubjectAdmin,
+              variables: systemTpl.subjectVariables,
+            }}
             onSaveSystem={async (zones) => {
               await patchMutation.mutateAsync(zones)
               toast.success(

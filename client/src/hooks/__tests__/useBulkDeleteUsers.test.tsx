@@ -128,10 +128,11 @@ describe('useBulkDeleteUsers', () => {
   })
 
   /**
-   * (d) api.post rejette { response: { data: { error: 'Boom' } } } →
-   * toast.error('Erreur: Boom').
+   * (d) api.post rejette { response: { data: { error: 'Boom' } } } — forme
+   * plate sans code reconnu → le message serveur n'atteint pas l'écran ;
+   * toast.error affiche le repli de l'appelant.
    */
-  it('(d) toast.error("Erreur: Boom") sur rejet API avec message serveur', async () => {
+  it('(d) toast.error avec le message de repli sur rejet API sans code reconnu', async () => {
     vi.mocked(api.post).mockRejectedValueOnce({
       response: { data: { error: 'Boom' } }
     })
@@ -141,8 +142,12 @@ describe('useBulkDeleteUsers', () => {
     result.current.mutate(['id1'])
 
     await waitFor(() => {
-      expect(mockToast.error).toHaveBeenCalledWith('Erreur: Boom')
+      expect(mockToast.error).toHaveBeenCalled()
     })
+
+    const msg = vi.mocked(toast.error).mock.calls[0][0] as string
+    expect(msg).toBe("La suppression a échoué. Aucun membre n'a été supprimé, réessayez.")
+    expect(msg).not.toContain('Boom')
   })
 
   /**

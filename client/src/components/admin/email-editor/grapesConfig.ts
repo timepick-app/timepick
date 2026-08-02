@@ -17,7 +17,11 @@ import {
   type LockableComponent as ShellLockable,
   type ShellWrapperLike,
 } from './shellStructureLock'
-import { injectLayerPanelLockCss, injectLockedShellSignalCss } from './lockedShellSignalCss'
+import {
+  injectLayerPanelLockCss,
+  injectLockedShellSignalCss,
+  LOCKED_SHELL_LABEL_CSS,
+} from './lockedShellSignalCss'
 
 const ALLOWED_BLOCK_IDS = new Set(['mj-image', 'mj-text', 'mj-button', 'mj-divider', 'mj-spacer'])
 
@@ -179,35 +183,12 @@ export function initEmailEditor(
       storageManager: false,
       fromElement: false,
       i18n: { locale: 'fr', messages: { fr: GRAPESJS_FR_MESSAGES } },
-      // Story 26-2 / AC6 — permanent "En-tête" / "Pied" labels above the
-      // 2 locked-shell sections. The labels are driven by the
-      // `data-locked-label` attribute injected by `addLockedLabel()` in
-      // `bodyExtraction.ts`. The CSS lives inside the canvas iframe
-      // (separate document from the host page) via `canvas.frameStyle`.
-      canvas: {
-        frameStyle: `
-          .locked-shell[data-locked-label] {
-            position: relative;
-          }
-          .locked-shell[data-locked-label]::before {
-            content: attr(data-locked-label);
-            position: absolute;
-            top: -1.25em;
-            left: 0;
-            padding: 0.125rem 0.5rem;
-            font-size: 0.75rem;
-            font-weight: 600;
-            color: #4b5563;
-            background: #f3f4f6;
-            border-radius: 0.25rem;
-            pointer-events: none;
-            z-index: 1;
-          }
-          .locked-shell[data-part-kind] {
-            cursor: not-allowed;
-          }
-        `,
-      },
+      // Étiquette permanente « En-tête » / « Corps » / « Pied ». La règle vit
+      // dans `lockedShellSignalCss.ts` avec l'autre signal de canvas (drift
+      // guard commun) ; elle est passée en `frameStyle` — et non injectée comme
+      // l'autre — parce qu'elle doit exister dès le premier rendu de l'iframe,
+      // avant toute passe de verrou.
+      canvas: { frameStyle: LOCKED_SHELL_LABEL_CSS },
       // F26 carry-over: wrap the plugin to pass options inline. We can't use
       // GrapesJS' `pluginsOpts` map because the function reference can't be a
       // stable object key. `useCustomTheme: false` disables the plugin's

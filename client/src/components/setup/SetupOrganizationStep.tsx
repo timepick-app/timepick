@@ -16,7 +16,7 @@ import {
   ORGANIZATION_NAME_MAX_LENGTH,
 } from '@/services/organization.service'
 import { IMAGE_UPLOAD_ACCEPT, IMAGE_UPLOAD_HINT, IMAGE_UPLOAD_MAX_BYTES } from '@/lib/imageUpload'
-import { extractErrorMessage } from '@/lib/extractErrorMessage'
+import { userFacingErrorMessage } from '@/lib/userFacingErrorMessage'
 import { isRichTextEmpty, isSameRichText } from '@/lib/richText'
 
 /**
@@ -129,7 +129,12 @@ export function SetupOrganizationStep({
       const result = await uploadSetupOrganizationLogo(file)
       onDraftChange({ logo: result.logo })
     } catch (err) {
-      toast.error(extractErrorMessage(err, "Erreur lors de l'envoi du logo"))
+      toast.error(
+        userFacingErrorMessage(
+          err,
+          "L'envoi du logo a échoué. Le logo n'a pas été modifié, réessayez.",
+        ),
+      )
     } finally {
       setIsUploadingLogo(false)
     }
@@ -141,7 +146,12 @@ export function SetupOrganizationStep({
       await deleteSetupOrganizationLogo()
       onDraftChange({ logo: '' })
     } catch (err) {
-      toast.error(extractErrorMessage(err, 'Erreur lors de la suppression du logo'))
+      toast.error(
+        userFacingErrorMessage(
+          err,
+          "La suppression du logo a échoué. Le logo n'a pas été supprimé, réessayez.",
+        ),
+      )
     } finally {
       setIsDeletingLogo(false)
     }
@@ -171,7 +181,12 @@ export function SetupOrganizationStep({
       onSaved(payload)
       onDone()
     } catch (err) {
-      toast.error(extractErrorMessage(err, "Erreur lors de l'enregistrement de l'organisation"))
+      toast.error(
+        userFacingErrorMessage(
+          err,
+          "L'enregistrement de l'organisation a échoué. Vos modifications sont toujours à l'écran, réessayez.",
+        ),
+      )
     } finally {
       setIsSaving(false)
     }

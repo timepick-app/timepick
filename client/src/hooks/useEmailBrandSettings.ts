@@ -12,7 +12,7 @@ import {
   type EmailBrandSettingsPatch,
 } from '../services/email-brand-settings.service'
 import { toast } from 'sonner'
-import { extractErrorMessage } from '@/lib/extractErrorMessage'
+import { userFacingErrorMessage } from '@/lib/userFacingErrorMessage'
 
 const invalidateAllTemplatePreviews = (queryClient: QueryClient) => {
   queryClient.invalidateQueries({
@@ -81,7 +81,7 @@ export const usePatchEmailBrandSettings = (
     },
     onError: (err: unknown) => {
       if (silent) return
-      toast.error(extractErrorMessage(err, 'Erreur lors de la sauvegarde'))
+      toast.error(userFacingErrorMessage(err, "L'enregistrement de l'identité visuelle des emails a échoué. Vos modifications sont toujours à l'écran, réessayez."))
     },
   })
 }
@@ -102,7 +102,7 @@ export const useResetEmailBrandSettings = () => {
       toast.success('Identité visuelle réinitialisée')
     },
     onError: (err: unknown) => {
-      toast.error(extractErrorMessage(err, 'Erreur lors de la réinitialisation'))
+      toast.error(userFacingErrorMessage(err, "La réinitialisation de l'identité visuelle a échoué. Vos réglages actuels sont conservés, réessayez."))
     },
   })
 }

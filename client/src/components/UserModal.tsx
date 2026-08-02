@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Banner, BannerDescription } from '@/components/ui/banner'
 import { SheetShell } from './SheetShell'
 import { SelfDemotionConfirmDialog } from './SelfDemotionConfirmDialog'
+import { userFacingErrorMessage } from '@/lib/userFacingErrorMessage'
 import { useEmailValidation } from '../hooks/useEmailValidation'
 import type { User, ApiCreateUserInput, ApiUpdateUserInput, UserRole } from '../types/user'
 import type { AuthUser } from '../hooks/useAuth'
@@ -168,12 +169,11 @@ export const UserModal = ({ mode, user, currentUser, onSave, onClose }: UserModa
       // Trace de diagnostic : sans ce log, une erreur de programmation (non-axios)
       // serait indiscernable d'une validation serveur dans le bandeau utilisateur.
       console.error('[UserModal] échec sauvegarde membre:', err)
-      const e = err as { response?: { data?: { error?: string } } }
       setErrors({
-        general:
-          e.response?.data?.error ||
-          (err instanceof Error ? err.message : undefined) ||
-          'Une erreur est survenue',
+        general: userFacingErrorMessage(
+          err,
+          "L'enregistrement a échoué. Vos modifications sont toujours à l'écran, réessayez."
+        ),
       })
       // La sauvegarde a échoué : la base n'a pas changé. On rétablit le radio
       // sur le rôle réellement persisté pour éviter d'afficher un état non enregistré

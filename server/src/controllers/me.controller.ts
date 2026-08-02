@@ -3,6 +3,7 @@ import { ZodError } from 'zod'
 import { meService } from '../services/me.service'
 import { NotFoundError } from '../errors/NotFoundError'
 import { ValidationError } from '../errors/ValidationError'
+import { ERROR_CODES } from '@timepick/shared'
 import {
   patchMeProfileSchema,
   formatZodError
@@ -46,7 +47,7 @@ export const getMyProfile = async (
     const userId = req.user!.userId
     const profile = await meService.getMyProfile(userId)
     if (!profile) {
-      res.status(404).json({ error: 'Utilisateur non trouvé' })
+      res.status(404).json({ error: 'Utilisateur non trouvé', code: ERROR_CODES.USER_NOT_FOUND })
       return
     }
     res.json({ data: profile })
@@ -75,15 +76,15 @@ export const updateMyProfile = async (
     res.json({ data: updated })
   } catch (err) {
     if (err instanceof ZodError) {
-      res.status(400).json({ error: formatZodError(err) })
+      res.status(400).json({ error: formatZodError(err), code: ERROR_CODES.VALIDATION_ERROR })
       return
     }
     if (err instanceof ValidationError) {
-      res.status(400).json({ error: err.message })
+      res.status(400).json({ error: err.message, code: err.code })
       return
     }
     if (err instanceof NotFoundError) {
-      res.status(404).json({ error: err.message })
+      res.status(404).json({ error: err.message, code: err.code })
       return
     }
     console.error('[MeProfile] Error updating profile:', err)
@@ -112,7 +113,7 @@ export const getMySlots = async (
   } catch (err) {
     // ValidationError = curseur invalide (AC7) → 400 explicite.
     if (err instanceof ValidationError) {
-      res.status(400).json({ error: err.message })
+      res.status(400).json({ error: err.message, code: err.code })
       return
     }
     console.error('[MeSlots] Error fetching member slots:', err)

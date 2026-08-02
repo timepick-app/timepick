@@ -1,4 +1,5 @@
 import net from 'net'
+import { ERROR_CODES } from '@timepick/shared'
 import type { Request, Response } from 'express'
 import { getSmtpSettings } from '../db/settings.db'
 import { getEmailProviderConfig, type EmailProvider } from '../db/email-provider.db'
@@ -65,7 +66,7 @@ export const getSetupSmtpConfigHandler = async (_req: Request, res: Response): P
   } catch (e) {
     console.error('[SetupSmtp] get error:', e)
     res.status(500).json({
-      error: { code: 'INTERNAL_ERROR', message: 'Erreur lors de la récupération de la configuration SMTP' },
+      error: { code: ERROR_CODES.INTERNAL_ERROR, message: 'Erreur lors de la récupération de la configuration SMTP' },
     })
   }
 }
@@ -93,7 +94,7 @@ export const testSetupSmtpHandler = async (req: Request, res: Response): Promise
 
       const meta = getProviderMeta(validated.provider)
       if (!meta) {
-        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Fournisseur email non supporté' } })
+        res.status(400).json({ error: { code: ERROR_CODES.VALIDATION_ERROR, message: 'Fournisseur email non supporté' } })
         return
       }
 
@@ -122,7 +123,7 @@ export const testSetupSmtpHandler = async (req: Request, res: Response): Promise
     // Blocklist prod : rejeter les IPs privées/loopback littérales (ex. 169.254.169.254)
     if (process.env.NODE_ENV === 'production' && isBlockedSmtpHost(smtpParams.smtpHost)) {
       res.status(400).json({
-        error: { code: 'SMTP_HOST_BLOCKED', message: 'Hôte SMTP non autorisé (adresse interne).' },
+        error: { code: ERROR_CODES.SMTP_HOST_BLOCKED, message: 'Hôte SMTP non autorisé (adresse interne).' },
       })
       return
     }
@@ -140,6 +141,6 @@ export const testSetupSmtpHandler = async (req: Request, res: Response): Promise
     if (ve.code !== 'VALIDATION_ERROR') {
       console.error('[SetupSmtp] test error:', error)
     }
-    res.status(ve.code === 'VALIDATION_ERROR' ? 400 : 500).json({ error: ve })
+    res.status(ve.code === ERROR_CODES.VALIDATION_ERROR ? 400 : 500).json({ error: ve })
   }
 }

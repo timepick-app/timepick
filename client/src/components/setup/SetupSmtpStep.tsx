@@ -11,7 +11,7 @@ import { useEmailProvidersCatalog } from '@/hooks/useSmtpSettings'
 import { SmtpFields, validateProviderCredentials } from '@/components/smtp/SmtpFields'
 import type { SmtpFieldsValues } from '@/components/smtp/SmtpFields'
 import { EMAIL_RE } from '@/lib/email'
-import { extractErrorMessage } from '@/lib/extractErrorMessage'
+import { userFacingErrorMessage } from '@/lib/userFacingErrorMessage'
 import { visibleFieldErrors } from '@/lib/formErrors'
 
 const DEFAULT_PORT = 587
@@ -209,7 +209,10 @@ export function SetupSmtpStep({ onDone, onBack, skippable = false, onConfigChang
       const status = (err as AxiosError).response?.status
       setTest({
         outcome: status === 429 ? 'throttled' : 'failed',
-        message: extractErrorMessage(err, 'Erreur lors du test SMTP'),
+        message: userFacingErrorMessage(
+          err,
+          "Le test de connexion SMTP a échoué. Aucun email de test n'a été envoyé, corrigez les paramètres puis réessayez.",
+        ),
         signature: testedSignature,
       })
     } finally {
@@ -231,7 +234,12 @@ export function SetupSmtpStep({ onDone, onBack, skippable = false, onConfigChang
       void onConfigChanged?.()
       onDone()
     } catch (err) {
-      toast.error(extractErrorMessage(err, "Erreur lors de l'enregistrement SMTP"))
+      toast.error(
+        userFacingErrorMessage(
+          err,
+          "L'enregistrement de la configuration SMTP a échoué. Vos paramètres sont toujours dans le formulaire, réessayez.",
+        ),
+      )
     } finally {
       setIsSaving(false)
     }
@@ -254,7 +262,12 @@ export function SetupSmtpStep({ onDone, onBack, skippable = false, onConfigChang
       // nouvelle sonde revenue, sinon le bouton change d'état deux fois.
       await onConfigChanged?.()
     } catch (err) {
-      toast.error(extractErrorMessage(err, "Erreur lors de l'effacement de la configuration"))
+      toast.error(
+        userFacingErrorMessage(
+          err,
+          "L'effacement de la configuration a échoué. Rien n'a été supprimé, réessayez.",
+        ),
+      )
     } finally {
       setIsClearing(false)
     }

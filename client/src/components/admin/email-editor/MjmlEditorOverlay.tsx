@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useCallback, useMemo } from 'react'
+import { lazy, Suspense, useState, useCallback, useRef } from 'react'
 import { Loader2, type LucideIcon } from 'lucide-react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import {
@@ -12,6 +12,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { isDismissGuardedSurface, isDrawbridgePresent } from './dismissGuard'
+import type { EditorSubjectProps } from './MjmlEditorOverlayInner'
+import type { SubjectPatch } from '@/services/email-templates.service'
 import './email-editor.css'
 
 /**
@@ -67,8 +69,8 @@ export interface MjmlEditorOverlayProps {
   defaultBodyMjml?: string
   /** Variable names for the palette (e.g. ['event_name', 'magic_link']). */
   variables: readonly string[]
-  /** Called with extracted body fragment when the user clicks Save (invitation). */
-  onSave?: (bodyMjml: string) => Promise<void>
+  /** Called with extracted body fragment (+ le fragment objet) when the user clicks Save (invitation). */
+  onSave?: (bodyMjml: string, subject?: SubjectPatch) => Promise<void>
   /** Called when the user confirms Reset to factory (invitation). Parent handles the API call. */
   onReset?: () => Promise<void>
   /** Called when the user closes the overlay (after dirty-check confirmation). */
@@ -91,12 +93,16 @@ export interface MjmlEditorOverlayProps {
   systemIntroText?: string
   /** L3a (système) — signature courante. Requis si `mode==='system'`. */
   systemSignatureText?: string
-  /** L3a (système) — save : extraction des 2 zones → PATCH { introText, signatureText }. */
-  onSaveSystem?: (zones: { introText: string; signatureText: string }) => Promise<void>
+  /** L3a (système) — save : extraction des 2 zones (+ objet) → PATCH. */
+  onSaveSystem?: (
+    zones: { introText: string; signatureText: string } & SubjectPatch,
+  ) => Promise<void>
   /** Sélecteur de modèle dans la barre d'outils (bascule sans fermer l'éditeur).
    *  Le wrapper intercepte `onRequestSwitch` pour dirty-guarder : si des
    *  modifications non sauvegardées existent, une confirmation s'ouvre d'abord. */
   templateSwitcher?: TemplateSwitcherProps
+  /** Ligne Objet sous la barre d'outils. Absente ⇒ pas de ligne. */
+  subjectLine?: EditorSubjectProps
 }
 
 function EditorSkeleton() {
@@ -176,8 +182,18 @@ export function MjmlEditorOverlay(props: MjmlEditorOverlayProps) {
   // unusable over a modal Radix Dialog (it sets `body { pointer-events: none }`,
   // dismisses on outside click, and traps focus). When the extension is present
   // we relax the Dialog to non-modal so design review works; production (no
-  // extension) keeps the modal. Resolved once per open via the extension root id.
-  const drawbridgePresent = useMemo(() => open && isDrawbridgePresent(), [open])
+  // extension) keeps the modal.
+  //
+  // GELÉE le temps d'une ouverture : Radix rend l'overlay sous
+  // `context.modal ? <Presence …/> : null`, donc une bascule en cours de vie le
+  // détruit et le recrée EN FIN de `<body>` — au-dessus des fenêtres ouvertes
+  // depuis, qu'il grise et dont il avale les clics (voile et fenêtre partagent
+  // `z-50`, l'ordre d'arrivée arbitre). Un `useMemo` ne garantit rien : React
+  // peut le réévaluer, et l'extension injecte son panneau de façon asynchrone.
+  const drawbridgeRef = useRef<boolean | null>(null)
+  if (!open) drawbridgeRef.current = null
+  else drawbridgeRef.current ??= isDrawbridgePresent()
+  const drawbridgePresent = drawbridgeRef.current === true
 
   return (
     <>
@@ -211,6 +227,7 @@ export function MjmlEditorOverlay(props: MjmlEditorOverlayProps) {
                 systemIntroText={props.systemIntroText}
                 systemSignatureText={props.systemSignatureText}
                 onSaveSystem={props.onSaveSystem}
+                subjectLine={props.subjectLine}
                 templateSwitcher={
                   props.templateSwitcher
                     ? {

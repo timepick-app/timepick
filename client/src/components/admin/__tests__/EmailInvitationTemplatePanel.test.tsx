@@ -7,6 +7,7 @@ import {
   getEmailTemplate,
   type InvitationTemplate,
 } from '../../../services/email-templates.service'
+import { setTestScreen } from '@/test/screenSize'
 
 // --- Mocks ---------------------------------------------------------------
 
@@ -33,6 +34,9 @@ const invitationDto: InvitationTemplate = {
   defaultBodyMjml:
     '<!-- timepick:body --><mj-section><mj-text>{{magic_link}} {{expiration_date}}</mj-text></mj-section><!-- /timepick:body -->',
   updatedAt: '2026-05-01T10:00:00Z',
+  subject: null,
+  defaultSubject: 'Inscription participation - {{event_name}}',
+  subjectVariables: [],
 }
 
 function renderPanel(onOpenEditor = vi.fn()) {
@@ -147,5 +151,28 @@ describe('EmailInvitationTemplatePanel (carte muette)', () => {
     expect(section).toHaveTextContent('{{event_description}}')
     expect(section).toHaveTextContent('{{magic_link}}')
     expect(section).toHaveTextContent('{{expiration_date}}')
+  })
+
+  // === Refus des appareils qui ne pourront jamais afficher l'éditeur ===
+
+  it("garde le CTA sur un écran capable, sans explication de repli", async () => {
+    renderPanel()
+
+    expect(
+      await screen.findByTestId('invitation-open-editor-btn'),
+    ).toBeInTheDocument()
+    expect(screen.queryByTestId('email-editor-screen-requirement')).toBeNull()
+  })
+
+  it("retire le CTA et explique, sur un écran incapable — le reste de la fiche est intact", async () => {
+    setTestScreen(393, 852)
+
+    renderPanel()
+
+    expect(
+      await screen.findByTestId('email-editor-screen-requirement'),
+    ).toHaveTextContent(/quelle que soit son orientation/i)
+    expect(screen.queryByTestId('invitation-open-editor-btn')).toBeNull()
+    expect(screen.getByTestId('invitation-template-variables')).toBeInTheDocument()
   })
 })

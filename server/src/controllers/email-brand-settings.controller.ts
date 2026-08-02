@@ -1,3 +1,4 @@
+import { ERROR_CODES } from '@timepick/shared'
 import type { Request, Response } from 'express'
 import {
   getEmailBrandSettings,
@@ -30,11 +31,11 @@ export const patchEmailBrandSettingsHandler = async (req: Request, res: Response
   } catch (error) {
     if (error instanceof EmailBrandSettingsNotFoundError) {
       console.error('[EmailBrandSettings] Singleton row missing:', error)
-      res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Erreur lors de la mise à jour des paramètres de marque' } })
+      res.status(500).json({ error: { code: ERROR_CODES.INTERNAL_ERROR, message: 'Erreur lors de la mise à jour des paramètres de marque' } })
       return
     }
     const validationError = formatApiError(error, 'Erreur lors de la mise à jour des paramètres de marque')
-    const statusCode = validationError.code === 'VALIDATION_ERROR' ? 400 : 500
+    const statusCode = validationError.code === ERROR_CODES.VALIDATION_ERROR ? 400 : 500
     res.status(statusCode).json({ error: validationError })
   }
 }
@@ -66,7 +67,7 @@ export const resetEmailBrandSettingsHandler = async (_req: Request, res: Respons
       console.error('[EmailBrandSettings] Singleton row missing on reset:', error)
       res.status(500).json({
         error: {
-          code: 'INTERNAL_ERROR',
+          code: ERROR_CODES.INTERNAL_ERROR,
           message: "Erreur lors de la réinitialisation de l'identité visuelle",
         },
       })

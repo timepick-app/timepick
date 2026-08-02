@@ -3,6 +3,7 @@ import { invitationsService } from '../services/invitations.service'
 import { sendInvitationsSchema, formatZodError } from '../validators/invitations.validator'
 import { NotFoundError } from '../errors/NotFoundError'
 import { z } from 'zod'
+import { ERROR_CODES } from '@timepick/shared'
 
 /**
  * Envoie les invitations aux utilisateurs sélectionnés pour un événement
@@ -28,11 +29,11 @@ export const sendInvitations = async (req: Request, res: Response): Promise<void
     })
   } catch (error) {
     if (error instanceof z.ZodError) {
-      res.status(400).json({ error: formatZodError(error) })
+      res.status(400).json({ error: formatZodError(error), code: ERROR_CODES.VALIDATION_ERROR })
       return
     }
     if (error instanceof NotFoundError) {
-      res.status(404).json({ error: error.message })
+      res.status(404).json({ error: error.message, code: error.code })
       return
     }
     console.error('Error sending invitations:', error)
@@ -50,7 +51,7 @@ export const getEventInvitations = async (req: Request, res: Response): Promise<
     res.json({ data: invitations })
   } catch (error) {
     if (error instanceof NotFoundError) {
-      res.status(404).json({ error: error.message })
+      res.status(404).json({ error: error.message, code: error.code })
       return
     }
     console.error('Error getting invitations:', error)
@@ -68,7 +69,7 @@ export const getEventUsersInvitationStatus = async (req: Request, res: Response)
     res.json({ data: users })
   } catch (error) {
     if (error instanceof NotFoundError) {
-      res.status(404).json({ error: error.message })
+      res.status(404).json({ error: error.message, code: error.code })
       return
     }
     console.error('Error getting invitation status:', error)
@@ -98,7 +99,7 @@ export const resendInvitation = async (req: Request, res: Response): Promise<voi
     })
   } catch (error) {
     if (error instanceof NotFoundError) {
-      res.status(404).json({ error: error.message })
+      res.status(404).json({ error: error.message, code: error.code })
       return
     }
     console.error('Error resending invitation:', error)
@@ -119,7 +120,7 @@ export const resendUnanswered = async (req: Request, res: Response): Promise<voi
     res.json({ data: result })
   } catch (error) {
     if (error instanceof NotFoundError) {
-      res.status(404).json({ error: error.message })
+      res.status(404).json({ error: error.message, code: error.code })
       return
     }
     console.error('Error resending unanswered invitations:', error)
@@ -148,7 +149,7 @@ export const checkInvitationEligibility = async (req: Request, res: Response): P
     res.json({ data: { canSend: true } })
   } catch (error) {
     if (error instanceof NotFoundError) {
-      res.status(404).json({ error: error.message })
+      res.status(404).json({ error: error.message, code: error.code })
       return
     }
     console.error('Error checking invitation eligibility:', error)

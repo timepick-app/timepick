@@ -309,7 +309,10 @@ describe('MjmlEditorOverlay — Save flow', () => {
     await user.click(saveBtn)
 
     await waitFor(() => {
-      expect(onSave).toHaveBeenCalledWith('EDITED')
+      // Second argument : le fragment « objet » à fusionner dans le PATCH.
+      // Vide ici — cet éditeur est monté sans ligne Objet, donc la colonne
+      // n'est pas touchée.
+      expect(onSave).toHaveBeenCalledWith('EDITED', {})
     })
   })
 
@@ -854,6 +857,104 @@ describe('MjmlEditorOverlay — StructuralBadge appears on selection, not perman
 })
 
 // ============================================================================
+// Contradiction badge ⇄ panneau — les deux messages sont lus ENSEMBLE.
+//
+// Incident du 2026-07-30 : le badge annonçait « modifiable » sur un bloc hérité
+// à 20 px du panneau qui disait l'inverse, et la vérification ne l'a pas vu
+// parce qu'elle lisait la zone modifiée (le canvas), pas l'écran entier. D'où
+// l'assertion sur le texte de TOUT l'arbre rendu et non sur le seul badge :
+// elle reste vraie où que le badge soit rendu (barre d'outils ou canvas).
+// ============================================================================
+
+/** Wording fixé par la politique de personnalisation de la coque email,
+ *  § « Badge de sélection et héritage ».
+ *
+ *  DEUX formulations par état depuis le 2026-08-01 : dès le palier « court » la
+ *  barre d'outils raccourcit le badge, et les deux coexistent dans le DOM (une
+ *  seule est rendue, selon le `data-toolbar-tier` que la barre publie — et jsdom
+ *  n'ayant pas de mise en page, la barre ne publie rien et les deux formes sont
+ *  visibles ici). La garde de non-contradiction doit couvrir
+ *  les DEUX formes affirmatives : sinon un badge court disant « modifiable » à
+ *  côté du panneau d'héritage passerait, et l'incident du 2026-07-30 serait
+ *  rouvert par la porte de derrière. */
+const BADGE_MODIFIABLE = 'Élément structurel — modifiable, non supprimable'
+const BADGE_MODIFIABLE_SHORT = 'Structurel — non supprimable'
+const BADGE_INHERITED = 'Élément structurel — hérité, pas encore personnalisé ici'
+const BADGE_INHERITED_SHORT = 'Hérité — pas encore personnalisé'
+const PANEL_HEADING = 'Ce contenu est défini au niveau supérieur'
+
+describe('MjmlEditorOverlay — badge et panneau ne se contredisent jamais à l’écran', () => {
+  const contextWithHeaderOrigin = (origin: 'template' | 'event') => ({
+    data: makeDefaultResolvedShell({
+      header: { contentMjml: '<mj-section><mj-column></mj-column></mj-section>', origin },
+    }),
+    isLoading: false,
+    error: null,
+  })
+
+  it("bloc hérité : le panneau est monté ET aucun « modifiable » n'est affiché nulle part", async () => {
+    editorContextValue = contextWithHeaderOrigin('template')
+    await renderAndWaitForInner(makeProps({ ownerKind: 'event', ownerId: 'evt-1' }))
+
+    act(() => {
+      registeredOnLockedShellSelection?.({ partKind: 'header' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mjml-editor-locked-panel-overlay')).toBeInTheDocument()
+    })
+    // Lecture de l'écran ENTIER, pas du seul composant modifié — l'assertion
+    // reste vraie où que le badge soit rendu, et c'est elle qui a été falsifiée
+    // en injectant le libellé affirmatif dans le badge.
+    expect(document.body.textContent).not.toContain(BADGE_MODIFIABLE)
+    // La forme courte porte le même risque : « Structurel — non supprimable »
+    // affirme lui aussi que le bloc est éditable ici.
+    expect(document.body.textContent).not.toContain(BADGE_MODIFIABLE_SHORT)
+    // Les DEUX messages sont bien à l'écran en même temps : sans cette paire,
+    // la non-contradiction pourrait être satisfaite par un écran vide.
+    expect(screen.getByText(PANEL_HEADING)).toBeInTheDocument()
+    expect(screen.getByTestId('structural-badge-header')).toHaveTextContent(BADGE_INHERITED)
+    expect(screen.getByTestId('structural-badge-header')).toHaveTextContent(
+      BADGE_INHERITED_SHORT,
+    )
+    // Le prédicat qui lie les deux affichages, et non son seul effet visible.
+    expect(screen.getByTestId('structural-badge-header')).toHaveAttribute(
+      'data-inherited',
+      'true',
+    )
+  })
+
+  it('bloc surchargé au niveau courant : pas de panneau, et le badge annonce « modifiable »', async () => {
+    // Branche inverse — sans elle, un badge bloqué sur « hérité » satisferait le
+    // cas ci-dessus tout en mentant sur un bloc parfaitement éditable.
+    editorContextValue = contextWithHeaderOrigin('event')
+    await renderAndWaitForInner(makeProps({ ownerKind: 'event', ownerId: 'evt-1' }))
+
+    act(() => {
+      registeredOnLockedShellSelection?.({ partKind: 'header' })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('structural-badge-header')).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId('mjml-editor-locked-panel-overlay')).toBeNull()
+    expect(screen.queryByText(PANEL_HEADING)).toBeNull()
+    expect(screen.getByTestId('structural-badge-header')).toHaveTextContent(BADGE_MODIFIABLE)
+    expect(screen.getByTestId('structural-badge-header')).toHaveTextContent(
+      BADGE_MODIFIABLE_SHORT,
+    )
+    // Branche inverse de la garde ci-dessus : aucune formulation « hérité » ne
+    // doit apparaître sur un bloc surchargé au niveau courant.
+    expect(document.body.textContent).not.toContain(BADGE_INHERITED)
+    expect(document.body.textContent).not.toContain(BADGE_INHERITED_SHORT)
+    expect(screen.getByTestId('structural-badge-header')).toHaveAttribute(
+      'data-inherited',
+      'false',
+    )
+  })
+})
+
+// ============================================================================
 // L3a (D5/D6) — mode système contraint : rendu, save intro/sig, gate FR55.
 // Greffe minimale (pas d'orchestrateur shell-parts). Le stub editor.getWrapper()
 // .find() renvoie les zones depuis currentZones (cf. systemFind ci-dessus).
@@ -1375,7 +1476,7 @@ describe('MjmlEditorOverlay — save orchestration (matrice I/O invitation)', ()
     await waitFor(() => {
       expect(upsertMutateAsync).toHaveBeenCalledTimes(1)
       // Body extrait SANS marqueurs (extractBodyFragment strippe BODY:START/END).
-      expect(onSave).toHaveBeenCalledWith('B-EDITED')
+      expect(onSave).toHaveBeenCalledWith('B-EDITED', {})
     })
   })
 
@@ -1553,7 +1654,7 @@ describe('MjmlEditorOverlay — save orchestration (matrice I/O invitation)', ()
       )
     })
     // Body OK → onSave appelé une fois. Header KO → ancre non avancée → dirty.
-    expect(onSave).toHaveBeenCalledWith('B-EDITED')
+    expect(onSave).toHaveBeenCalledWith('B-EDITED', {})
     // Le bouton reste actif (header reste dirty).
     await waitFor(() => expect(saveBtn).not.toBeDisabled())
   })

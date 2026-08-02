@@ -29,6 +29,9 @@ const SAMPLE_TEMPLATE: EventEmailTemplate = {
   defaultBodyMjml: '<!-- BODY:START --><mj-section>default</mj-section><!-- BODY:END -->',
   isCustom: true,
   updatedAt: '2026-05-02T12:00:00Z',
+  subject: null,
+  inheritedSubject: 'Inscription participation - {{event_name}}',
+  subjectVariables: [],
 }
 
 describe('event-email-templates.service', () => {
@@ -113,6 +116,7 @@ describe('event-email-templates.service', () => {
         text: 'preview',
         templateKey: 'invitation',
         eventId: EVENT_ID,
+        subject: 'Inscription participation - Mon événement',
       }
       mockPost.mockResolvedValue({ data: { data: preview } })
 

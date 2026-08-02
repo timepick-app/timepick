@@ -31,8 +31,20 @@ export interface ImportResult {
   rows: ImportRowResult[]
 }
 
-/** Erreur de format global (CSV illisible / en-tête manquant) → 400 contrôleur. */
-export class CsvFormatError extends Error {}
+/**
+ * Erreur de format global (CSV illisible / en-tête manquant) → 400 contrôleur.
+ *
+ * `technicalCause` porte l'exception d'origine — typiquement celle de
+ * `csv-parse`, en anglais. Elle est destinée aux journaux : le `message`, lui,
+ * part à l'écran sous `CSV_FORMAT_ERROR`, qui est en liste blanche.
+ * (`Error.cause` n'est pas typé sous `target: es2016`.)
+ */
+export class CsvFormatError extends Error {
+  constructor(message: string, public readonly technicalCause?: unknown) {
+    super(message)
+    this.name = 'CsvFormatError'
+  }
+}
 
 interface ParsedCsv {
   headers: string[] // en-têtes normalisés (minuscule, trim)
@@ -62,7 +74,14 @@ export function parseUsersCsv(content: string): ParsedCsv {
       skip_records_with_empty_values: true,
     }) as Record<string, string>[]
   } catch (err) {
-    throw new CsvFormatError(`CSV illisible : ${(err as Error).message}`)
+    // Ne PAS interpoler `err.message` : il vient de `csv-parse`, il est en
+    // anglais et cite des positions internes. `CSV_FORMAT_ERROR` est en liste
+    // blanche, donc ce texte atteindrait l'écran tel quel. Le détail technique
+    // reste attaché à l'exception, pour les journaux.
+    throw new CsvFormatError(
+      "Le fichier n'a pas pu être lu. Vérifiez qu'il est séparé par des points-virgules et que chaque ligne a le même nombre de colonnes, puis réessayez.",
+      err,
+    )
   }
   if (!headers.includes('email')) {
     throw new CsvFormatError('En-tête « email » manquant')

@@ -1,3 +1,4 @@
+import { ERROR_CODES } from '@timepick/shared'
 import type { Request, Response, NextFunction } from 'express'
 import multer, { MulterError } from 'multer'
 
@@ -23,12 +24,12 @@ export const organizationLogoMulterErrorHandler = (
   next: NextFunction,
 ): void => {
   if (err instanceof MulterError && err.code === 'LIMIT_FILE_SIZE') {
-    res.status(413).json({ error: 'Fichier trop volumineux (max 5 Mo)' })
+    res.status(413).json({ error: 'Fichier trop volumineux (max 5 Mo)', code: ERROR_CODES.FILE_TOO_LARGE })
     return
   }
   if (err instanceof MulterError) {
     console.error('[Organization] Multer error:', err)
-    res.status(400).json({ error: 'Erreur upload — fichier invalide' })
+    res.status(400).json({ error: 'Erreur upload — fichier invalide', code: ERROR_CODES.UPLOAD_INVALID_FILE })
     return
   }
   next(err)

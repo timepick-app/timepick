@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../services/api'
 import { toast } from 'sonner'
-import { extractErrorMessage } from '@/lib/extractErrorMessage'
+import { userFacingErrorMessage } from '@/lib/userFacingErrorMessage'
 
 /**
  * useResendUnanswered Hook
@@ -39,9 +39,7 @@ export const useResendUnanswered = (eventId: string) => {
       }
     },
     onError: (err) => {
-      const error = err as { response?: { data?: { error?: string } }; message?: string }
-      const errorMsg = extractErrorMessage(error, 'Erreur lors de la relance des invitations')
-      toast.error(`Erreur: ${errorMsg}`)
+      toast.error(userFacingErrorMessage(err, "La relance a échoué. Aucune invitation n'a été relancée, réessayez."))
     },
   })
 

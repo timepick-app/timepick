@@ -13,7 +13,7 @@ import {
   type ProviderMeta,
 } from '../services/settings.service'
 import { toast } from 'sonner'
-import { extractErrorMessage } from '@/lib/extractErrorMessage'
+import { userFacingErrorMessage } from '@/lib/userFacingErrorMessage'
 
 /**
  * Catalogue des fournisseurs email HTTP (contrat §1/§3.1) — statique côté
@@ -59,7 +59,7 @@ export const useSaveSmtpSettings = () => {
       toast.success('Paramètres SMTP sauvegardés')
     },
     onError: (err: unknown) => {
-      toast.error(extractErrorMessage(err, 'Erreur lors de la sauvegarde'))
+      toast.error(userFacingErrorMessage(err, "L'enregistrement de la configuration SMTP a échoué. Vos modifications sont toujours à l'écran, réessayez."))
     },
   })
 }
@@ -79,7 +79,7 @@ export const useTestSmtpConnection = () => {
       }
     },
     onError: (err: unknown) => {
-      toast.error(extractErrorMessage(err, 'Erreur lors du test'))
+      toast.error(userFacingErrorMessage(err, "Le test a échoué. Aucun email de test n'a été envoyé, réessayez."))
     },
   })
 }
@@ -99,7 +99,7 @@ export const useClearSmtpSettings = () => {
       toast.success('Configuration SMTP désactivée')
     },
     onError: (err: unknown) => {
-      toast.error(extractErrorMessage(err, 'La désactivation a échoué. Votre configuration reste active.'))
+      toast.error(userFacingErrorMessage(err, 'La désactivation a échoué. Votre configuration reste active, réessayez.'))
     },
   })
 }

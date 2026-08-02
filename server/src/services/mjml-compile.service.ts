@@ -143,3 +143,40 @@ export function substituteVariables(html: string, vars: VariablesPayload): strin
   // la sortie).
   return html.replace(VAR_RE, (_match, key: SubstitutableKey) => vars[key] ?? '')
 }
+
+// Sous-ensemble de SUBSTITUTABLE_KEYS admissible dans un OBJET d'e-mail. Les
+// clés écartées le sont par nature, pas par prudence :
+//   * `event_description` : longueur non maîtrisée (décision produit) ;
+//   * `cancellation_reason` et `changes_blocks` : HTML pré-assemblé, illisible
+//     dans une ligne d'objet ;
+//   * `magic_link`, `login_url`, `calendar_url` : des URL ;
+//   * `expiration_date` : appartient au CORPS, pas à l'objet (décision produit
+//     2026-08-02) — la retirer d'ici fait échouer la compilation partout où
+//     elle subsiste, libellé compris.
+// Même dérivation que VAR_RE — la regex descend de la liste, donc les deux ne
+// peuvent pas se désynchroniser.
+export const SUBJECT_SUBSTITUTABLE_KEYS = [
+  'event_name',
+  'slot_date',
+  'slot_time',
+  'user_first_name',
+  'user_last_name',
+  'user_full_name',
+] as const satisfies readonly SubstitutableKey[]
+
+export type SubjectSubstitutableKey = (typeof SUBJECT_SUBSTITUTABLE_KEYS)[number]
+
+const SUBJECT_VAR_RE = new RegExp(
+  `\\{\\{(${SUBJECT_SUBSTITUTABLE_KEYS.join('|')})\\}\\}`,
+  'g',
+)
+
+/**
+ * Interpolation restreinte pour la ligne d'objet. Motif SANS tolérance
+ * d'espaces, comme VAR_RE : `{{ event_name }}` reste littéral des deux côtés.
+ */
+export function substituteSubjectVariables(subject: string, vars: VariablesPayload): string {
+  // F16 : remplaçant fonction, pour la même raison que substituteVariables —
+  // une valeur contenant `$1` / `$&` / `$'` doit être insérée littéralement.
+  return subject.replace(SUBJECT_VAR_RE, (_match, key: SubjectSubstitutableKey) => vars[key] ?? '')
+}

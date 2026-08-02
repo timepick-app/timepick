@@ -132,9 +132,11 @@ describe('useDuplicateEvent', () => {
   })
 
   /**
-   * T5.5: Tester l'affichage du toast erreur
+   * T5.5: Tester que l'échec affiche le message de repli, pas le message
+   * serveur brut (forme plate sans code, `{ error: error.message }` côté
+   * contrôleur `duplicateEvent`).
    */
-  it('should show error toast on error', async () => {
+  it('should show the fallback error toast, not the raw server message', async () => {
     vi.mocked(api.post).mockRejectedValueOnce({
       response: {
         data: {
@@ -148,8 +150,12 @@ describe('useDuplicateEvent', () => {
     result.current.duplicateEvent('non-existent-id')
 
     await waitFor(() => {
-      expect(mockToast.error).toHaveBeenCalledWith('Erreur: Événement non trouvé')
+      expect(mockToast.error).toHaveBeenCalled()
     })
+
+    const msg = vi.mocked(toast.error).mock.calls[0][0] as string
+    expect(msg).toBe('La duplication a échoué. Aucune copie n\'a été créée, réessayez.')
+    expect(msg).not.toContain('Événement non trouvé')
   })
 
   /**

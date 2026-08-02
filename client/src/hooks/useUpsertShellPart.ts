@@ -8,7 +8,7 @@
  * `(ownerKind, ownerId)` tuples coexist in memory (e.g. across tabs).
  *
  * No global `onError` — the consuming component owns the user-facing toast
- * (cf. `LockedShellInfoPanel.handleCustomize` for the pattern).
+ * (cf. `MjmlEditorOverlayInner.handleCustomizeLockedPart` for the pattern).
  *
  * Plan `2026-05-17-shell-parts-persistance-save` — `skipInvalidate` option
  * neutralises the `onSuccess` invalidation when the orchestrator (`handleSave`
@@ -17,8 +17,10 @@
  * each fire an `invalidateQueries`, producing 1-4 refetches that race with
  * `Promise.allSettled` and break the dirty tracker recompute. The orchestrator
  * is responsible for one final `invalidateQueries` after the settled() resolves.
- * Other consumers (`LockedShellInfoPanel`) keep default behaviour (invalidation
- * active) — zero régression.
+ * Le panneau d'héritage (`LockedShellInfoPanel`) ne consomme PLUS ce hook
+ * directement : matérialiser une surcharge exige de re-pousser le canvas, donc
+ * le handler vit dans l'overlay et partage cette instance `skipInvalidate` en
+ * faisant son propre refetch explicite.
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {

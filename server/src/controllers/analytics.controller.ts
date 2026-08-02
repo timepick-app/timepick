@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express'
 import { analyticsService } from '../services/analytics.service'
 import { UUID_RE } from '../lib/constants'
+import { ERROR_CODES } from '@timepick/shared'
 
 function parseEventId(req: Request): string | undefined {
   const { event_id } = req.query
@@ -10,7 +11,7 @@ function parseEventId(req: Request): string | undefined {
 export const getBookingTimestamps = async (req: Request, res: Response): Promise<void> => {
   const eventId = parseEventId(req)
   if (!eventId || !UUID_RE.test(eventId)) {
-    res.status(400).json({ error: 'event_id requis (UUID valide)' })
+    res.status(400).json({ error: 'event_id requis (UUID valide)', code: ERROR_CODES.VALIDATION_ERROR })
     return
   }
   try {

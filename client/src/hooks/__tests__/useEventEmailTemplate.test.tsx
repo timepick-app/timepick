@@ -35,6 +35,9 @@ const templateDto: EventEmailTemplate = {
   defaultBodyMjml: '<!-- BODY:START --><mj-section>default</mj-section><!-- BODY:END -->',
   isCustom: true,
   updatedAt: '2026-05-02T12:00:00Z',
+  subject: null,
+  inheritedSubject: 'Inscription participation - {{event_name}}',
+  subjectVariables: [],
 }
 
 const previewDto: EventEmailTemplatePreview = {
@@ -42,6 +45,7 @@ const previewDto: EventEmailTemplatePreview = {
   text: 'preview',
   templateKey: 'invitation',
   eventId: EVENT_ID,
+  subject: 'Inscription participation - Mon événement',
 }
 
 describe('useEventEmailTemplate hook suite', () => {

@@ -5,6 +5,13 @@ type QueryResult = { rows: Record<string, unknown>[] }
 const mockQuery = jest.fn() as jest.MockedFunction<(query: string, params?: unknown[]) => Promise<QueryResult>>
 const mockGenerateMagicLink = jest.fn() as jest.MockedFunction<() => Promise<{ link: string; expirationDate: Date }>>
 const mockSendEventInvitation = jest.fn() as jest.MockedFunction<() => Promise<boolean>>
+// `dispatchInvitations` (E3.S3-bis, hoisting) appelle `loadSubjectOverrides`
+// une fois par lot, AVANT la boucle `Promise.allSettled` — sans ce mock,
+// l'appel réel (undefined, car le module `email.service` est entièrement
+// remplacé ci-dessous) lève un TypeError et casse CHAQUE test de cette suite.
+const mockLoadSubjectOverrides = jest.fn() as jest.MockedFunction<
+  (templateKey: string, eventId?: string) => Promise<{ subject: string | null; subjectAdmin: string | null; eventSubject: string | null } | null>
+>
 const mockGetMagicLinkConfig = jest.fn() as jest.MockedFunction<() => Promise<{ adminTTL: number; userTTL: number; sessionTTL: number }>>
 
 jest.mock('../../db', () => ({
@@ -16,7 +23,8 @@ jest.mock('../../services/auth.service', () => ({
 }))
 
 jest.mock('../../services/email.service', () => ({
-  sendEventInvitation: mockSendEventInvitation
+  sendEventInvitation: mockSendEventInvitation,
+  loadSubjectOverrides: mockLoadSubjectOverrides,
 }))
 
 jest.mock('../../services/config.service', () => ({
@@ -40,6 +48,7 @@ describe('invitationsService', () => {
       expirationDate: futureDate
     })
     mockSendEventInvitation.mockResolvedValue(true)
+    mockLoadSubjectOverrides.mockResolvedValue(null)
     mockGetMagicLinkConfig.mockResolvedValue({
       adminTTL: 86400,
       userTTL: 604800,
@@ -222,6 +231,33 @@ describe('invitationsService', () => {
       // Vérifier que chaque utilisateur a reçu une invitation
       expect(mockGenerateMagicLink).toHaveBeenCalledTimes(2)
       expect(mockSendEventInvitation).toHaveBeenCalledTimes(2)
+    })
+
+    it('[hoisting E3.S3-bis] charge les surcharges d\'objet UNE SEULE fois pour N destinataires, jamais par destinataire', async () => {
+      setupValidEventMocks()
+      mockQuery.mockResolvedValueOnce({
+        rows: [
+          { id: 'user-1', email: 'user1@example.com', first_name: 'User One' },
+          { id: 'user-2', email: 'user2@example.com', first_name: 'User Two' }
+        ]
+      }) // 2. Authorized users
+      mockQuery.mockResolvedValueOnce({
+        rows: [{ end: futureDate, slot_count: '5' }]
+      }) // 3. validateEventForInvitations - has slots
+      mockQuery.mockResolvedValueOnce({
+        rows: [{ end: futureDate }]
+      }) // 4. calculateInvitationTTL - get event end
+      mockQuery.mockResolvedValueOnce({ rows: [] }) // INSERT invitation user-1
+      mockQuery.mockResolvedValueOnce({ rows: [] }) // INSERT invitation user-2
+
+      await invitationsService.sendInvitations(eventId, userIds)
+
+      // Les variables changent par destinataire (prénom/nom), les surcharges
+      // d'objet non : (modèle, événement) identiques pour tout le lot. Un
+      // défaut qui redéplacerait la lecture DANS `users.map(...)` ferait
+      // passer ce compte à 2 (une lecture par destinataire) au lieu de 1.
+      expect(mockLoadSubjectOverrides).toHaveBeenCalledTimes(1)
+      expect(mockLoadSubjectOverrides).toHaveBeenCalledWith('invitation', eventId)
     })
 
     it('[P0] uses calculateInvitationTTL to get TTL for magic link', async () => {
@@ -891,7 +927,7 @@ describe('invitationsService', () => {
       mockSendEventInvitation.mockResolvedValueOnce(false)
 
       await expect(invitationsService.resendInvitation(eventId, userId))
-        .rejects.toThrow('Échec de l\'envoi d\'email')
+        .rejects.toThrow("L'e-mail n'a pas pu être envoyé. Rien n'est parti, réessayez dans quelques minutes.")
     })
 
     it('[P1] lance EmailDeliveryError si l\'envoi d\'email échoue (type)', async () => {

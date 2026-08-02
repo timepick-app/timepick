@@ -300,33 +300,47 @@ describe('SlotCalendar', () => {
   })
 
   describe('Error state', () => {
-    it('should show error message when error exists', () => {
-      const errorMessage = 'Erreur lors du chargement des créneaux'
+    it("affiche le message de repli et jamais le message brut quand l'erreur est une chaîne", () => {
+      const rawMessage = 'Erreur lors du chargement des créneaux'
       mockUseEventSlots.mockReturnValue({
         events: [],
         isLoading: false,
-        error: errorMessage,
+        error: rawMessage,
         refetch: vi.fn()
       })
 
       render(<SlotCalendar eventId="event-1" />)
 
       expect(screen.getByRole('heading', { name: /Erreur/i })).toBeInTheDocument()
-      expect(screen.getByText(errorMessage)).toBeInTheDocument()
+      expect(
+        screen.getByText("Les créneaux n'ont pas pu être chargés. Rafraîchissez la page pour réessayer.")
+      ).toBeInTheDocument()
+      expect(screen.queryByText(rawMessage)).not.toBeInTheDocument()
     })
 
-    it('should normalize Error object to message string', () => {
-      const errorObj = new Error('Network error')
-      mockUseEventSlots.mockReturnValue({
-        events: [],
-        isLoading: false,
-        error: errorObj,
-        refetch: vi.fn()
-      })
+    it("affiche le message de repli et jamais le texte technique, quelle que soit la forme de l'erreur reçue", () => {
+      const fallback = "Les créneaux n'ont pas pu être chargés. Rafraîchissez la page pour réessayer."
+      const cases: Array<{ error: HookError; technical: string }> = [
+        { error: new Error('Network error'), technical: 'Network error' },
+        { error: { message: 'Erreur interne inconnue', code: 'SOME_UNKNOWN' } as unknown as HookError, technical: 'Erreur interne inconnue' }
+      ]
 
-      render(<SlotCalendar eventId="event-1" />)
+      for (const { error, technical } of cases) {
+        mockUseEventSlots.mockReturnValue({
+          events: [],
+          isLoading: false,
+          error,
+          refetch: vi.fn()
+        })
 
-      expect(screen.getByText('Network error')).toBeInTheDocument()
+        const { unmount } = render(<SlotCalendar eventId="event-1" />)
+
+        expect(screen.getByRole('heading', { name: /Erreur/i })).toBeInTheDocument()
+        expect(screen.getByText(fallback)).toBeInTheDocument()
+        expect(screen.queryByText(technical, { exact: false })).not.toBeInTheDocument()
+
+        unmount()
+      }
     })
   })
 

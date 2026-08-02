@@ -1,4 +1,5 @@
 import { z, ZodError } from 'zod'
+import { ERROR_CODES, type ErrorCode } from '@timepick/shared'
 import { formatZodError } from './zod-utils'
 
 /**
@@ -72,15 +73,15 @@ export const updateMagicLinkConfigSchema = z.object({
  * Format validation/API errors for controller responses.
  * Handles ZodError → VALIDATION_ERROR (400), others → INTERNAL_ERROR (500).
  */
-export function formatApiError(error: unknown, fallbackMessage = 'Erreur lors du traitement'): { code: string; message: string } {
+export function formatApiError(error: unknown, fallbackMessage = 'Erreur lors du traitement'): { code: ErrorCode; message: string } {
   if (error instanceof ZodError) {
     return {
-      code: 'VALIDATION_ERROR',
+      code: ERROR_CODES.VALIDATION_ERROR,
       message: formatZodError(error)
     }
   }
   return {
-    code: 'INTERNAL_ERROR',
+    code: ERROR_CODES.INTERNAL_ERROR,
     message: fallbackMessage
   }
 }

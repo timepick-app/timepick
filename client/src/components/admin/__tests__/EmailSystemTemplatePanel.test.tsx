@@ -11,6 +11,7 @@ import {
   SYSTEM_TEMPLATE_VARIABLES,
   type SystemTemplateKey,
 } from '../../../lib/email-system-template-constants'
+import { setTestScreen } from '@/test/screenSize'
 
 // Carte muette (conductor 2026-06-22) : le panneau ne PATCH plus, ne rend plus
 // l'overlay et n'invoque plus useEditorContext. On ne mocke QUE getEmailTemplate
@@ -76,6 +77,9 @@ function makeDto(key: SystemTemplateKey, intro?: string, sig?: string): SystemTe
     defaultIntroText: factory.intro,
     defaultSignatureText: factory.sig,
     updatedAt: '2026-05-01T10:00:00Z',
+    subject: null,
+    defaultSubject: 'Confirmation de réservation - {{event_name}}',
+    subjectVariables: [],
   }
 }
 
@@ -154,6 +158,27 @@ describe('EmailSystemTemplatePanel (carte muette)', () => {
       await screen.findByTestId(`system-open-editor-btn-${key}`)
       expect(screen.queryByTestId('mock-overlay')).toBeNull()
       expect(screen.queryByTestId('mjml-editor-overlay')).toBeNull()
+    })
+
+    it("garde le CTA sur un écran capable, sans explication de repli", async () => {
+      renderPanel(key)
+      expect(
+        await screen.findByTestId(`system-open-editor-btn-${key}`),
+      ).toBeInTheDocument()
+      expect(screen.queryByTestId('email-editor-screen-requirement')).toBeNull()
+    })
+
+    it("retire le CTA et explique, sur un écran incapable — les variables restent", async () => {
+      setTestScreen(393, 852)
+      renderPanel(key)
+
+      expect(
+        await screen.findByTestId('email-editor-screen-requirement'),
+      ).toHaveTextContent(/quelle que soit son orientation/i)
+      expect(screen.queryByTestId(`system-open-editor-btn-${key}`)).toBeNull()
+      expect(
+        screen.getByTestId(`system-template-variables-${key}`),
+      ).toBeInTheDocument()
     })
   })
 })

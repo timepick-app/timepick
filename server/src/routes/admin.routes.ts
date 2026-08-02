@@ -1,3 +1,4 @@
+import { ERROR_CODES } from '@timepick/shared'
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import multer, { MulterError } from 'multer'
 import { requireAdmin } from '../middleware/adminAuth'
@@ -72,6 +73,7 @@ router.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
     const tooBig = err.code === 'LIMIT_FILE_SIZE'
     res.status(tooBig ? 413 : 400).json({
       error: tooBig ? 'Fichier trop volumineux (max 5 Mo)' : 'Erreur upload — fichier invalide',
+      code: tooBig ? ERROR_CODES.FILE_TOO_LARGE : ERROR_CODES.UPLOAD_INVALID_FILE,
     })
     return
   }

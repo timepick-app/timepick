@@ -11,6 +11,7 @@ import {
   type EventEmailTemplate,
   type EventEmailTemplatePreview,
 } from '../../../services/event-email-templates.service'
+import { setTestScreen } from '@/test/screenSize'
 
 const EVENT_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
 
@@ -129,6 +130,9 @@ const customDto: EventEmailTemplate = {
   defaultBodyMjml: '<!-- BODY:START --><mj-section>default</mj-section><!-- BODY:END -->',
   isCustom: true,
   updatedAt: '2026-05-02T12:00:00Z',
+  subject: null,
+  inheritedSubject: 'Inscription participation - {{event_name}}',
+  subjectVariables: [],
 }
 
 const inheritedDto: EventEmailTemplate = {
@@ -142,6 +146,7 @@ const previewDto: EventEmailTemplatePreview = {
   text: 'HELLO_EVENT',
   templateKey: 'invitation',
   eventId: EVENT_ID,
+  subject: 'Inscription participation - Mon événement',
 }
 
 function renderPanel() {
@@ -406,5 +411,33 @@ describe('EventInvitationTemplatePanel', () => {
     renderPanel()
     await user.click(await screen.findByTestId('event-invitation-open-editor-btn'))
     expect(screen.getByTestId('overlay-title')).toHaveTextContent('Forum des assos')
+  })
+
+  // === Refus des appareils qui ne pourront jamais afficher l'éditeur ===
+
+  it("garde le CTA sur un écran capable, sans explication de repli", async () => {
+    renderPanel()
+
+    expect(
+      await screen.findByTestId('event-invitation-open-editor-btn'),
+    ).toBeInTheDocument()
+    expect(screen.queryByTestId('email-editor-screen-requirement')).toBeNull()
+  })
+
+  it("retire le CTA et explique, sur un écran incapable — aperçu et badge restent", async () => {
+    setTestScreen(393, 852)
+
+    renderPanel()
+
+    expect(
+      await screen.findByTestId('email-editor-screen-requirement'),
+    ).toHaveTextContent(/quelle que soit son orientation/i)
+    expect(screen.queryByTestId('event-invitation-open-editor-btn')).toBeNull()
+    expect(
+      screen.getByTestId('event-invitation-preview-iframe'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByTestId('event-invitation-inheritance-badge'),
+    ).toBeInTheDocument()
   })
 })

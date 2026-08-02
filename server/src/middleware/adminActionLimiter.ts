@@ -1,3 +1,4 @@
+import { ERROR_CODES } from '@timepick/shared'
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit'
 import type { Request } from 'express'
 
@@ -39,7 +40,7 @@ export const adminActionLimiter = rateLimit({
   keyGenerator,
   message: {
     error: {
-      code: 'RATE_LIMITED',
+      code: ERROR_CODES.RATE_LIMITED,
       message: 'Trop de requêtes. Veuillez patienter avant de réessayer.',
     },
   },
@@ -61,7 +62,7 @@ export const testSendLimiter = rateLimit({
   keyGenerator,
   message: {
     error: {
-      code: 'RATE_LIMITED',
+      code: ERROR_CODES.RATE_LIMITED,
       message: 'Trop d’envois de test. Veuillez patienter avant de réessayer.',
     },
   },

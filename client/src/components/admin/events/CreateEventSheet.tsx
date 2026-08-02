@@ -11,7 +11,8 @@ import { Button } from '@/components/ui/button'
 import { EventForm } from './EventForm'
 import type { EventFormRef } from './EventForm'
 import { useCreateEvent } from '@/hooks/useEvents'
-import { extractErrorMessage } from '@/lib/extractErrorMessage'
+import { userFacingErrorMessage } from '@/lib/userFacingErrorMessage'
+import type { ApiErrorEnvelope } from '@/types/apiError'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 
 interface CreateEventSheetProps {
@@ -46,11 +47,16 @@ export function CreateEventSheet({ open, onOpenChange }: CreateEventSheetProps) 
         opensAt: data.opensAt,
       })
     } catch (err) {
-      const error = err as { response?: { status?: number; data?: { error?: string } }; message?: string }
+      const error = err as ApiErrorEnvelope
       if (error.response?.status === 409) {
         setNameError('Un événement porte déjà ce nom')
       } else {
-        toast.error(extractErrorMessage(error, 'Erreur lors de la création de l\'événement'))
+        toast.error(
+          userFacingErrorMessage(
+            error,
+            "La création de l'événement a échoué. Vos informations sont toujours dans le formulaire, réessayez."
+          )
+        )
       }
       return
     }

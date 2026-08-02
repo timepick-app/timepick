@@ -534,7 +534,10 @@ describe('Events API', () => {
         .send({})
 
       expect(res.status).toBe(400)
-      expect(res.body.error).toBe('Aucun champ à mettre à jour')
+      expect(res.body.error).toBe("Aucune donnée à mettre à jour. Modifiez au moins une information avant d'enregistrer.")
+      // Le refus porte son code : il devient affichable au lieu de retomber
+      // sur la phrase générique de l'appelant.
+      expect(res.body.code).toBe('NO_FIELDS_TO_UPDATE')
     })
 
     it('retourne 409 si le nom existe déjà', async () => {

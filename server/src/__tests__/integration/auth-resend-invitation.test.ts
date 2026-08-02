@@ -253,9 +253,9 @@ describe('POST /api/auth/resend-invitation — renvoi par identité (token sans 
     expect(fresh.role).toBe('admin');
     expect(fresh.redirectAfterLogin).toBe('/admin');
 
-    // Token frais stocké en DB
-    const db = await pool.query('SELECT magic_link_token FROM users WHERE id = $1', [admin.id]);
-    expect(db.rows[0].magic_link_token).toBeTruthy();
+    // Token frais stocké en DB (par son empreinte)
+    const db = await pool.query('SELECT token_hash FROM magic_link_tokens WHERE user_id = $1', [admin.id]);
+    expect(db.rows[0].token_hash).toBeTruthy();
   });
 
   // (b) User rétrogradé admin→member : token forgé role=admin/redirect=/admin, mais la DB
@@ -329,8 +329,8 @@ describe('POST /api/auth/resend-invitation — renvoi par identité (token sans 
     expect(res.status).toBe(200);
     expect(sendAdminSpy).not.toHaveBeenCalled();
     expect(sendUserSpy).not.toHaveBeenCalled();
-    const db = await pool.query('SELECT magic_link_token FROM users WHERE id = $1', [admin.id]);
-    expect(db.rows[0].magic_link_token).toBeNull();
+    const db = await pool.query('SELECT token_hash FROM magic_link_tokens WHERE user_id = $1', [admin.id]);
+    expect(db.rows).toHaveLength(0);
   });
 
   // (d) Rejeu du même token expiré 2× dans la fenêtre → 2e appel rate-limité (429).

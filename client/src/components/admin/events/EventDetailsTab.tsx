@@ -126,6 +126,9 @@ export const EventDetailsTab = forwardRef<EventDetailsTabRef, EventDetailsTabPro
     // État pour le feedback visuel lors de la copie du lien
     const [copiedToClipboard, setCopiedToClipboard] = useState(false)
 
+    // Erreur de validation locale sur le champ nom (E1 — inline, pas de toast : R7).
+    const [nameError, setNameError] = useState<string | null>(null)
+
     // Derived state: toggle is ON when opensAt has a value
     const isScheduled = !!formData.opensAt
 
@@ -195,6 +198,10 @@ export const EventDetailsTab = forwardRef<EventDetailsTabRef, EventDetailsTabPro
      * Mise à jour d'un champ du formulaire
      */
     const handleChange = useCallback((field: keyof EventFormData, value: string | boolean | null) => {
+      // Masquer l'erreur de validation locale dès que l'utilisateur retouche le nom (E1).
+      if (field === 'name' && nameError) {
+        setNameError(null)
+      }
       setFormData(prev => {
         if (field === 'opensAt') {
           // When opensAt changes directly, update it
@@ -206,7 +213,7 @@ export const EventDetailsTab = forwardRef<EventDetailsTabRef, EventDetailsTabPro
       if (field === 'name' && typeof value === 'string') {
         onNameChange?.(value)
       }
-    }, [onNameChange])
+    }, [onNameChange, nameError])
 
     /**
      * Handler pour le toggle de programmation d'ouverture
@@ -258,7 +265,7 @@ export const EventDetailsTab = forwardRef<EventDetailsTabRef, EventDetailsTabPro
      */
     const handleSave = useCallback(async (): Promise<boolean> => {
       if (!formData.name.trim()) {
-        toast.error('Le nom de l\'événement est obligatoire')
+        setNameError('Le nom de l\'événement est obligatoire')
         return false
       }
 
@@ -302,6 +309,7 @@ export const EventDetailsTab = forwardRef<EventDetailsTabRef, EventDetailsTabPro
      */
     const handleCancel = useCallback(() => {
       setFormData(originalData)
+      setNameError(null)
       onDirtyChange?.(false)
     }, [originalData, onDirtyChange])
 
@@ -321,14 +329,22 @@ export const EventDetailsTab = forwardRef<EventDetailsTabRef, EventDetailsTabPro
           </Label>
           <Input
             id="name"
-            aria-describedby="name-counter"
+            aria-describedby={nameError ? 'name-error name-counter' : 'name-counter'}
+            aria-invalid={nameError !== null}
             value={formData.name}
             onChange={(e) => handleChange('name', e.target.value)}
             placeholder="Ex: Fête de l&apos;école 2026"
             maxLength={FIELD_MAX_LENGTHS.NAME}
             disabled={isUpdating}
             required
+            className={nameError ? 'border-destructive focus-visible:ring-destructive' : undefined}
           />
+          {/* E1 — erreur rattachée à ce champ : inline, pas un toast (R7). */}
+          {nameError && (
+            <p id="name-error" className="text-xs text-destructive" role="alert">
+              {nameError}
+            </p>
+          )}
           <p id="name-counter" className="text-xs text-muted-foreground">
             {formData.name.length}/{FIELD_MAX_LENGTHS.NAME} caractères
           </p>

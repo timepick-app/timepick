@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom'
 import { configure } from '@testing-library/react'
 import { vi, beforeEach } from 'vitest'
+import { DEFAULT_TEST_SCREEN, setTestScreen } from './screenSize'
 
 // Runners CI / charge locale : le défaut de 1 s de waitFor/findBy est trop juste
 // pour les tests d'intégration wizard (rendu React + user-event + requêtes
@@ -87,11 +88,23 @@ global.ResizeObserver = class ResizeObserver {
   disconnect() {}
 } as unknown as typeof ResizeObserver
 
+// jsdom rapporte un écran de 0 × 0 (screen.width / screen.height), une valeur
+// qu'aucun appareil réel ne produit. Tout code qui décide d'après la capacité
+// de l'écran classerait donc l'environnement de test en « appareil incapable »
+// et en ferait tomber les tests, sans que rien ne soit cassé côté application.
+// On pose un écran de bureau par défaut, une fois pour toutes ici plutôt que
+// fichier par fichier — même convention que le défaut « bureau » retenu pour
+// useMediaQuery.
+setTestScreen(DEFAULT_TEST_SCREEN.width, DEFAULT_TEST_SCREEN.height)
+
 // Nettoyer localStorage avant chaque test
 beforeEach(() => {
   localStorage.clear()
   // Nettoyer le corps du document
   document.body.innerHTML = ''
+  // Rétablir l'écran par défaut : un test qui vise un appareil incapable
+  // appelle setTestScreen sans avoir à nettoyer derrière lui.
+  setTestScreen(DEFAULT_TEST_SCREEN.width, DEFAULT_TEST_SCREEN.height)
 })
 
 // Mock Sonner toast library

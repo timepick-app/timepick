@@ -1,3 +1,4 @@
+import { ERROR_CODES } from '@timepick/shared'
 import type { Request, Response } from 'express'
 import { getEncryptionKeySource, fingerprintKey } from '../utils/secret-bootstrap'
 
@@ -22,7 +23,7 @@ export const revealAdminEncryptionKey = (_req: Request, res: Response): void => 
   if (getEncryptionKeySource() !== 'file') {
     res.status(403).json({
       error: {
-        code: 'KEY_ENV_MANAGED',
+        code: ERROR_CODES.KEY_ENV_MANAGED,
         message: "La clé est gérée via une variable d'environnement et ne peut pas être révélée.",
       },
     })
@@ -31,7 +32,7 @@ export const revealAdminEncryptionKey = (_req: Request, res: Response): void => 
 
   const key = process.env.ENCRYPTION_KEY
   if (!key) {
-    res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Clé de chiffrement introuvable.' } })
+    res.status(500).json({ error: { code: ERROR_CODES.INTERNAL_ERROR, message: 'Clé de chiffrement introuvable.' } })
     return
   }
 

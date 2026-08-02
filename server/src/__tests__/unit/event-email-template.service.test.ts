@@ -32,6 +32,8 @@ describe('event-email-template.service', () => {
           {
             invitation_mjml: null,
             default_body: DEFAULT_BODY,
+            invitation_subject: null,
+            template_subject: null,
             updated_at: FROZEN_DATE,
             has_event_shell: false,
           },
@@ -46,6 +48,25 @@ describe('event-email-template.service', () => {
         bodyMjml: DEFAULT_BODY,
         defaultBodyMjml: DEFAULT_BODY,
         isCustom: false,
+        // Aucune surcharge d'objet nulle part : l'événement hérite du modèle,
+        // qui n'a lui-même rien de personnalisé, donc l'objet d'usine — en
+        // forme SOURCE, jetons compris.
+        subject: null,
+        inheritedSubject: 'Inscription participation - {{event_name}}',
+        // Contrat A3 pour l'invitation : ce que sa fonction d'envoi passe
+        // réellement, ni plus (pas de slot_date) ni moins. UN TABLEAU, pas un
+        // dictionnaire — le middleware de casse réécrirait `event_name` en
+        // `eventName` s'il s'agissait d'une clé.
+        subjectVariables: [
+          { name: 'event_name', label: "Nom de l'événement", previewValue: 'Réunion de présentation' },
+          { name: 'user_first_name', label: 'Prénom du destinataire', previewValue: 'Camille' },
+          { name: 'user_last_name', label: 'Nom du destinataire', previewValue: 'Martin' },
+          {
+            name: 'user_full_name',
+            label: 'Prénom et nom du destinataire',
+            previewValue: 'Camille Martin',
+          },
+        ],
         updatedAt: FROZEN_DATE.toISOString(),
       })
 
@@ -61,6 +82,8 @@ describe('event-email-template.service', () => {
           {
             invitation_mjml: CUSTOM_BODY,
             default_body: DEFAULT_BODY,
+            invitation_subject: null,
+            template_subject: null,
             updated_at: FROZEN_DATE,
             has_event_shell: false,
           },
@@ -81,6 +104,8 @@ describe('event-email-template.service', () => {
           {
             invitation_mjml: null,
             default_body: DEFAULT_BODY,
+            invitation_subject: null,
+            template_subject: null,
             updated_at: FROZEN_DATE,
             has_event_shell: true,
           },
@@ -100,6 +125,8 @@ describe('event-email-template.service', () => {
           {
             invitation_mjml: CUSTOM_BODY,
             default_body: DEFAULT_BODY,
+            invitation_subject: null,
+            template_subject: null,
             updated_at: FROZEN_DATE,
           },
         ],
@@ -127,6 +154,8 @@ describe('event-email-template.service', () => {
           {
             invitation_mjml: null,
             default_body: null,
+            invitation_subject: null,
+            template_subject: null,
             updated_at: FROZEN_DATE,
             has_event_shell: false,
           },
@@ -153,6 +182,8 @@ describe('event-email-template.service', () => {
             {
               invitation_mjml: null,
               default_body: DEFAULT_BODY,
+              invitation_subject: null,
+              template_subject: null,
               updated_at: FROZEN_DATE,
               has_event_shell: false,
             },

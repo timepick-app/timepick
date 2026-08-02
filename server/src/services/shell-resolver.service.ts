@@ -304,7 +304,9 @@ export async function resolveShellParts(input: ResolveShellPartsInput): Promise<
   //   1. surcharge admin `shell_parts(mj-body)` — éditée via l'éditeur MJML ;
   //      inclut le fallback inter-templates de la coque commune invitation
   //      (branche γ de la requête ci-dessus ; cf. la politique de personnalisation de la coque email) ;
-  //   2. sinon repli hardcodé `HARDCODED_MJ_BODY_ATTRS` (#ffffff). Le fond n'est
+  //   2. sinon repli hardcodé `HARDCODED_MJ_BODY_ATTRS`, dont la couleur EST la
+  //      constante partagée `MJ_BODY_BACKGROUND_COLOR` — citée par son nom, jamais
+  //      par sa valeur (ce commentaire affichait un `#ffffff` périmé). Le fond n'est
   //      plus un token de marque depuis le retrait de `background_color` (022).
   const mjBody: ResolvedMjBody = mjBodyPick
     ? {
@@ -346,10 +348,10 @@ const MJ_BODY_OPEN_RE = /<mj-body\b([^>]*)>/
 const ATTR_MATCH_ALL_RE = /([\w-]+)="([^"]*)"/g
 
 function extractMjBodyAttrs(contentMjml: string): ResolvedMjBodyAttrs {
-  // Défaut = repli hardcodé `HARDCODED_MJ_BODY_ATTRS` (#ffffff) : une row mj-body
-  // sans attribut `background-color` hérite du repli au lieu de retomber en
-  // chaîne vide. Le fond n'est plus un token de marque (retrait `background_color`,
-  // migration 022).
+  // Défaut = repli hardcodé `HARDCODED_MJ_BODY_ATTRS` (couleur =
+  // `MJ_BODY_BACKGROUND_COLOR`) : une row mj-body sans attribut
+  // `background-color` hérite du repli au lieu de retomber en chaîne vide. Le
+  // fond n'est plus un token de marque (retrait `background_color`, migration 022).
   const attrs: ResolvedMjBodyAttrs = { ...HARDCODED_MJ_BODY_ATTRS }
   const match = MJ_BODY_OPEN_RE.exec(contentMjml)
   if (!match) return attrs

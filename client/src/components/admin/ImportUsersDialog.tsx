@@ -12,6 +12,7 @@ import {
   AlertDialogFooter,
   AlertDialogCancel,
 } from '@/components/ui/alert-dialog'
+import { userFacingErrorMessage } from '@/lib/userFacingErrorMessage'
 import { useImportUsers } from '@/hooks/useImportUsers'
 import type { ImportResult } from '@/types/user'
 
@@ -41,8 +42,12 @@ export function ImportUsersDialog({ disabled }: ImportUsersDialogProps) {
       const result = await previewMutation.mutateAsync(selected)
       setPreview(result)
     } catch (err) {
-      const e = err as { response?: { data?: { error?: string } } }
-      toast.error(e.response?.data?.error || "Échec de l'analyse du fichier")
+      toast.error(
+        userFacingErrorMessage(
+          err,
+          "L'analyse du fichier a échoué. Aucune donnée n'a été importée, choisissez un autre fichier."
+        )
+      )
       reset()
     }
   }
@@ -62,12 +67,18 @@ export function ImportUsersDialog({ disabled }: ImportUsersDialogProps) {
       }
       reset()
     } catch (err) {
-      const e = err as { response?: { data?: ImportResult & { error?: string } } }
-      if (e.response?.data?.summary) {
-        setPreview(e.response.data as ImportResult)
-        toast.error("L'import a échoué : corrigez les lignes en erreur")
+      const importError = err as { response?: { data?: ImportResult } }
+      if (importError.response?.data?.summary) {
+        // R8 — un seul canal : la liste inline (`hasErrors`, ligne ~119, `role="alert"`)
+        // annonce déjà cet échec, ligne par ligne. Pas de toast en plus.
+        setPreview(importError.response.data as ImportResult)
       } else {
-        toast.error(e.response?.data?.error ?? "Échec de l'import (erreur serveur). Réessayez.")
+        toast.error(
+          userFacingErrorMessage(
+            err,
+            "L'import a échoué. Aucun membre n'a été importé, corrigez le fichier et réessayez."
+          )
+        )
       }
     }
   }

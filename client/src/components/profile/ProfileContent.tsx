@@ -20,7 +20,7 @@ import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { formatFullName } from '@/lib/formatFullName'
 import { getInitials } from '@/lib/getInitials'
-import { extractErrorMessage } from '@/lib/extractErrorMessage'
+import { userFacingErrorMessage } from '@/lib/userFacingErrorMessage'
 import { SecurityPanel, EncryptionKeyPanel } from '@/components/admin'
 
 // Aligné sur patchMeProfileSchema / updateUserSchema (server/src/validators/user.validator.ts)
@@ -143,7 +143,12 @@ export function ProfileContent() {
       })
       toast.success('Profil mis à jour')
     } catch (err) {
-      toast.error(extractErrorMessage(err, 'Échec de la mise à jour du profil'))
+      toast.error(
+        userFacingErrorMessage(
+          err,
+          'La mise à jour du profil a échoué. Vos modifications sont toujours dans le formulaire, réessayez.',
+        ),
+      )
     }
   }
 

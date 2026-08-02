@@ -1,3 +1,4 @@
+import { ERROR_CODES } from '@timepick/shared'
 import { Router } from 'express'
 import rateLimit from 'express-rate-limit'
 import { requireAdmin } from '../middleware/adminAuth'
@@ -17,7 +18,7 @@ const revealLimiter = rateLimit({
   skip: () => process.env.NODE_ENV === 'test',
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: { code: 'RATE_LIMITED', message: 'Trop de requêtes.' } },
+  message: { error: { code: ERROR_CODES.RATE_LIMITED, message: 'Trop de requêtes.' } },
 })
 
 export const encryptionKeyAdminRoutes = Router()

@@ -123,7 +123,7 @@ describe('DELETE /api/admin/shell-parts/:ownerKind/:ownerId/:partKind', () => {
         .delete(`/api/admin/shell-parts/event/${GHOST_EVENT_ID}/header`)
         .set('Authorization', `Bearer ${adminToken}`)
       expect(res.status).toBe(404)
-      expect(res.body.error.code).toBe('NOT_FOUND')
+      expect(res.body.error.code).toBe('EVENT_NOT_FOUND')
     })
   })
 

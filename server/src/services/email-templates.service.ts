@@ -19,6 +19,13 @@ import {
   resetSharedShellToFactory,
   isInvitationShellCustomized,
 } from './shell-parts.service'
+import { assertSafeEmailBody } from '../validators/email-body-content.validator'
+import {
+  SUBJECT_VARIABLES_BY_TEMPLATE,
+  SUBJECT_VARIABLE_LABELS,
+  normalizeSubject,
+} from '../lib/email-subject'
+import { buildPreviewVariables, factorySubjectTemplate } from './email-send.service'
 
 // --- Types ---
 
@@ -30,7 +37,47 @@ import {
 // non exposé dans l'éditeur UI, décision V8 — donc pas de skeleton INTRO/SIG).
 export type SystemTemplateKey = Exclude<TemplateKey, 'invitation' | 'slot_modification'>
 
-interface InvitationTemplateView {
+/**
+ * Une variable admissible dans un objet, telle que le serveur la publie.
+ *
+ * UN TABLEAU, PAS UN DICTIONNAIRE, et ce n'est pas un goût : le middleware de
+ * conversion de casse réécrit les CLÉS de toute réponse JSON, donc un
+ * `Record<'event_name', …>` partirait en `eventName` et le client
+ * interpolerait `{{eventName}}` — un jeton que le serveur ne reconnaît pas.
+ * Dans un tableau, `event_name` est une VALEUR, que le middleware ne touche
+ * pas. Mesuré sur la réponse réelle le 2026-08-01. Ne pas « simplifier » en
+ * dictionnaire.
+ */
+export interface SubjectVariableView {
+  /** Nom du jeton, tel qu'il s'écrit entre accolades. */
+  name: string
+  /** Libellé FR affiché dans le menu d'insertion. */
+  label: string
+  /**
+   * Valeur de démonstration, RESTREINTE à ce que ce modèle fournit réellement.
+   * Sans cette restriction, l'aperçu montrerait « Réunion de présentation » là
+   * où l'envoi réel produit du vide : il CACHERAIT le défaut au lieu de le
+   * révéler.
+   */
+  previewValue: string
+}
+
+/**
+ * Ce que le client a besoin de savoir de l'objet, en une fois. La liste des
+ * variables est fournie PAR LE SERVEUR et non recalculée côté client : elle
+ * dépend de ce que la fonction d'envoi passe réellement à `renderEmail`, une
+ * information que seul le serveur détient.
+ */
+interface SubjectView {
+  /** Personnalisation, ou `null` = objet d'usine. Forme SOURCE, à jetons. */
+  subject: string | null
+  /** Objet d'usine, forme SOURCE. Sert de point de départ à l'édition. */
+  defaultSubject: string
+  /** Variables admissibles dans l'objet DE CE MODÈLE. */
+  subjectVariables: SubjectVariableView[]
+}
+
+interface InvitationTemplateView extends SubjectView {
   templateKey: 'invitation'
   bodyMjml: string
   defaultBodyMjml: string
@@ -41,12 +88,20 @@ interface InvitationTemplateView {
   updatedAt: Date
 }
 
-interface SystemTemplateView {
+interface SystemTemplateView extends SubjectView {
   templateKey: SystemTemplateKey
   introText: string
   signatureText: string
   defaultIntroText: string
   defaultSignatureText: string
+  /**
+   * `magic_link_login` SEUL : ce modèle a deux objets d'usine, choisis sur le
+   * rôle du destinataire. Absents des sept autres — leur présence est le
+   * prédicat qui fait apparaître le sélecteur « Membre / Administrateur » dans
+   * le popover d'édition.
+   */
+  subjectAdmin?: string | null
+  defaultSubjectAdmin?: string
   updatedAt: Date
 }
 
@@ -278,12 +333,48 @@ function stripMjTextWrapper(content: string): string {
   return decoded.replace(/\n{3,}/g, '\n\n').trim()
 }
 
+/**
+ * Les variables d'objet d'un modèle, prêtes à partir sur le fil : nom, libellé
+ * FR et valeur de démonstration. Partagé avec la vue par événement, qui doit
+ * publier EXACTEMENT la même liste — deux constructions séparées finiraient
+ * par diverger, et l'aperçu de l'événement mentirait sur ce que l'envoi produit.
+ *
+ * `eventName` : au niveau ÉVÉNEMENT, le NOM RÉEL de l'événement remplace celui
+ * de démonstration. Sans lui, la ligne Objet de l'éditeur annonçait « Réunion
+ * de présentation » pendant que l'aperçu de la même page, à quelques pixels,
+ * affichait le vrai nom — deux messages contradictoires sur le même écran,
+ * exactement la classe de défaut que la méthode de vérification du dépôt
+ * demande de traquer. Relevé à l'écran le 2026-08-01.
+ */
+export function subjectVariableViews(
+  templateKey: TemplateKey,
+  eventName?: string,
+): SubjectVariableView[] {
+  const demo = buildPreviewVariables(eventName === undefined ? undefined : { eventName })
+  return SUBJECT_VARIABLES_BY_TEMPLATE[templateKey].map((name) => ({
+    name,
+    label: SUBJECT_VARIABLE_LABELS[name],
+    previewValue: demo[name] ?? '',
+  }))
+}
+
+function projectSubject(row: EmailTemplateRow): SubjectView {
+  return {
+    subject: row.subject,
+    defaultSubject: factorySubjectTemplate(row.templateKey, false),
+    subjectVariables: subjectVariableViews(row.templateKey),
+  }
+}
+
 function projectRow(row: EmailTemplateRow): EmailTemplateView {
+  const subject = projectSubject(row)
+
   if (row.templateKey === 'invitation') {
     return {
       templateKey: 'invitation',
       bodyMjml: row.bodyMjml,
       defaultBodyMjml: row.defaultBodyMjml,
+      ...subject,
       updatedAt: row.updatedAt,
     }
   }
@@ -298,6 +389,13 @@ function projectRow(row: EmailTemplateRow): EmailTemplateView {
     signatureText: current.signatureText,
     defaultIntroText: defaults.introText,
     defaultSignatureText: defaults.signatureText,
+    ...subject,
+    // Deux champs de plus pour magic_link_login SEUL : leur présence est le
+    // prédicat qui fait apparaître le sélecteur de variante côté client.
+    ...(sysKey === 'magic_link_login' && {
+      subjectAdmin: row.subjectAdmin,
+      defaultSubjectAdmin: factorySubjectTemplate('magic_link_login', true),
+    }),
     updatedAt: row.updatedAt,
   }
 }
@@ -315,30 +413,77 @@ export async function getEmailTemplateView(templateKey: TemplateKey): Promise<Em
   return view
 }
 
+/** Part « objet » d'une charge de PATCH — tri-état par champ (cf. `updateEmailTemplate`). */
+interface SubjectPatch {
+  subject?: string | null
+  subjectAdmin?: string | null
+}
+
+/**
+ * A7 au niveau modèle, côté SERVEUR. Une personnalisation textuellement égale à
+ * l'objet d'usine n'est pas une personnalisation : la stocker figerait une
+ * copie qui cesserait de suivre toute évolution future de l'usine — la dérive
+ * exacte que A7 existe pour empêcher.
+ *
+ * Le client fait déjà cette réduction (`EmailSubjectLine.nextValue`), mais un
+ * PATCH direct la contournerait. Le niveau événement, lui, la fait en SQL
+ * (`event-email-template.service.ts`) ; ceci en est le pendant.
+ *
+ * Tri-état préservé : `undefined` (ne pas toucher) et `null` (effacer) passent
+ * inchangés. La comparaison porte sur la forme SOURCE, jetons compris, seule
+ * forme dont l'égalité signifie « même objet pour tout destinataire ».
+ */
+function reduceSubjectToInherited(
+  subject: string | null | undefined,
+  factory: string,
+): string | null | undefined {
+  if (subject === undefined || subject === null) return subject
+  return subject === normalizeSubject(factory) ? null : subject
+}
+
 export async function applyEmailTemplatePatch(
   templateKey: TemplateKey,
-  patch: { bodyMjml: string } | { introText: string; signatureText: string },
+  patch: ({ bodyMjml: string } | { introText: string; signatureText: string }) & SubjectPatch,
 ): Promise<EmailTemplateView> {
-  let row: EmailTemplateRow
+  // Les deux branches convergent vers un seul corps, donc vers un seul garde de
+  // contenu. La branche système ne peut en principe rien produire de refusé (ses
+  // deux zones de texte sont échappées avant injection dans le squelette), mais la
+  // vérifier coûte un balayage et transforme une faute de squelette en refus
+  // explicite plutôt qu'en corps douteux stocké.
+  let bodyMjml: string
 
   if (templateKey === 'invitation') {
-    row = await updateEmailTemplate(templateKey, {
-      bodyMjml: (patch as { bodyMjml: string }).bodyMjml,
-    })
+    // Forme garantie par `pickPatchSchema` : la clé invitation n'accepte que `bodyMjml`.
+    const invitationPatch = patch as { bodyMjml: string }
+    bodyMjml = invitationPatch.bodyMjml
   } else {
-    const { introText, signatureText } = patch as {
-      introText: string
-      signatureText: string
-    }
-    const bodyMjml = composeSystemTemplate({
+    // Forme garantie par `pickPatchSchema` : toute autre clé n'accepte que les deux zones.
+    const systemPatch = patch as { introText: string; signatureText: string }
+    bodyMjml = composeSystemTemplate({
       templateKey: templateKey as SystemTemplateKey,
-      introText,
-      signatureText,
+      introText: systemPatch.introText,
+      signatureText: systemPatch.signatureText,
     })
-    row = await updateEmailTemplate(templateKey, { bodyMjml })
   }
 
-  return projectRow(row)
+  assertSafeEmailBody(bodyMjml)
+
+  // Corps et objet dans la MÊME écriture : un seul bouton « Enregistrer » ne
+  // vaut pas une seule transaction, mais ces deux-là au moins atterrissent
+  // ensemble ou pas du tout.
+  return projectRow(
+    await updateEmailTemplate(templateKey, {
+      bodyMjml,
+      subject: reduceSubjectToInherited(
+        patch.subject,
+        factorySubjectTemplate(templateKey, false),
+      ),
+      subjectAdmin: reduceSubjectToInherited(
+        patch.subjectAdmin,
+        factorySubjectTemplate(templateKey, true),
+      ),
+    }),
+  )
 }
 
 // Clés UI réinitialisables par le reset global. Toutes les clés système

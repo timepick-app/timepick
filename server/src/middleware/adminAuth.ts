@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express'
+import { ERROR_CODES } from '@timepick/shared'
 import { requireAuth } from './auth.middleware'
 
 /**
@@ -15,7 +16,7 @@ export const requireAdmin = async (
     if (req.user?.role === 'admin') {
       next()
     } else {
-      res.status(403).json({ error: 'Accès réservé aux administrateurs' })
+      res.status(403).json({ error: 'Accès réservé aux administrateurs. Demandez les droits à un administrateur de votre organisation.', code: ERROR_CODES.ADMIN_ONLY })
     }
   })
 }

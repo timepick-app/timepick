@@ -1,3 +1,4 @@
+import { ERROR_CODES } from '@timepick/shared'
 import type { Request, Response } from 'express'
 import { configService } from '../services/config.service'
 import { updatePollingIntervalSchema, updateMagicLinkConfigSchema, formatApiError } from '../validators/config.validator'
@@ -16,7 +17,7 @@ export const getPollingInterval = async (req: Request, res: Response): Promise<v
     res.json({ data: config })
   } catch (error) {
     console.error('Error fetching polling config:', error)
-    res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Erreur lors de la récupération de la configuration' } })
+    res.status(500).json({ error: { code: ERROR_CODES.INTERNAL_ERROR, message: 'Erreur lors de la récupération de la configuration' } })
   }
 }
 
@@ -43,7 +44,7 @@ export const updatePollingInterval = async (req: Request, res: Response): Promis
     res.json({ data: config })
   } catch (error) {
     const validationError = formatApiError(error, 'Erreur lors de la mise à jour de la configuration')
-    const statusCode = validationError.code === 'VALIDATION_ERROR' ? 400 : 500
+    const statusCode = validationError.code === ERROR_CODES.VALIDATION_ERROR ? 400 : 500
     res.status(statusCode).json({ error: validationError })
   }
 }
@@ -63,7 +64,7 @@ export const getMagicLinkConfig = async (req: Request, res: Response): Promise<v
     res.json({ data: config })
   } catch (error) {
     console.error('Error fetching magic link config:', error)
-    res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Erreur lors de la récupération de la configuration' } })
+    res.status(500).json({ error: { code: ERROR_CODES.INTERNAL_ERROR, message: 'Erreur lors de la récupération de la configuration' } })
   }
 }
 
@@ -97,7 +98,7 @@ export const updateMagicLinkConfig = async (req: Request, res: Response): Promis
     res.json({ data: config })
   } catch (error) {
     const validationError = formatApiError(error, 'Erreur lors de la mise à jour de la configuration')
-    const statusCode = validationError.code === 'VALIDATION_ERROR' ? 400 : 500
+    const statusCode = validationError.code === ERROR_CODES.VALIDATION_ERROR ? 400 : 500
     res.status(statusCode).json({ error: validationError })
   }
 }

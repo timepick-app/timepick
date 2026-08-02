@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tansta
 import api from '../services/api'
 import { toast } from 'sonner'
 import type { User } from '@/types/user'
-import { extractErrorMessage } from '@/lib/extractErrorMessage'
+import { userFacingErrorMessage } from '@/lib/userFacingErrorMessage'
 
 import type { Event, CreateEventInput, UpdateEventInput } from '@/types/event'
 export type { Event, CreateEventInput, UpdateEventInput }
@@ -97,9 +97,11 @@ export const useUpdateEvent = (options?: UseUpdateEventOptions) => {
       options?.onSuccess?.(updatedEvent)
     },
     onError: (err) => {
-      const error = err as { response?: { data?: { error?: string } }; message?: string }
-      const errorMsg = extractErrorMessage(error, 'Erreur lors de la mise à jour')
-      toast.error(`Erreur: ${errorMsg}`)
+      const errorMsg = userFacingErrorMessage(
+        err,
+        "La mise à jour a échoué. Vos modifications sont toujours à l'écran, réessayez."
+      )
+      toast.error(errorMsg)
       // Callback personnalisé après erreur
       options?.onError?.(new Error(errorMsg))
     }
@@ -130,9 +132,12 @@ export const usePublishEvent = () => {
       toast.success(`Événement "${updatedEvent.name}" publié avec succès`)
     },
     onError: (err) => {
-      const error = err as { response?: { data?: { error?: string } }; message?: string }
-      const errorMsg = extractErrorMessage(error, 'Erreur lors de la publication')
-      toast.error(`Erreur: ${errorMsg}`)
+      toast.error(
+        userFacingErrorMessage(
+          err,
+          "La publication a échoué. L'événement n'a pas été publié, réessayez."
+        )
+      )
     }
   })
 
@@ -160,9 +165,12 @@ export const useUnpublishEvent = () => {
       toast.success(`Événement "${updatedEvent.name}" dépublié`)
     },
     onError: (err) => {
-      const error = err as { response?: { data?: { error?: string } }; message?: string }
-      const errorMsg = extractErrorMessage(error, 'Erreur lors de la dépublication')
-      toast.error(`Erreur: ${errorMsg}`)
+      toast.error(
+        userFacingErrorMessage(
+          err,
+          "La dépublication a échoué. L'événement reste publié, réessayez."
+        )
+      )
     }
   })
 
@@ -211,9 +219,12 @@ export const useUpdateOpeningDate = () => {
       }
     },
     onError: (err) => {
-      const error = err as { response?: { data?: { error?: string } }; message?: string }
-      const errorMsg = extractErrorMessage(error, 'Erreur lors de la mise à jour')
-      toast.error(`Erreur: ${errorMsg}`)
+      toast.error(
+        userFacingErrorMessage(
+          err,
+          "La mise à jour de la date d'ouverture a échoué. La date n'a pas été modifiée, réessayez."
+        )
+      )
     }
   })
 
@@ -262,9 +273,12 @@ export const useSetEventUsers = () => {
       toast.success(`Utilisateurs mis à jour (${variables.userIds.length} sélectionné${variables.userIds.length > 1 ? 's' : ''})`)
     },
     onError: (err) => {
-      const error = err as { response?: { data?: { error?: string } }; message?: string }
-      const errorMsg = extractErrorMessage(error, 'Erreur lors de la mise à jour')
-      toast.error(`Erreur: ${errorMsg}`)
+      toast.error(
+        userFacingErrorMessage(
+          err,
+          'La mise à jour des invités a échoué. Votre sélection est toujours à l\'écran, réessayez.'
+        )
+      )
     }
   })
 
@@ -293,9 +307,12 @@ export const useRemoveEventUser = () => {
       toast.success('Utilisateur retiré')
     },
     onError: (err) => {
-      const error = err as { response?: { data?: { error?: string } }; message?: string }
-      const errorMsg = extractErrorMessage(error, 'Erreur lors du retrait')
-      toast.error(`Erreur: ${errorMsg}`)
+      toast.error(
+        userFacingErrorMessage(
+          err,
+          'Le retrait a échoué. La personne est toujours invitée, réessayez.'
+        )
+      )
     }
   })
 
@@ -368,9 +385,9 @@ export const useDeleteEvent = () => {
       toast.success('Événement supprimé avec succès')
     },
     onError: (err) => {
-      const error = err as { response?: { data?: { error?: string } }; message?: string }
-      const errorMsg = extractErrorMessage(error, 'Erreur lors de la suppression')
-      toast.error(`Erreur: ${errorMsg}`)
+      toast.error(
+        userFacingErrorMessage(err, 'La suppression a échoué. Rien n\'a été supprimé, réessayez.')
+      )
     }
   })
 
@@ -451,9 +468,9 @@ export const useDuplicateEvent = (options?: UseDuplicateEventOptions) => {
       options?.onSuccess?.(newEventId)
     },
     onError: (err) => {
-      const error = err as { response?: { data?: { error?: string } }; message?: string }
-      const errorMsg = extractErrorMessage(error, 'Erreur lors de la duplication')
-      toast.error(`Erreur: ${errorMsg}`)
+      toast.error(
+        userFacingErrorMessage(err, 'La duplication a échoué. Aucune copie n\'a été créée, réessayez.')
+      )
     }
   })
 
@@ -501,9 +518,9 @@ export const useBulkDeleteEvents = () => {
       }
     },
     onError: (err) => {
-      const error = err as { response?: { data?: { error?: string } }; message?: string }
-      const errorMsg = extractErrorMessage(error, 'Erreur lors de la suppression')
-      toast.error(`Erreur: ${errorMsg}`)
+      toast.error(
+        userFacingErrorMessage(err, 'La suppression a échoué. Aucun événement n\'a été supprimé, réessayez.')
+      )
     },
   })
 }

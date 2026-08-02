@@ -11,7 +11,12 @@ import { type SlotDiff } from '../utils/slot-diff'
 import { formatSlotEmailDate, formatSlotEmailTime } from '../utils/slotEmailFormat'
 import { emailNameVariables } from '../utils/nameUtils'
 import { frontendBaseUrl, memberEventUrl } from '../utils/frontendUrl'
-import type { VariablesPayload } from './mjml-compile.service'
+import {
+  substituteSubjectVariables,
+  type VariablesPayload,
+} from './mjml-compile.service'
+import { getSubjectOverrides, type SubjectOverrides } from '../db/email-templates.db'
+import { normalizeSubject } from '../lib/email-subject'
 import {
   getTransporter,
   getFromAddress,
@@ -59,28 +64,39 @@ function logRenderEmailFailure({ templateKey, eventId, slotId, error, recipient 
 }
 
 /**
- * Source UNIQUE des sujets d'email (prod ET test-send). Dérive le vrai sujet
- * depuis le templateKey + les variables déjà passées à renderEmail. Le test-send
- * (sendTemplateTestEmail) préfixe « [Test TimePick] » sur la sortie. Switch
- * exhaustif sans `default` : ajouter une clé sans son sujet = erreur TS.
+ * Registre des objets d'USINE, en forme SOURCE — avec leurs jetons, jamais
+ * interpolés. Switch exhaustif sans `default` : ajouter une clé de modèle sans
+ * son objet est une erreur de compilation.
+ *
+ * POURQUOI LA FORME SOURCE ET NON LA CHAÎNE FINIE. Un objet d'usine est le
+ * point de départ que l'administrateur retouche : le popover d'édition
+ * pré-remplit son champ avec cette chaîne. Livrée déjà interpolée, elle
+ * arriverait avec le nom d'événement de démonstration figé dedans, et le
+ * premier enregistrement le graverait dans la base pour tous les événements.
+ * Une seule représentation, donc — la source à jetons — interpolée aux
+ * extrémités, exactement comme une personnalisation.
+ *
+ * C'est la SEULE source des valeurs d'usine : elles ne sont pas dupliquées en
+ * base (cf. migration 044). `resolveSubject` s'y replie chaque fois qu'aucune
+ * personnalisation ne s'applique.
+ *
+ * `isAdmin` ne concerne que `magic_link_login`, seul modèle à deux objets —
+ * c'est un drapeau HORS interpolation, jamais un jeton.
  */
-function buildSubject(templateKey: TemplateKey, vars: VariablesPayload): string {
-  const eventName = vars.event_name ?? ''
+export function factorySubjectTemplate(templateKey: TemplateKey, isAdmin: boolean): string {
   switch (templateKey) {
     case 'invitation':
-      return `Inscription participation - ${eventName}`
+      return 'Inscription participation - {{event_name}}'
     case 'reservation_confirmation':
-      return `Confirmation de réservation - ${eventName}`
+      return 'Confirmation de réservation - {{event_name}}'
     case 'cancellation_confirmation':
-      return `Créneau annulé - ${eventName}`
+      return 'Créneau annulé - {{event_name}}'
     case 'unregistration_confirmation':
-      return `Désinscription confirmée - ${eventName}`
+      return 'Désinscription confirmée - {{event_name}}'
     case 'slot_modification':
-      return `Créneau modifié - ${eventName}`
+      return 'Créneau modifié - {{event_name}}'
     case 'magic_link_login':
-      return vars.is_admin === 'true'
-        ? "Connexion à l'administration TimePick"
-        : 'Connexion à TimePick'
+      return isAdmin ? "Connexion à l'administration TimePick" : 'Connexion à TimePick'
     case 'account_created':
       return 'Bienvenue — votre compte a été créé'
     case 'role_promoted':
@@ -88,6 +104,101 @@ function buildSubject(templateKey: TemplateKey, vars: VariablesPayload): string 
     case 'role_demoted':
       return 'TimePick — Mise à jour de votre accès'
   }
+}
+
+/**
+ * Borne de l'objet RÉELLEMENT ENVOYÉ, distincte de `MAX_SUBJECT_LENGTH` qui ne
+ * borne que la forme SOURCE. Un objet de 252 caractères fait de 18
+ * `{{event_name}}` (200 caractères chacun au plus) produirait ~3 600 caractères
+ * d'en-tête, replié par Nodemailer mais tronqué ou rejeté par certains MTA.
+ * Coupe en POINTS DE CODE : `slice` sur unités UTF-16 casserait un emoji en
+ * deux moitiés de paire de substitution.
+ */
+const MAX_SENT_SUBJECT_LENGTH = 512
+
+function capSubject(subject: string): string {
+  const points = [...subject]
+  return points.length <= MAX_SENT_SUBJECT_LENGTH
+    ? subject
+    : points.slice(0, MAX_SENT_SUBJECT_LENGTH).join('')
+}
+
+/**
+ * Surcharges chargées une fois pour un lot d'envois. `null` = lecture
+ * impossible ou modèle absent : la résolution retombe sur l'usine.
+ */
+export type LoadedSubjectOverrides = SubjectOverrides | null
+
+/**
+ * Lecture des surcharges, isolée de la résolution pour que les envois EN MASSE
+ * la fassent UNE fois plutôt qu'une fois par destinataire : les variables
+ * changent à chaque destinataire, pas les surcharges.
+ *
+ * L'échec de lecture retombe sur l'usine : l'objet ne doit jamais être ce qui
+ * fait perdre un e-mail que le rendu a déjà produit.
+ */
+export async function loadSubjectOverrides(
+  templateKey: TemplateKey,
+  eventId?: string,
+): Promise<LoadedSubjectOverrides> {
+  try {
+    return await getSubjectOverrides(templateKey, eventId)
+  } catch (error) {
+    console.error('[EmailService] subject override read failed:', {
+      templateKey,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    })
+    return null
+  }
+}
+
+/**
+ * Objet réellement envoyé, à partir de surcharges DÉJÀ lues. Cascade, dans cet
+ * ordre : `events.invitation_subject` → `email_templates.subject` → usine.
+ *
+ * DEUX REPLIS, pas un. L'absence de personnalisation retombe sur l'usine, et
+ * une personnalisation qui s'INTERPOLE EN VIDE aussi — cas réel : un objet
+ * réduit à `{{user_last_name}}` pour un destinataire mononyme. Un e-mail sans
+ * objet est donc impossible, quoi que contienne la base.
+ */
+export function resolveSubjectFrom(
+  overrides: LoadedSubjectOverrides,
+  params: { templateKey: TemplateKey; vars: VariablesPayload },
+): string {
+  const isAdmin = params.vars.is_admin === 'true'
+  const factory = normalizeSubject(
+    substituteSubjectVariables(factorySubjectTemplate(params.templateKey, isAdmin), params.vars),
+  )
+  if (!overrides) return capSubject(factory)
+
+  // magic_link_login est le seul modèle à deux objets d'usine, choisis sur le
+  // drapeau hors-interpolation `is_admin` : sa personnalisation se dédouble de
+  // la même façon plutôt que d'introduire des conditions dans le moteur.
+  const templateOverride =
+    params.templateKey === 'magic_link_login' && isAdmin
+      ? overrides.subjectAdmin
+      : overrides.subject
+
+  // Seule l'invitation a un niveau événement (events.invitation_mjml et son
+  // pendant objet). Les autres modèles ne sont pas rattachés à un événement.
+  const override =
+    params.templateKey === 'invitation'
+      ? overrides.eventSubject ?? templateOverride
+      : templateOverride
+  if (override === null) return capSubject(factory)
+
+  const interpolated = normalizeSubject(substituteSubjectVariables(override, params.vars))
+  return capSubject(interpolated.length > 0 ? interpolated : factory)
+}
+
+/** Chemin unitaire : une lecture, une résolution. */
+export async function resolveSubject(params: {
+  templateKey: TemplateKey
+  eventId?: string
+  vars: VariablesPayload
+}): Promise<string> {
+  const overrides = await loadSubjectOverrides(params.templateKey, params.eventId)
+  return resolveSubjectFrom(overrides, params)
 }
 
 /**
@@ -111,13 +222,20 @@ export const sendAdminMagicLinkEmail = async (
   const formattedExpiration = format(exp, "d MMMM yyyy 'a' HH'h'mm", { locale: fr })
   const linkWithCtx = isAdmin ? withAdminCtx(link) : link
 
+  // Une seule charge de variables pour le corps ET l'objet : un objet
+  // personnalisé interpole les mêmes jetons que le corps, avec les mêmes
+  // valeurs. Deux charges divergeraient au premier jeton ajouté.
+  const vars: VariablesPayload = {
+    ...emailNameVariables(firstName, lastName),
+    magic_link: linkWithCtx,
+    expiration_date: formattedExpiration,
+    is_admin: 'true',
+  }
+
   let html: string
   let text: string
   try {
-    const rendered = await renderEmail({
-      templateKey: 'magic_link_login',
-      variables: { ...emailNameVariables(firstName, lastName), magic_link: linkWithCtx, expiration_date: formattedExpiration, is_admin: 'true' },
-    })
+    const rendered = await renderEmail({ templateKey: 'magic_link_login', variables: vars })
     html = rendered.html
     text = rendered.text
   } catch (err) {
@@ -135,7 +253,7 @@ export const sendAdminMagicLinkEmail = async (
   const sent = await sendMailWithFallback(transporter, {
     from,
     to: email,
-    subject: buildSubject('magic_link_login', { is_admin: 'true' }),
+    subject: await resolveSubject({ templateKey: 'magic_link_login', vars }),
     text,
     html,
   })
@@ -145,8 +263,8 @@ export const sendAdminMagicLinkEmail = async (
 
 /**
  * Email de setup du premier administrateur (wizard d'installation). Corps
- * dédié — cf. renderSetupAdminEmail. Son sujet est inline : hors buildSubject,
- * réservé aux TemplateKey test-sendables.
+ * dédié — cf. renderSetupAdminEmail. Son sujet est inline : hors du registre
+ * `factorySubject` et hors cascade, réservé aux TemplateKey test-sendables.
  */
 export const sendSetupAdminEmail = async (
   email: string,
@@ -210,13 +328,17 @@ export const sendUserMagicLinkEmail = async (
   const exp = expirationDate || new Date(Date.now() + ttlMinutes * 60 * 1000)
   const formattedExpiration = format(exp, "d MMMM yyyy 'a' HH'h'mm", { locale: fr })
 
+  const vars: VariablesPayload = {
+    ...emailNameVariables(firstName, lastName),
+    magic_link: link,
+    expiration_date: formattedExpiration,
+    is_admin: 'false',
+  }
+
   let html: string
   let text: string
   try {
-    const rendered = await renderEmail({
-      templateKey: 'magic_link_login',
-      variables: { ...emailNameVariables(firstName, lastName), magic_link: link, expiration_date: formattedExpiration, is_admin: 'false' },
-    })
+    const rendered = await renderEmail({ templateKey: 'magic_link_login', variables: vars })
     html = rendered.html
     text = rendered.text
   } catch (err) {
@@ -234,7 +356,7 @@ export const sendUserMagicLinkEmail = async (
   const sent = await sendMailWithFallback(transporter, {
     from,
     to: email,
-    subject: buildSubject('magic_link_login', { is_admin: 'false' }),
+    subject: await resolveSubject({ templateKey: 'magic_link_login', vars }),
     text,
     html,
   })
@@ -255,16 +377,15 @@ export const sendWelcomeInvitation = async (
   const appUrl = frontendBaseUrl()
   const loginUrl = isAdmin ? withAdminCtx(`${appUrl}/login`) : `${appUrl}/login`
 
+  const vars: VariablesPayload = {
+    ...emailNameVariables(firstName, lastName),
+    login_url: loginUrl,
+  }
+
   let html: string
   let text: string
   try {
-    const rendered = await renderEmail({
-      templateKey: 'account_created',
-      variables: {
-        ...emailNameVariables(firstName, lastName),
-        login_url: loginUrl,
-      },
-    })
+    const rendered = await renderEmail({ templateKey: 'account_created', variables: vars })
     html = rendered.html
     text = rendered.text
   } catch (err) {
@@ -282,7 +403,7 @@ export const sendWelcomeInvitation = async (
   const sent = await sendMailWithFallback(transporter, {
     from,
     to: email,
-    subject: buildSubject('account_created', {}),
+    subject: await resolveSubject({ templateKey: 'account_created', vars }),
     text,
     html,
   })
@@ -313,16 +434,15 @@ export const sendRoleChangedEmail = async (
     ? withAdminCtx(magicLink ?? `${appUrl}/login`)
     : `${appUrl}/login`
 
+  const vars: VariablesPayload = {
+    ...emailNameVariables(firstName, lastName),
+    login_url: loginUrl,
+  }
+
   let html: string
   let text: string
   try {
-    const rendered = await renderEmail({
-      templateKey,
-      variables: {
-        ...emailNameVariables(firstName, lastName),
-        login_url: loginUrl,
-      },
-    })
+    const rendered = await renderEmail({ templateKey, variables: vars })
     html = rendered.html
     text = rendered.text
   } catch (err) {
@@ -340,7 +460,7 @@ export const sendRoleChangedEmail = async (
   const sent = await sendMailWithFallback(transporter, {
     from,
     to: email,
-    subject: buildSubject(templateKey, {}),
+    subject: await resolveSubject({ templateKey, vars }),
     text,
     html,
   })
@@ -354,6 +474,10 @@ export const sendRoleChangedEmail = async (
  * @param eventData - Données de l'événement (id requis pour résolution du template via renderEmail)
  * @param magicLink - Lien magic link de connexion
  * @param expirationDate - Date d'expiration du lien (optionnel)
+ * @param subjectOverrides - Surcharges d'objet DÉJÀ lues, quand l'appelant boucle
+ *   sur les destinataires d'un même événement (`dispatchInvitations`) : elles ne
+ *   dépendent pas du destinataire, une lecture par personne serait N fois la
+ *   même. Omis ⇒ lecture unitaire, comme avant.
  * @returns true si envoyé, false sinon
  */
 export const sendEventInvitation = async (
@@ -367,10 +491,19 @@ export const sendEventInvitation = async (
   expirationDate?: Date,
   firstName?: string | null,
   lastName?: string | null,
+  subjectOverrides?: LoadedSubjectOverrides,
 ): Promise<boolean> => {
   const formattedExpiration = expirationDate
     ? format(expirationDate, "d MMMM yyyy 'a' HH'h'mm", { locale: fr })
     : ''
+
+  const vars: VariablesPayload = {
+    ...emailNameVariables(firstName, lastName),
+    event_name: eventData.name,
+    event_description: eventData.description ?? '',
+    magic_link: magicLink,
+    expiration_date: formattedExpiration,
+  }
 
   let html: string
   let text: string
@@ -378,13 +511,7 @@ export const sendEventInvitation = async (
     const rendered = await renderEmail({
       templateKey: 'invitation',
       eventId: eventData.id,
-      variables: {
-        ...emailNameVariables(firstName, lastName),
-        event_name: eventData.name,
-        event_description: eventData.description ?? '',
-        magic_link: magicLink,
-        expiration_date: formattedExpiration,
-      },
+      variables: vars,
     })
     html = rendered.html
     text = rendered.text
@@ -403,7 +530,14 @@ export const sendEventInvitation = async (
   const sent = await sendMailWithFallback(transporter, {
     from,
     to: email,
-    subject: buildSubject('invitation', { event_name: eventData.name }),
+    // Seul point d'envoi à passer `eventId` : l'invitation est le seul modèle
+    // dont l'objet se surcharge par événement.
+    subject: resolveSubjectFrom(
+      subjectOverrides !== undefined
+        ? subjectOverrides
+        : await loadSubjectOverrides('invitation', eventData.id),
+      { templateKey: 'invitation', vars },
+    ),
     text,
     html,
   })
@@ -467,19 +601,21 @@ export const sendSlotCancellationEmail = async (
     ? `<strong>Motif :</strong> ${escapeHtmlText(cancellationReason.trim())}`
     : ''
 
+  const vars: VariablesPayload = {
+    ...emailNameVariables(userFirstName, userLastName),
+    event_name: eventName,
+    slot_date: slotDate,
+    slot_time: slotTime,
+    cancellation_reason: cancellationReasonHtml,
+    calendar_url: memberEventUrl(eventId),
+  }
+
   let html: string
   let text: string
   try {
     const rendered = await renderEmail({
       templateKey: 'cancellation_confirmation',
-      variables: {
-        ...emailNameVariables(userFirstName, userLastName),
-        event_name: eventName,
-        slot_date: slotDate,
-        slot_time: slotTime,
-        cancellation_reason: cancellationReasonHtml,
-        calendar_url: memberEventUrl(eventId),
-      },
+      variables: vars,
     })
     html = rendered.html
     text = rendered.text
@@ -498,7 +634,7 @@ export const sendSlotCancellationEmail = async (
   const sent = await sendMailWithFallback(transporter, {
     from,
     to: userEmail,
-    subject: buildSubject('cancellation_confirmation', { event_name: eventName }),
+    subject: await resolveSubject({ templateKey: 'cancellation_confirmation', vars }),
     text,
     html,
   })
@@ -529,18 +665,20 @@ export const sendReservationEmail = async (
 ): Promise<boolean> => {
   const { userEmail, userFirstName, userLastName, eventId, eventName, slotDate, slotTime } = data
 
+  const vars: VariablesPayload = {
+    ...emailNameVariables(userFirstName, userLastName),
+    event_name: eventName,
+    slot_date: slotDate,
+    slot_time: slotTime,
+    calendar_url: memberEventUrl(eventId),
+  }
+
   let html: string
   let text: string
   try {
     const rendered = await renderEmail({
       templateKey: 'reservation_confirmation',
-      variables: {
-        ...emailNameVariables(userFirstName, userLastName),
-        event_name: eventName,
-        slot_date: slotDate,
-        slot_time: slotTime,
-        calendar_url: memberEventUrl(eventId),
-      },
+      variables: vars,
     })
     html = rendered.html
     text = rendered.text
@@ -559,7 +697,7 @@ export const sendReservationEmail = async (
   const sent = await sendMailWithFallback(transporter, {
     from,
     to: userEmail,
-    subject: buildSubject('reservation_confirmation', { event_name: eventName }),
+    subject: await resolveSubject({ templateKey: 'reservation_confirmation', vars }),
     text,
     html,
   })
@@ -592,18 +730,20 @@ export const sendUnregistrationEmail = async (
 ): Promise<boolean> => {
   const { userEmail, userFirstName, userLastName, eventName, eventId, slotDate, slotTime } = data
 
+  const vars: VariablesPayload = {
+    ...emailNameVariables(userFirstName, userLastName),
+    event_name: eventName,
+    slot_date: slotDate,
+    slot_time: slotTime,
+    calendar_url: memberEventUrl(eventId),
+  }
+
   let html: string
   let text: string
   try {
     const rendered = await renderEmail({
       templateKey: 'unregistration_confirmation',
-      variables: {
-        ...emailNameVariables(userFirstName, userLastName),
-        event_name: eventName,
-        slot_date: slotDate,
-        slot_time: slotTime,
-        calendar_url: memberEventUrl(eventId),
-      },
+      variables: vars,
     })
     html = rendered.html
     text = rendered.text
@@ -622,7 +762,7 @@ export const sendUnregistrationEmail = async (
   const sent = await sendMailWithFallback(transporter, {
     from,
     to: userEmail,
-    subject: buildSubject('unregistration_confirmation', { event_name: eventName }),
+    subject: await resolveSubject({ templateKey: 'unregistration_confirmation', vars }),
     text,
     html,
   })
@@ -714,7 +854,11 @@ export const sendTemplateTestEmail = async (params: {
   const sent = await sendMailWithFallback(transporter, {
     from,
     to: params.to,
-    subject: `[Test TimePick] ${buildSubject(params.templateKey, vars)}`,
+    subject: `[Test TimePick] ${await resolveSubject({
+      templateKey: params.templateKey,
+      eventId: params.eventId,
+      vars,
+    })}`,
     text: rendered.text,
     html: rendered.html,
   })
@@ -770,20 +914,25 @@ export async function sendSlotModificationEmail(
   }
   const from = await getFromAddress()
 
+  // Surcharges lues UNE fois : elles ne dépendent pas du destinataire, alors que
+  // les variables si. `slot_modification` n'a aucune surface d'édition (exclu du
+  // schéma de param, donc ni GET ni PATCH), donc la lecture ramène toujours
+  // NULL — on la fait quand même, une seule fois, pour que ce modèle marche le
+  // jour où il gagne un sous-onglet, plutôt qu'un appel oublié à corriger.
+  const subjectOverrides = await loadSubjectOverrides('slot_modification')
+
   // 4. Rendu + envoi parallèle ; rendu par destinataire car user_first_name varie
   const results = await Promise.allSettled(
     recipients.map(async (r) => {
+      const vars: VariablesPayload = {
+        ...emailNameVariables(r.firstName, r.lastName),
+        event_name: slot.eventName,
+        changes_blocks: changesBlocks,
+        calendar_url: calendarUrl,
+      }
       let rendered: { html: string; text: string }
       try {
-        rendered = await renderEmail({
-          templateKey: 'slot_modification',
-          variables: {
-            ...emailNameVariables(r.firstName, r.lastName),
-            event_name: slot.eventName,
-            changes_blocks: changesBlocks,
-            calendar_url: calendarUrl,
-          },
-        })
+        rendered = await renderEmail({ templateKey: 'slot_modification', variables: vars })
       } catch (error) {
         logRenderEmailFailure({ templateKey: 'slot_modification', slotId: slot.id, error, recipient: r.email })
         return false
@@ -791,7 +940,7 @@ export async function sendSlotModificationEmail(
       return sendMailWithFallback(transporter, {
         from,
         to: r.email,
-        subject: buildSubject('slot_modification', { event_name: slot.eventName }),
+        subject: resolveSubjectFrom(subjectOverrides, { templateKey: 'slot_modification', vars }),
         text: rendered.text,
         html: rendered.html,
       })

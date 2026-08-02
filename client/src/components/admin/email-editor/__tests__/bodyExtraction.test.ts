@@ -491,6 +491,70 @@ describe('wrapBodyForEditing — inherited marking (shellLock condition — Lot 
   })
 })
 
+describe("wrapBodyForEditing — libellé d'origine de la pastille d'héritage", () => {
+  // La policy exige la mention « Hérité du modèle » ou « Hérité de la marque »
+  // SELON L'ORIGINE ; la pastille du canvas lit ce libellé dans
+  // `data-inherited-label`. Sans ces cas, une pastille pourrait afficher la
+  // mauvaise provenance sans que rien ne le signale.
+  function headerOf(mjml: string): string {
+    return mjml.slice(0, mjml.indexOf('<!-- BODY:START -->'))
+  }
+  function footerOf(mjml: string): string {
+    return mjml.slice(mjml.indexOf('<!-- BODY:END -->'))
+  }
+
+  it('nomme la provenance de chaque bloc hérité au niveau événement', () => {
+    const shell: ResolvedShellForCanvas = {
+      header: { contentMjml: '<mj-section><mj-column></mj-column></mj-section>', origin: 'template' },
+      footer: { contentMjml: '<mj-section><mj-column></mj-column></mj-section>', origin: 'brand' },
+      mjBody: { backgroundColor: '#ffffff', paddingTop: '0', paddingBottom: '0' },
+    }
+    const out = wrapBodyForEditing(seedBody, brand, shell, { ownerKind: 'event' })
+    expect(headerOf(out)).toContain('data-inherited-label="Hérité du modèle"')
+    expect(footerOf(out)).toContain('data-inherited-label="Hérité de la marque"')
+  })
+
+  it("ne dit pas « hérité » d'un contenu d'origine — le filet de sécurité n'est pas un niveau de cascade", () => {
+    // Politique de personnalisation de la coque email : un bloc dont l'origine
+    // résolue est le filet livré avec l'application « n'est jamais considéré
+    // comme hérité au sens utilisateur ».
+    const shell: ResolvedShellForCanvas = {
+      header: { contentMjml: '<mj-section><mj-column></mj-column></mj-section>', origin: 'hardcoded' },
+      footer: { contentMjml: '<mj-section><mj-column></mj-column></mj-section>', origin: 'hardcoded' },
+      mjBody: { backgroundColor: '#ffffff', paddingTop: '0', paddingBottom: '0' },
+    }
+    const out = wrapBodyForEditing(seedBody, brand, shell, { ownerKind: 'event' })
+    expect(headerOf(out)).toContain('data-inherited-label="Contenu d\'origine"')
+    expect(headerOf(out)).not.toContain('Hérité')
+  })
+
+  it("n'émet aucun libellé sur un bloc surchargé au niveau courant", () => {
+    const shell: ResolvedShellForCanvas = {
+      header: { contentMjml: '<mj-section><mj-column></mj-column></mj-section>', origin: 'event' },
+      footer: { contentMjml: '<mj-section><mj-column></mj-column></mj-section>', origin: 'event' },
+      mjBody: { backgroundColor: '#ffffff', paddingTop: '0', paddingBottom: '0' },
+    }
+    const out = wrapBodyForEditing(seedBody, brand, shell, { ownerKind: 'event' })
+    expect(out).not.toContain('data-inherited-label')
+  })
+
+  it('étiquette le CORPS « Corps » quand la carte content-wrapper existe', () => {
+    // La policy énumère TROIS étiquettes permanentes — « En-tête », « Corps »,
+    // « Pied ». Celle du corps n'a jamais existé jusqu'au 2026-07-30.
+    const shell: ResolvedShellForCanvas = {
+      header: { contentMjml: '<mj-section><mj-column></mj-column></mj-section>', origin: 'event' },
+      footer: { contentMjml: '<mj-section><mj-column></mj-column></mj-section>', origin: 'event' },
+      mjBody: { backgroundColor: '#ffffff', paddingTop: '0', paddingBottom: '0' },
+      contentWrapper: {
+        contentMjml: '<mj-section background-color="#ffffff"></mj-section>',
+        origin: 'template',
+      },
+    }
+    const out = wrapBodyForEditing(seedBody, brand, shell, { ownerKind: 'event' })
+    expect(out).toContain('css-class="locked-card" data-locked-label="Corps"')
+  })
+})
+
 describe('wrapBodyForEditing — content-wrapper card (Plan carte-éditable)', () => {
   const baseShell = (overrides?: {
     contentWrapper?: { contentMjml: string; origin: 'template' | 'brand' | 'event' | 'hardcoded' } | null
@@ -778,19 +842,22 @@ describe('extractShellSections', () => {
 })
 
 describe('normalizeShellFragment', () => {
-  it('strips css-class=locked-shell, data-locked-label, data-part-kind AND data-inherited', () => {
+  it('strips css-class=locked-shell, data-locked-label, data-part-kind, data-inherited AND data-inherited-label', () => {
     const fragment =
-      '<mj-section css-class="locked-shell" data-locked-label="En-tête" data-part-kind="header" data-inherited="true" padding="20px"><mj-column></mj-column></mj-section>'
+      '<mj-section css-class="locked-shell" data-locked-label="En-tête" data-part-kind="header" data-inherited="true" data-inherited-label="Hérité du modèle" padding="20px"><mj-column></mj-column></mj-section>'
     const out = normalizeShellFragment(fragment)
     expect(out).not.toContain('locked-shell')
     expect(out).not.toContain('data-locked-label')
     expect(out).not.toContain('data-part-kind')
     expect(out).not.toContain('data-inherited')
+    // Sans ce strip, le dirty tracker verrait une diff structurelle là où il n'y
+    // a qu'une décoration d'éditeur : « Enregistrer » s'activerait tout seul.
+    expect(out).toBe('<mj-section padding="20px"><mj-column></mj-column></mj-section>')
   })
 
   it('is idempotent — normalize(normalize(x)) === normalize(x)', () => {
     const fragment =
-      '<mj-section css-class="locked-shell other" data-locked-label="En-tête" data-part-kind="header" data-inherited="true" padding="20px"><mj-column><mj-text>X</mj-text></mj-column></mj-section>'
+      '<mj-section css-class="locked-shell other" data-locked-label="En-tête" data-part-kind="header" data-inherited="true" data-inherited-label="Hérité de la marque" padding="20px"><mj-column><mj-text>X</mj-text></mj-column></mj-section>'
     const once = normalizeShellFragment(fragment)
     const twice = normalizeShellFragment(once)
     expect(twice).toBe(once)

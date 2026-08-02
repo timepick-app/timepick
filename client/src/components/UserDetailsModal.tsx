@@ -8,6 +8,7 @@ import { SheetShell } from './SheetShell'
 import api from '../services/api'
 import type { UserWithBookings } from '../types/user'
 import { formatFullName } from '@/lib/formatFullName'
+import { userFacingErrorMessage } from '@/lib/userFacingErrorMessage'
 import { getInitials } from '@/lib/getInitials'
 import { Link } from 'react-router-dom'
 import { isMultiDaySlot, formatSlotRangeCompact } from '@/lib/utils'
@@ -32,8 +33,7 @@ export const UserDetailsModal = ({ userId, onClose }: UserDetailsModalProps) => 
         const res = await api.get(`/admin/users/${userId}`)
         setUser(res.data)
       } catch (err) {
-        const error = err as { response?: { data?: { error?: string } } }
-        setError(error.response?.data?.error || 'Erreur lors du chargement')
+        setError(userFacingErrorMessage(err, 'Le chargement des informations du membre a échoué. Réessayez.'))
       } finally {
         setLoading(false)
       }

@@ -3,6 +3,7 @@ import type { z } from 'zod'
 import type { patchMeProfileSchema } from '../validators/user.validator'
 import { NotFoundError } from '../errors/NotFoundError'
 import { ValidationError } from '../errors/ValidationError'
+import { ERROR_CODES } from '@timepick/shared'
 
 /**
  * Forme d'une row DB brute (snake_case) retournée par la requête /me/events.
@@ -458,7 +459,7 @@ export const meService = {
       paramCount++
     }
     if (updates.length === 0) {
-      throw new ValidationError('Aucune donnée à mettre à jour')
+      throw new ValidationError('Aucune donnée à mettre à jour', ERROR_CODES.NO_FIELDS_TO_UPDATE)
     }
     values.push(userId)
     const result = await query<MyProfileRow>(
@@ -467,7 +468,7 @@ export const meService = {
       values
     )
     if (!result.rows[0]) {
-      throw new NotFoundError('Utilisateur non trouvé')
+      throw new NotFoundError('Utilisateur non trouvé', ERROR_CODES.USER_NOT_FOUND)
     }
     return result.rows[0]
   },

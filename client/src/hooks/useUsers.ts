@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../services/api'
 import { toast } from 'sonner'
-import { extractErrorMessage } from '@/lib/extractErrorMessage'
+import { userFacingErrorMessage } from '@/lib/userFacingErrorMessage'
 import type { User, ApiCreateUserInput, ApiUpdateUserInput, PaginatedUsersResponse, UsersQueryParams, BulkDeleteUsersResult, BulkDeleteSkipReason } from '../types/user'
 
 /** Libellés FR des raisons d'ignorement renvoyées par bulk-delete. */
@@ -37,7 +37,7 @@ export const useDeleteUser = () => {
       toast.success(`Utilisateur supprimé avec succès${bookingMsg}`)
     },
     onError: (err) => {
-      toast.error(`Erreur: ${extractErrorMessage(err, 'Erreur lors de la suppression')}`)
+      toast.error(userFacingErrorMessage(err, "La suppression a échoué. Rien n'a été supprimé, réessayez."))
     }
   })
 }
@@ -88,7 +88,7 @@ export const useBulkDeleteUsers = () => {
       }
     },
     onError: (err) => {
-      toast.error(`Erreur: ${extractErrorMessage(err, 'Erreur lors de la suppression')}`)
+      toast.error(userFacingErrorMessage(err, "La suppression a échoué. Aucun membre n'a été supprimé, réessayez."))
     }
   })
 }
@@ -165,7 +165,7 @@ export const useUsers = (params: UsersQueryParams = {}) => {
   return {
     users: responseData?.users || [],
     loading: isLoading,
-    error: error ? extractErrorMessage(error, 'Erreur de chargement') : null,
+    error: error ? userFacingErrorMessage(error, "La liste des utilisateurs n'a pas pu être chargée. Réessayez.") : null,
     pagination: responseData?.pagination || null,
     refetch,
     createUser: (input: ApiCreateUserInput) => createMutation.mutateAsync(input),

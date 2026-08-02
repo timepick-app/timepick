@@ -198,14 +198,30 @@ describe('Event Email Template API (E3.S2)', () => {
       expect(res.body.error).toMatchObject({ code: 'VALIDATION_ERROR' })
     })
 
-    it('returns 400 when BODY:START / BODY:END markers are missing', async () => {
+    it('accepts and persists a body WITHOUT BODY:START / BODY:END markers, verbatim', async () => {
+      // Le corps que l'éditeur produit réellement : l'extraction client renvoie
+      // le contenu ENTRE les marqueurs, donc sans eux. Le validateur a exigé
+      // l'inverse du 2026-05-02 au 2026-07-31, ce qui rendait tout
+      // enregistrement par événement impossible (400). Ce test tient la porte :
+      // les marqueurs sont un découpage côté client, pas un contrat de charge
+      // utile, et le serveur ne ré-enveloppe rien.
+      const markerlessBody =
+        '<mj-section><mj-column><mj-text>No markers</mj-text></mj-column></mj-section>'
+
       const res = await request(testServer())
         .patch(`/api/admin/events/${testEventId}/email-template`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ bodyMjml: '<mj-section><mj-column><mj-text>No markers</mj-text></mj-column></mj-section>' })
+        .send({ bodyMjml: markerlessBody })
 
-      expect(res.status).toBe(400)
-      expect(res.body.error).toMatchObject({ code: 'VALIDATION_ERROR' })
+      expect(res.status).toBe(200)
+      expect(res.body.data).toMatchObject({ isCustom: true, bodyMjml: markerlessBody })
+
+      const getRes = await request(testServer())
+        .get(`/api/admin/events/${testEventId}/email-template`)
+        .set('Authorization', `Bearer ${adminToken}`)
+
+      expect(getRes.status).toBe(200)
+      expect(getRes.body.data.bodyMjml).toBe(markerlessBody)
     })
 
     it('returns 400 when bodyMjml exceeds 64 KiB', async () => {

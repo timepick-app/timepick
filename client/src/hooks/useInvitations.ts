@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../services/api'
 import { toast } from 'sonner'
-import { extractErrorMessage } from '@/lib/extractErrorMessage'
+import { userFacingErrorMessage } from '@/lib/userFacingErrorMessage'
 import type { Invitation, SendInvitationsResult } from '@/types/invitation'
 
 // Ré-exporter les types pour compatibilité avec les composants
@@ -40,7 +40,14 @@ export const useInvitations = (eventId: string) => {
   // Mutation pour envoyer les invitations
   const sendInvitationsMutation = useMutation({
     mutationFn: async (input: SendInvitationsInput) => {
-      const { data } = await api.post(`/admin/events/${eventId}/invitations/send`, input)
+      // L'envoi dispatche en parallèle (Promise.allSettled côté serveur,
+      // invitations.service.ts) via le transport SMTP mutualisé et poolé
+      // (socketTimeout 300s/opération, email-transport.service.ts) : pour un
+      // événement à forte audience, l'attente peut légitimement dépasser les
+      // 60 s par défaut sans qu'aucun envoi n'ait échoué.
+      const { data } = await api.post(`/admin/events/${eventId}/invitations/send`, input, {
+        timeout: 180_000,
+      })
       return data.data as SendInvitationsResult
     },
     onSuccess: (result) => {
@@ -53,9 +60,7 @@ export const useInvitations = (eventId: string) => {
       toast.success(result.message)
     },
     onError: (err) => {
-      const error = err as { response?: { data?: { error?: string } }; message?: string }
-      const errorMsg = extractErrorMessage(error, 'Erreur lors de l\'envoi des invitations')
-      toast.error(`Erreur: ${errorMsg}`)
+      toast.error(userFacingErrorMessage(err, "L'envoi des invitations a échoué. Aucune invitation n'est partie, réessayez."))
     }
   })
 
@@ -73,9 +78,7 @@ export const useInvitations = (eventId: string) => {
       toast.success(`Invitation renvoyée à ${result.email}`)
     },
     onError: (err) => {
-      const error = err as { response?: { data?: { error?: string } }; message?: string }
-      const errorMsg = extractErrorMessage(error, 'Erreur lors du renvoi de l\'invitation')
-      toast.error(`Erreur: ${errorMsg}`)
+      toast.error(userFacingErrorMessage(err, "Le renvoi a échoué. L'invitation n'est pas partie, réessayez."))
     }
   })
 

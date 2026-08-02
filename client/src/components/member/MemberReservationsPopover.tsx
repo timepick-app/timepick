@@ -153,7 +153,7 @@ export function MemberReservationsPopover({
       <PopoverContent
         align="end"
         sideOffset={8}
-        className="w-80 z-50 max-h-[min(70vh,var(--radix-popover-content-available-height))] overflow-y-auto"
+        className="w-80 max-h-[min(70vh,var(--radix-popover-content-available-height))] overflow-y-auto"
         data-testid="member-reservations-popover"
       >
         {content}

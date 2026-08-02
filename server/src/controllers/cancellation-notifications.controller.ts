@@ -1,6 +1,7 @@
 import { Request, Response } from 'express'
 import { z } from 'zod'
 import { cancellationNotificationService } from '../services/cancellation-notification.service'
+import { ERROR_CODES } from '@timepick/shared'
 
 // `eventId` optionnel et validé en UUID : absent = global, présent = un seul
 // événement. Le cast SQL `$1::uuid` exige un UUID bien formé — on rejette en
@@ -28,7 +29,7 @@ export const cancellationNotificationsController = {
       res.json({ data })
     } catch (error: any) {
       if (error.name === 'ZodError') {
-        res.status(400).json({ error: error.issues[0].message })
+        res.status(400).json({ error: error.issues[0].message, code: ERROR_CODES.VALIDATION_ERROR })
       } else {
         console.error('Error fetching cancellation notifications:', error)
         res.status(500).json({ error: 'Erreur lors de la récupération des notifications en attente' })
@@ -52,7 +53,7 @@ export const cancellationNotificationsController = {
       res.json({ data })
     } catch (error: any) {
       if (error.name === 'ZodError') {
-        res.status(400).json({ error: error.issues[0].message })
+        res.status(400).json({ error: error.issues[0].message, code: ERROR_CODES.VALIDATION_ERROR })
       } else {
         console.error('Error resending cancellation notifications:', error)
         res.status(500).json({ error: 'Erreur lors du renvoi des notifications' })

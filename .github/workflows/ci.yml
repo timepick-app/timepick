@@ -95,6 +95,10 @@ jobs:
     name: Tests server (jest + postgres)
     runs-on: ubuntu-latest
     env:
+      # Même TZ que test-client : les objets d'e-mail interpolent des dates
+      # formatées par date-fns en heure LOCALE, donc un test à horloge figée
+      # n'a de valeur attendue stable que sous une TZ fixée.
+      TZ: Europe/Paris
       # Jest charge 99 suites + tests d'intégration PG en parallèle ;
       # le heap Node par défaut (~1,5 GB) est insuffisant sur ce runner.
       # Le runner GitHub Actions dispose de 7 GB RAM → 4 GB est sûr.

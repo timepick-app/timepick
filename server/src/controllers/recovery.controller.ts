@@ -2,6 +2,7 @@ import { Request, Response } from 'express'
 import jwt from 'jsonwebtoken'
 import bcrypt from 'bcrypt'
 import { z } from 'zod'
+import { ERROR_CODES } from '@timepick/shared'
 import { query } from '../db'
 import { configService } from '../services/config.service'
 import {
@@ -65,7 +66,7 @@ function getUserAgent(req: Request): string | null {
 export const generateCodes = async (req: Request, res: Response): Promise<void> => {
   const adminId = req.user?.userId
   if (!adminId) {
-    res.status(401).json({ error: 'Authentification requise' })
+    res.status(401).json({ error: 'Authentification requise', code: ERROR_CODES.UNAUTHORIZED })
     return
   }
 
@@ -80,7 +81,7 @@ export const generateCodes = async (req: Request, res: Response): Promise<void> 
       const elapsed = Date.now() - new Date(last).getTime()
       if (elapsed < REGEN_WINDOW_MS) {
         res.status(429).json({
-          code: 'RATE_LIMITED',
+          code: ERROR_CODES.RATE_LIMITED,
           retryAfterMs: REGEN_WINDOW_MS - elapsed,
         })
         return
@@ -103,7 +104,7 @@ export const generateCodes = async (req: Request, res: Response): Promise<void> 
 export const getStatus = async (req: Request, res: Response): Promise<void> => {
   const adminId = req.user?.userId
   if (!adminId) {
-    res.status(401).json({ error: 'Authentification requise' })
+    res.status(401).json({ error: 'Authentification requise', code: ERROR_CODES.UNAUTHORIZED })
     return
   }
 
@@ -146,7 +147,7 @@ export const getStatus = async (req: Request, res: Response): Promise<void> => {
 export const dismissBanner = async (req: Request, res: Response): Promise<void> => {
   const adminId = req.user?.userId
   if (!adminId) {
-    res.status(401).json({ error: 'Authentification requise' })
+    res.status(401).json({ error: 'Authentification requise', code: ERROR_CODES.UNAUTHORIZED })
     return
   }
 
@@ -211,7 +212,7 @@ export async function constantTimeCompare(
 // outage doesn't create a status-code oracle on valid codes.
 const SESSION_TTL_FALLBACK_SECONDS = 2 * 60 * 60
 
-const INVALID_CREDENTIALS_BODY = { code: 'INVALID_CREDENTIALS' } as const
+const INVALID_CREDENTIALS_BODY = { code: ERROR_CODES.INVALID_CREDENTIALS } as const
 
 export const emergencyLogin = async (req: Request, res: Response): Promise<void> => {
   const ip = getClientIp(req)

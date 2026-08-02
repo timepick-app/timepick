@@ -1,3 +1,4 @@
+import { ERROR_CODES } from '@timepick/shared';
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { getSetupStatus, createFirstAdmin, checkSetupNotDone } from '../controllers/setup.controller';
@@ -23,7 +24,7 @@ const setupSmtpLimiter = rateLimit({
   limit: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: { code: 'RATE_LIMITED', message: 'Trop de requêtes.' } },
+  message: { error: { code: ERROR_CODES.RATE_LIMITED, message: 'Trop de requêtes.' } },
 })
 
 // Les deux routes publiques qui déclenchent un envoi SMTP réel vers une adresse
@@ -37,7 +38,7 @@ const setupEmailSendLimiter = rateLimit({
   skip: () => process.env.NODE_ENV === 'test',
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: { code: 'RATE_LIMITED', message: 'Trop de requêtes.' } },
+  message: { error: { code: ERROR_CODES.RATE_LIMITED, message: 'Trop de requêtes.' } },
 })
 
 // Status GET is a cheap read consumed by the wizard; its own limiter skips in
@@ -48,7 +49,7 @@ const setupEncryptionKeyLimiter = rateLimit({
   skip: () => process.env.NODE_ENV === 'test',
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: { code: 'RATE_LIMITED', message: 'Trop de requêtes.' } },
+  message: { error: { code: ERROR_CODES.RATE_LIMITED, message: 'Trop de requêtes.' } },
 })
 
 // Routes publiques (pas d'auth middleware)

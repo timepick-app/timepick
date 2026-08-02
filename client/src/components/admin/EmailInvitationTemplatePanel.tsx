@@ -3,10 +3,13 @@ import { Button } from '@/components/ui/button'
 import { AlertCircle } from 'lucide-react'
 import { Banner, BannerDescription } from '@/components/ui/banner'
 import { EmailVariablesHelp } from './EmailVariablesHelp'
+import { EmailSubjectSummary } from './EmailSubjectSummary'
 import { EmailCompatibilityWarningCard } from './email-editor/EmailCompatibilityWarningCard'
+import { EmailEditorScreenRequirement } from './email-editor/EmailEditorScreenRequirement'
 import { useEmailTemplate } from '@/hooks/useEmailTemplate'
 import { useEditorContext } from '@/hooks/useEditorContext'
 import { INVITATION_VARIABLE_HELP } from '@/lib/email-template-constants'
+import { canDeviceDisplayEmailEditor } from '@/lib/email-editor-capability'
 
 /**
  * E2.S4 — carte « muette » du template d'invitation par défaut.
@@ -30,7 +33,7 @@ export interface EmailInvitationTemplatePanelProps {
 export const EmailInvitationTemplatePanel = ({
   onOpenEditor,
 }: EmailInvitationTemplatePanelProps) => {
-  const { isLoading, error } = useEmailTemplate('invitation')
+  const { data: template, isLoading, error } = useEmailTemplate('invitation')
   const { data: editorContext } = useEditorContext({
     ownerKind: 'template',
     ownerId: 'invitation',
@@ -43,6 +46,9 @@ export const EmailInvitationTemplatePanel = ({
   }
 
   const hasError = !!error
+  // Capacité de l'ÉCRAN, pas taille de la fenêtre — et constante sur la
+  // session, donc un simple appel au rendu suffit.
+  const canOpenEditor = canDeviceDisplayEmailEditor()
 
   return (
     <Card data-testid="email-invitation-template-panel">
@@ -84,6 +90,14 @@ export const EmailInvitationTemplatePanel = ({
 
         {!isLoading && !hasError && (
           <>
+            {template && (
+              <EmailSubjectSummary
+                subject={template.subject}
+                defaultSubject={template.defaultSubject}
+                variables={template.subjectVariables}
+                data-testid="invitation-template-subject"
+              />
+            )}
             <EmailVariablesHelp
               variables={INVITATION_VARIABLE_HELP}
               data-testid="invitation-template-variables"
@@ -92,16 +106,20 @@ export const EmailInvitationTemplatePanel = ({
               sources={compatSources}
               scopeKey="template:invitation"
             />
-            <div className="flex flex-wrap items-center justify-end gap-3">
-              <Button
-                type="button"
-                onClick={onOpenEditor}
-                disabled={isLoading}
-                data-testid="invitation-open-editor-btn"
-              >
-                Personnaliser avec l&apos;éditeur
-              </Button>
-            </div>
+            {canOpenEditor ? (
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                <Button
+                  type="button"
+                  onClick={onOpenEditor}
+                  disabled={isLoading}
+                  data-testid="invitation-open-editor-btn"
+                >
+                  Personnaliser avec l&apos;éditeur
+                </Button>
+              </div>
+            ) : (
+              <EmailEditorScreenRequirement />
+            )}
           </>
         )}
       </CardContent>

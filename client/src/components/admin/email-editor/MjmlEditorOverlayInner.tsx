@@ -12,6 +12,8 @@ import {
 } from '@/components/ui/select'
 import { LockedShellInfoPanel, type LockedShellPartKind } from './LockedShellInfoPanel'
 import { StructuralBadge } from './StructuralBadge'
+import { structuralBadgeWording } from './StructuralBadge.constants'
+import { useToolbarTier } from './useToolbarTier'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,7 +29,7 @@ import { useEditorContext } from '@/hooks/useEditorContext'
 import type { ResolvedShell } from '@/services/editor-context.service'
 import { useUpsertShellPart } from '@/hooks/useUpsertShellPart'
 import { useDeleteShellPart } from '@/hooks/useDeleteShellPart'
-import { extractErrorMessage } from '@/lib/extractErrorMessage'
+import { userFacingErrorMessage } from '@/lib/userFacingErrorMessage'
 import { initEmailEditor, type EmailEditorWrapper } from './grapesConfig'
 import {
   extractBodyFragment,
@@ -66,6 +68,35 @@ import {
   findMissingSystemCriticalVariables,
   type SystemTemplateKey,
 } from '@/lib/email-system-template-constants'
+import {
+  EmailSubjectLine,
+  EMPTY_SUBJECT_STATE,
+  type EmailSubjectState,
+} from './EmailSubjectLine'
+import type { SubjectVariable } from '@/lib/email-subject'
+import type { SubjectPatch } from '@/services/email-templates.service'
+
+/**
+ * De quoi rendre la ligne Objet. Groupé en un seul objet plutôt qu'éparpillé
+ * en cinq props : ces valeurs viennent toutes du même DTO et n'ont aucun sens
+ * séparément. Prop absente ⇒ pas de ligne Objet (appelant qui n'en a pas).
+ */
+export interface EditorSubjectProps {
+  /** Personnalisation persistée, ou `null`. Forme source. */
+  subject: string | null
+  /**
+   * Valeur en vigueur sans personnalisation : objet d'usine au niveau modèle,
+   * objet hérité du modèle au niveau événement.
+   */
+  fallbackSubject: string
+  /** Décide du vocabulaire et du régime du popover (héritage vs édition directe). */
+  level: 'template' | 'event'
+  /** `magic_link_login` seul — la présence de `fallbackSubjectAdmin` est le prédicat. */
+  subjectAdmin?: string | null
+  fallbackSubjectAdmin?: string
+  /** Liste publiée par le serveur (A3) — jamais reconstruite côté client. */
+  variables: SubjectVariable[]
+}
 
 interface InnerProps {
   /** Template key — informational, not sent to API. Exposed as `data-template-key` for E2E selectors. */
@@ -75,8 +106,8 @@ interface InnerProps {
   /** Factory default body fragment — used by Reset (event editor). */
   defaultBodyMjml?: string
   variables: readonly string[]
-  /** Invitation save : extrait le body fragment → onSave(bodyMjml). */
-  onSave?: (bodyMjml: string) => Promise<void>
+  /** Invitation save : extrait le body fragment → onSave(bodyMjml, subject). */
+  onSave?: (bodyMjml: string, subject?: SubjectPatch) => Promise<void>
   /** Reset au modèle par défaut. Le bouton ET le dialog ne sont rendus QUE si cette prop est fournie (rendu ⟺ opérabilité : pas de bouton no-op). Désactivé si !isCustom. Aujourd'hui câblé uniquement par l'éditeur d'événement. */
   onReset?: () => Promise<void>
   onDirtyChange: (dirty: boolean) => void
@@ -94,10 +125,14 @@ interface InnerProps {
   /** L3a (système) — signature courante. */
   systemSignatureText?: string
   /** L3a (système) — save : extraction des 2 zones → onSaveSystem({introText, signatureText}). */
-  onSaveSystem?: (zones: { introText: string; signatureText: string }) => Promise<void>
+  onSaveSystem?: (
+    zones: { introText: string; signatureText: string } & SubjectPatch,
+  ) => Promise<void>
   /** Sélecteur de modèle dans la barre d'outils (bascule sans fermer l'éditeur).
    *  Le wrapper dirty-guarde `onRequestSwitch` ; Inner ne fait que l'appeler. */
   templateSwitcher?: TemplateSwitcherProps
+  /** Ligne Objet sous la barre d'outils. Absente ⇒ pas de ligne. */
+  subjectLine?: EditorSubjectProps
 }
 
 function toCanvasShell(resolved: ResolvedShell | undefined): ResolvedShellForCanvas | undefined {
@@ -192,6 +227,7 @@ export default function MjmlEditorOverlayInner({
   systemSignatureText = '',
   onSaveSystem,
   templateSwitcher,
+  subjectLine,
 }: InnerProps) {
   const isSystem = mode === 'system'
   const containerRef = useRef<HTMLDivElement>(null)
@@ -257,10 +293,29 @@ export default function MjmlEditorOverlayInner({
   const [isDirty, setIsDirtyState] = useState(false)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [selectedLockedPart, setSelectedLockedPart] = useState<LockedShellPartKind | null>(null)
+  // PUT « Personnaliser ce bloc » en cours. État dédié, PAS
+  // `upsertShellPart.isPending` : l'instance de mutation est partagée avec
+  // l'orchestrateur de save, son `isPending` serait aussi vrai pendant un
+  // Enregistrer et désactiverait le bouton du panneau sans raison.
+  const [customizing, setCustomizing] = useState(false)
   const [previewOverrides, setPreviewOverrides] = useState<BrandPreviewOverrides | null>(null)
   // Plan 4a — dirty de l'identité visuelle, combiné au dirty du corps dans la
   // disabled-rule du master Save (le menu gère son propre snapshot).
   const [identityDirty, setIdentityDirty] = useState(false)
+  // 🔴 TROISIÈME ÉTAT DE MODIFICATION, sur le modèle de `identityDirty` — et
+  // surtout PAS agrégé dans `setDirty`.
+  //
+  // `handleEditorUpdate` RECALCULE `isDirty` intégralement depuis le canevas à
+  // chaque événement `update` de GrapesJS (et `handleSave` le recalcule aussi,
+  // en fin d'enregistrement). Écrire l'objet dans cet état-là produirait une
+  // PERTE SILENCIEUSE : modifier l'objet, toucher le canevas, annuler son
+  // geste — le MJML redevient identique à la référence, `dirty` repasse à
+  // `false`, la pastille s'éteint et la garde « Quitter sans enregistrer ? »
+  // ne se déclenche plus. Un état séparé, combiné par `||` à ses points
+  // d'usage, est le seul motif correct ; c'est déjà celui de `identityDirty`.
+  const [subjectState, setSubjectState] = useState<EmailSubjectState>(EMPTY_SUBJECT_STATE)
+  const subjectDirty = subjectState.dirty
+  const subjectBlockReason = subjectState.blockReason
 
   const setDirty = useCallback(
     (dirty: boolean) => {
@@ -270,13 +325,14 @@ export default function MjmlEditorOverlayInner({
     [],
   )
 
-  // P1 (review) — propage le dirty COMBINÉ (corps/zones + identité visuelle) au
-  // parent (garde « Quitter sans enregistrer ? » + beforeunload). Le dirty
-  // identité ne transite plus par setDirty (réservé corps/zones) ; sans ça une
-  // modif brand seule serait perdue sans confirmation.
+  // P1 (review) — propage le dirty COMBINÉ (corps/zones + identité visuelle +
+  // objet) au parent (garde « Quitter sans enregistrer ? » + beforeunload). Ni
+  // le dirty identité ni le dirty objet ne transitent par setDirty (réservé
+  // corps/zones) ; sans ça une modif de marque ou d'objet seule serait perdue
+  // sans confirmation.
   useEffect(() => {
-    onDirtyChange(isDirty || identityDirty)
-  }, [isDirty, identityDirty, onDirtyChange])
+    onDirtyChange(isDirty || identityDirty || subjectDirty)
+  }, [isDirty, identityDirty, subjectDirty, onDirtyChange])
 
   const handleEditorUpdate = useCallback(() => {
     const wrapper = editorRef.current
@@ -376,8 +432,9 @@ export default function MjmlEditorOverlayInner({
     mountedRef.current = true
     // Body ancre normalisée (sans markers BODY:START/END) : extractBodyFragment
     // retourne le contenu ENTRE les marqueurs, la comparaison dirty doit être
-    // symétrique (sinon dirty permanent quand le serveur stocke le body AVEC
-    // markers, cf. validator D-ext6 / events.invitation_mjml).
+    // symétrique — sinon dirty permanent sur un corps stocké AVEC markers
+    // (forme d'usine). Les deux formes coexistent en base : aucun endpoint
+    // d'écriture n'exige les marqueurs.
     initialBodyRef.current = stripBodyMarkers(bodyForCanvas)
     // L3a (système) — initialiser les ancres zones au mount.
     initialIntroRef.current = systemIntroText
@@ -467,20 +524,30 @@ export default function MjmlEditorOverlayInner({
     if (!editorContext) setSelectedLockedPart(null)
   }, [editorContext])
 
-  // beforeunload guard while dirty.
+  // Garde `beforeunload` tant qu'il reste quelque chose à enregistrer.
+  //
+  // 🔴 L'OUBLI DE `subjectDirty` ICI EST UNE PERTE DE TRAVAIL SILENCIEUSE :
+  // modifier SEULEMENT l'objet, fermer l'onglet, et le navigateur ne demande
+  // rien. Deux occurrences à tenir ensemble, la condition et le tableau de
+  // dépendances — la seconde seule suffit à figer la garde sur un état périmé.
   useEffect(() => {
-    if (!isDirty && !identityDirty) return
+    if (!isDirty && !identityDirty && !subjectDirty) return
     const handler = (event: BeforeUnloadEvent) => {
       event.preventDefault()
       event.returnValue = ''
     }
     window.addEventListener('beforeunload', handler)
     return () => window.removeEventListener('beforeunload', handler)
-  }, [isDirty, identityDirty])
+  }, [isDirty, identityDirty, subjectDirty])
 
   const handleSave = useCallback(async () => {
     const wrapper = editorRef.current
     if (!wrapper) return
+    // Le bouton reste FOCALISABLE quand l'objet est invalide (`aria-disabled`,
+    // pas `disabled`) : il peut donc être activé, et c'est ici qu'on l'arrête.
+    // Le motif est affiché par la ligne Objet et rattaché au bouton par
+    // `aria-describedby` — il nomme la condition, il ne constate pas.
+    if (subjectBlockReason) return
     // L3a (système) — court-circuiter : extraire les 2 zones, gate FR55 (variables
     // critiques), puis onSaveSystem({introText, signatureText}). Pas de bodyMjml.
     if (isSystem) {
@@ -507,10 +574,15 @@ export default function MjmlEditorOverlayInner({
       setSaving(true)
       const brandSaveSystem = brandSaveHandlerRef.current
       const zonesDirty = isDirtyRef.current
+      // L'objet voyage dans la MÊME requête que les deux zones : il n'ouvre pas
+      // de branche à lui dans le `Promise.allSettled`. Conséquence directe —
+      // une modification d'objet SEULE doit quand même déclencher l'appel, d'où
+      // le `|| subjectDirty`.
+      const systemPayload = { ...zones, ...subjectState.payload }
       try {
         const [brandResult, systemResult] = await Promise.allSettled([
           brandSaveSystem ? brandSaveSystem() : Promise.resolve({ status: 'skip' as const }),
-          zonesDirty ? onSaveSystem?.(zones) : undefined,
+          zonesDirty || subjectDirty ? onSaveSystem?.(systemPayload) : undefined,
         ])
         if (brandLegFailed(brandResult)) {
           toast.error("L'identité visuelle n'a pas pu être enregistrée")
@@ -524,7 +596,12 @@ export default function MjmlEditorOverlayInner({
           setDirty(false)
         }
       } catch (err) {
-        toast.error(extractErrorMessage(err, 'Erreur lors de la sauvegarde'))
+        toast.error(
+          userFacingErrorMessage(
+            err,
+            "L'enregistrement des zones éditables a échoué. Le texte modifié reste affiché, réessayez.",
+          ),
+        )
       } finally {
         if (mountedRef.current) setSaving(false)
       }
@@ -555,13 +632,18 @@ export default function MjmlEditorOverlayInner({
       }
       setSaving(true)
       try {
-        await onSave(bodyOnly)
+        await onSave(bodyOnly, subjectState.payload)
         if (!mountedRef.current) return
         initialBodyRef.current = bodyOnly
         setDirty(false)
       } catch (err) {
         if (mountedRef.current) {
-          toast.error(extractErrorMessage(err, 'Erreur lors de la sauvegarde'))
+          toast.error(
+            userFacingErrorMessage(
+              err,
+              "Le corps du modèle n'a pas pu être enregistré. Le contenu reste affiché, réessayez.",
+            ),
+          )
         }
       } finally {
         if (mountedRef.current) setSaving(false)
@@ -613,7 +695,13 @@ export default function MjmlEditorOverlayInner({
 
     // Body : asymétrie vs editorContext (gel cascade body) — comparaison
     // exclusive à l'ancre locale `initialBodyRef`.
-    const bodyRoute: Action = dirtyBody ? 'patch' : 'skip'
+    //
+    // L'OBJET EMPRUNTE CETTE MÊME BRANCHE, et c'est voulu : il part dans la
+    // même requête que le corps plutôt que d'ouvrir une branche à lui. Une
+    // modification d'objet SEULE doit donc router le corps en `patch`, sinon
+    // l'objet ne partirait jamais. Le corps renvoyé est alors identique à
+    // celui en base — écriture idempotente, pas une régression.
+    const bodyRoute: Action = dirtyBody || subjectDirty ? 'patch' : 'skip'
 
     // Header/footer/mj-body : double comparaison (vs ancre pour le dirty, vs
     // résolu cascade pour décider PUT vs DELETE vs skip). Owner = ownerKind/
@@ -683,8 +771,14 @@ export default function MjmlEditorOverlayInner({
 
       // Body → host PATCH SANS marqueurs (le conducteur stocke le payload tel
       // quel ; le toast succès vient du conducteur via onSave).
+      // L'OBJET PART DANS CETTE MÊME REQUÊTE (A10) : corps et objet
+      // atterrissent ensemble ou pas du tout.
       if (bodyRoute === 'patch') {
-        tasks.push({ leg: 'body', action: 'patch', promise: onSave(canvasBody) })
+        tasks.push({
+          leg: 'body',
+          action: 'patch',
+          promise: onSave(canvasBody, subjectState.payload),
+        })
       }
       // Header/footer → ownerKind/ownerId courant. Le serveur exige un
       // data-part-kind cohérent → tagSectionWithPartKind(section, partKind).
@@ -873,7 +967,12 @@ export default function MjmlEditorOverlayInner({
         legResults.contentWrapper === 'ko' ||
         legResults.brand === 'ko'
       if (bodyRejection) {
-        toast.error(extractErrorMessage(bodyRejection.reason, 'Erreur lors de la sauvegarde'))
+        toast.error(
+          userFacingErrorMessage(
+            bodyRejection.reason,
+            "Le corps du message n'a pas pu être enregistré. Le contenu reste affiché, réessayez.",
+          ),
+        )
       } else if (shellBrandFailed) {
         toast.error("Certaines modifications n'ont pas pu être enregistrées")
       }
@@ -897,7 +996,12 @@ export default function MjmlEditorOverlayInner({
         queryClient.invalidateQueries({ queryKey: ['settings', 'email-template'] })
       }
     } catch (err) {
-      toast.error(extractErrorMessage(err, 'Erreur lors de la sauvegarde'))
+      toast.error(
+        userFacingErrorMessage(
+          err,
+          "Une erreur inattendue a interrompu l'enregistrement. Le contenu reste affiché, mais vérifiez ce qui a été pris en compte avant de réessayer.",
+        ),
+      )
     } finally {
       if (mountedRef.current) setSaving(false)
     }
@@ -912,6 +1016,12 @@ export default function MjmlEditorOverlayInner({
     editorContext,
     editorContextSkipped,
     identityDirty,
+    // `dirtyBrand` reste sur `identityDirty` SEUL, délibérément : l'objet ne
+    // doit pas déclencher un enregistrement de la marque. Ce qui change ici,
+    // c'est le routage du corps et la charge utile — d'où ces trois entrées.
+    subjectDirty,
+    subjectBlockReason,
+    subjectState,
     upsertShellPart,
     deleteShellPart,
     queryClient,
@@ -963,11 +1073,171 @@ export default function MjmlEditorOverlayInner({
         toast.success('Événement réinitialisé au modèle.')
       }
     } catch (err) {
-      toast.error(extractErrorMessage(err, 'Erreur lors de la restauration'))
+      toast.error(
+        userFacingErrorMessage(
+          err,
+          "La réinitialisation a échoué. Le modèle personnalisé n'a pas été modifié, réessayez.",
+        ),
+      )
     } finally {
       setResetting(false)
     }
   }, [brandSettings, defaultBodyMjml, editorContext, isSystem, onReset, ownerKind, refetchEditorContext, setDirty])
+
+  // Crée la surcharge de coque au niveau événement — le geste que propose le
+  // panneau d'héritage (« Personnaliser ce bloc »).
+  //
+  // Le PUT seul NE SUFFIT PAS. L'effet d'init du canvas dépend de
+  // `[editorReady]` seul, délibérément (préserver les éditions en cours à
+  // travers les refetches) : un refetch de contexte ne re-pousse donc jamais le
+  // canvas. Sans le re-push ci-dessous, la surcharge serait bien créée en base
+  // mais le bloc resterait verrouillé à l'écran jusqu'à réouverture de
+  // l'éditeur — c'était le trou de la première version de ce bouton
+  // (`5eebca2e^`), dont le `onSuccess` ne faisait que refermer le panneau.
+  const handleCustomizeLockedPart = useCallback(async () => {
+    const partKind = selectedLockedPart
+    // La surcharge bloc par bloc n'existe qu'au niveau événement — cf. la
+    // politique de personnalisation de la coque email, section « Portée du
+    // panneau d'héritage ». Le bouton n'est rendu que sous ces conditions ; la
+    // garde ferme le contrat côté handler.
+    if (!partKind || ownerKind !== 'event' || !ownerId || !editorContext) return
+    setCustomizing(true)
+    try {
+      // On PUT le résolu COURANT tel quel : la personnalisation matérialise ce
+      // que l'admin voit déjà, elle ne change rien visuellement. Conséquence
+      // voulue sur le dirty tracker — `normalizeShellFragment` strippe
+      // `data-part-kind`, donc les ancres de coque restent valides et
+      // « Enregistrer » ne doit PAS s'activer après ce clic.
+      await upsertShellPart.mutateAsync({
+        ownerKind,
+        ownerId,
+        partKind,
+        contentMjml: tagSectionWithPartKind(
+          editorContext[partKind].contentMjml,
+          partKind,
+        ),
+      })
+      // Instance `skipInvalidate: true` partagée avec l'orchestrateur de save :
+      // le refetch est explicite, unique, et séquencé après le PUT — même
+      // discipline que `handleResetConfirmed`, pas de course d'invalidation.
+      const refreshed = await refetchEditorContext()
+      const freshContext = refreshed?.data ?? editorContext
+      const wrapper = editorRef.current
+      let canvasRefreshed = false
+      if (wrapper && brandSettings && !refreshed.error) {
+        // Pattern du live-preview de la marque : extraire le corps courant puis
+        // re-wrapper — les éditions en cours du corps sont PRÉSERVÉES (le reset,
+        // lui, re-pousse `defaultBodyMjml` et les écrase). `setMjmlSilently`
+        // rejoue `applyShellLocks` : c'est ce rejeu qui rend le bloc éditable,
+        // `origin` valant désormais `'event'`.
+        //
+        // `getMjml()` est DANS le try : à ce point le PUT a déjà réussi, donc tout
+        // échec en aval doit retomber sur le message honnête ci-dessous, jamais
+        // sur « Erreur lors de la création de la surcharge » — qui ferait croire à
+        // un échec alors que la surcharge existe en base.
+        try {
+          const fullMjml = wrapper.getMjml()
+          if (isBodyMarkerIntact(fullMjml)) {
+            const currentBody = extractBodyFragment(fullMjml)
+            const brand = brandTokensFromSettings(
+              previewOverrides ? { ...brandSettings, ...previewOverrides } : brandSettings,
+            )
+            const canvasShell = toCanvasShell(freshContext)
+            wrapper.setMjmlSilently(
+              wrapBodyForEditing(currentBody, brand, canvasShell, { ownerKind, isSystem }),
+            )
+            canvasRefreshed = true
+          }
+        } catch (err) {
+          if (import.meta.env.DEV) {
+            console.warn('[MjmlEditorOverlay] customize re-push failed:', err)
+          }
+        }
+      }
+      // Review R-P6 — l'admin peut fermer l'overlay pendant l'attente réseau ;
+      // les états et les toasts ne concernent plus personne. Même discipline que
+      // `handleSave`, qui garde tous ses setState post-await.
+      if (!mountedRef.current) return
+      setSelectedLockedPart(null)
+      // Accusé de réception émis EN DERNIER, une fois le canvas effectivement
+      // re-poussé — même raison que `handleResetConfirmed` : émis plus haut, un
+      // échec du re-push ferait cohabiter succès et erreur sur un seul clic.
+      if (canvasRefreshed) {
+        toast.success("Bloc personnalisé à ce niveau — vous pouvez désormais l'éditer.")
+      } else {
+        // La surcharge EXISTE en base ; seul l'affichage n'a pas suivi. Message
+        // honnête plutôt qu'un succès muet sur un bloc resté verrouillé.
+        toast.error(
+          "Bloc personnalisé, mais l'éditeur n'a pas pu être actualisé. Rouvrez-le pour modifier ce bloc.",
+        )
+      }
+    } catch (err) {
+      if (mountedRef.current) {
+        toast.error(
+          userFacingErrorMessage(
+            err,
+            "La personnalisation de ce bloc a échoué. Le bloc n'a pas été modifié, réessayez.",
+          ),
+        )
+      }
+    } finally {
+      if (mountedRef.current) setCustomizing(false)
+    }
+  }, [
+    brandSettings,
+    editorContext,
+    isSystem,
+    ownerId,
+    ownerKind,
+    previewOverrides,
+    refetchEditorContext,
+    selectedLockedPart,
+    upsertShellPart,
+  ])
+
+  // Le titre affiché dans la barre d'outils. Au niveau événement c'est le NOM
+  // DE L'ÉVÉNEMENT — du texte libre borné à 200 caractères par le formulaire,
+  // donc une largeur que la barre ne peut pas prévoir.
+  const headerTitle = title ?? "Éditeur d'email"
+
+  // Le badge de verrou annonce-t-il un bloc HÉRITÉ ? Même prédicat que le
+  // verrou du canvas et que la garde de montage du panneau d'héritage : sans
+  // lui, le badge annonçait « modifiable » sur un bloc hérité, à l'écran EN MÊME
+  // TEMPS que le panneau qui dit l'inverse.
+  //
+  // Remonté ici, au-dessus des retours anticipés, parce que la barre en a besoin
+  // pour deux choses : le rendre, et savoir que son contenu a changé — les deux
+  // variantes du badge ne font pas la même largeur.
+  const badgeInherited =
+    !!selectedLockedPart &&
+    !!editorContext &&
+    isShellBlockInherited(editorContext[selectedLockedPart].origin, {
+      ownerKind,
+      isSystem,
+    })
+
+  // Palier de la barre d'outils : le plus lisible qui TIENT, mesuré à chaque
+  // changement de largeur ou de contenu. Aucun seuil en pixels — voir
+  // `useToolbarTier`.
+  //
+  // La signature liste tout ce qui change le contenu de la barre SANS changer sa
+  // largeur : l'observateur de taille est aveugle à ces changements-là, et une
+  // mesure qui ne les reprend pas devient fausse au premier clic dans le canvas.
+  const toolbarRef = useToolbarTier(
+    [
+      headerTitle,
+      templateSwitcher?.value ?? '',
+      selectedLockedPart ?? '',
+      badgeInherited ? 'hérité' : 'modifiable',
+      onReset ? 'reset' : '',
+      saving ? 'enregistrement' : '',
+      // 🔴 `subjectDirty` compte ici : une modification d'objet SEULE allume la
+      // pastille du bouton Enregistrer, et l'observateur de taille ne voit pas
+      // les changements de contenu. L'oublier fige la barre sur un palier
+      // calculé pour une barre sans pastille.
+      isDirty || identityDirty || subjectDirty ? 'pastille' : '',
+    ].join('|'),
+  )
 
   if (brandError) {
     return (
@@ -1029,6 +1299,14 @@ export default function MjmlEditorOverlayInner({
     )
   }
 
+  // Icône du modèle actuellement sélectionné, rendue à part dans le déclencheur
+  // du sélecteur au palier icônes — voir le commentaire à son point d'usage.
+  // `SelectValue` ne rend le contenu de l'option choisie qu'en bloc : impossible
+  // d'en garder l'icône tout en masquant le texte sans la ressortir ici.
+  const CurrentTemplateIcon = templateSwitcher?.options.find(
+    (option) => option.value === templateSwitcher.value,
+  )?.icon
+
   return (
     <div
       className="flex flex-col h-full"
@@ -1040,12 +1318,137 @@ export default function MjmlEditorOverlayInner({
           actions en `size="sm"`/`icon-sm`, `X` de fermeture à l'extrême droite,
           micro-copie (titre, libellé de verrou) en primitives texte = écarts
           DÉLIBÉRÉS, pas des régressions. Ne pas « normaliser » en h-9 / <Typography>
-          sans revoir la densité de l'éditeur. */}
-      <header
-        className="flex items-center gap-3 border-b bg-zinc-50 px-4 py-2"
+          sans revoir la densité de l'éditeur.
+
+          AMENDEMENT 2026-08-01 — comportement responsive. La dérogation portait
+          sur la DENSITÉ ; elle porte désormais aussi sur la façon dont cette barre
+          se réduit, en deux étages qu'il ne faut pas confondre :
+          1. QUATRE PALIERS, choisis par DÉGRADATION AU DÉBORDEMENT : la barre
+             mesure ce dont elle a besoin et retient le palier le plus lisible qui
+             TIENT. ENTIER : tout en toutes lettres. COURT : les libellés
+             raccourcissent, le badge de verrou aussi. RESSERRÉ : le sélecteur de
+             modèle perd sa valeur, son cadre et son chevron, les libellés restent.
+             ICÔNES : icônes seules — TOUS les boutons, sans exception — et le
+             titre resserre son plafond de mesure. Aucun seuil en pixels : un seuil
+             unique ne peut pas servir six configurations dont le besoin va de 445
+             à 1 266 px, et c'est exactement ce qui faisait disparaître des
+             libellés avec 600 px de vide.
+          2. `flex-wrap` EN PLANCHER, sous le palier icônes. C'est un filet de
+             sécurité, PAS la réponse au manque de place : quand il joue, la barre
+             a déjà cédé tout ce qu'elle pouvait céder. Il ne doit plus JAMAIS
+             être atteint en usage — mesuré au pixel le 2026-08-01 : la barre la
+             plus chargée tient sur une ligne jusqu'à 380 px, la plus légère
+             jusqu'à 300. Ne pas le lire
+             comme le comportement responsive de cette barre, ni le retirer. */}
+      {/* LE PALIER EST MESURÉ, PAS SEUILLÉ. `useToolbarTier` essaie les quatre
+          tenues du plus lisible au moins lisible, garde la première qui tient, et
+          écrit le résultat en `data-toolbar-tier` — que les descendants lisent
+          via `group-data-[toolbar-tier=…]/toolbar:`.
+
+          CE QUI EST ÉTABLI SUR L'ABSENCE DE CLIGNOTEMENT, et ce qui ne l'est pas.
+          Les rappels de `ResizeObserver` s'exécutent après la mise en page et
+          AVANT la peinture, et la décision de premier montage est dans un
+          `useLayoutEffect` : la tenue périmée n'est donc pas censée être peinte,
+          et la passe de mesure ne l'est jamais (vérifié sur 641 trames
+          échantillonnées). En revanche, un échantillonnage par
+          `requestAnimationFrame` VOIT, à chaque franchissement de frontière, une
+          trame dont la mise en page porte encore l'ancienne tenue : la barre y est
+          à deux lignes et le canvas 44 px plus bas. Que cette mise en page soit
+          peinte ou remplacée par la re-disposition qui suit le rappel n'a pas été
+          mesuré — ne pas réécrire « aucun état intermédiaire n'est peint » comme
+          un fait constaté. Le supprimer demanderait que la décision tienne dans la
+          MÊME passe de mise en page, ce qu'aucun mécanisme CSS ne permet
+          aujourd'hui : une requête de conteneur ne sait pas se comparer à une
+          largeur mesurée publiée en propriété personnalisée.
+
+          POURQUOI PLUS AUCUNE REQUÊTE DE CONTENEUR ICI. Elles marchaient, mais
+          elles se déclenchent sur un nombre de pixels FIXE, et ce nombre était
+          calé sur la barre la plus chargée du produit. Les cinq autres
+          configurations subissaient le même seuil : la barre « Invitation »
+          pouvait garder ses libellés entiers jusqu'à 850 px, elle les perdait à
+          1 272 — 422 px trop tôt. Ce n'était pas un réglage à affiner. Ne pas
+          réintroduire de variante `@[…]/toolbar:` sur cette barre : deux
+          conventions côte à côte sont la dette qu'on vient de payer deux fois.
+
+          CE QUI DÉCLENCHE UN RECALCUL : la largeur de la barre
+          (`ResizeObserver`), et la signature de contenu passée au hook — titre,
+          valeur du sélecteur, apparition et variante du badge, présence du bouton
+          de réinitialisation, pastille d'état modifié, libellé de sauvegarde en
+          cours. Changer de palier ne change pas la largeur de la barre (elle
+          occupe toute la fenêtre) : l'observateur ne peut donc pas se réveiller
+          lui-même. */}
+      {/* `<div>` et non `<header>` : un `<header>` hors de
+          `article/aside/main/nav/section` prend le rôle `banner` — un repère de
+          niveau PAGE, censé être unique et global — alors que ceci est une barre
+          d'outils dans une fenêtre modale. Relevé dans l'arbre d'accessibilité de
+          Chrome (`dialog > banner`) le 2026-08-01. Ne pas y mettre
+          `role="toolbar"` en échange : ce rôle engage le motif composite ARIA
+          (navigation aux flèches, `tabindex` roulant) qui n'est pas implémenté
+          ici — le poser sans le code serait une promesse fausse. */}
+      <div
+        ref={toolbarRef}
+        className="group/toolbar flex flex-wrap items-center gap-3 data-[toolbar-tier=icones]:gap-2 border-b bg-zinc-50 px-4 py-2"
         data-testid="mjml-editor-toolbar"
       >
-        <p className="text-base font-semibold">{title ?? "Éditeur d&apos;email"}</p>
+        {/* Le titre est le SEUL élément de cette barre qui cède, et il cède en
+            permanence : c'est le seul dont la perte partielle reste
+            compréhensible (on vient de choisir cet événement pour arriver ici),
+            et le seul geste qui protège d'un nom à 200 caractères — contre
+            lequel aucun seuil de largeur ne peut rien.
+
+            LES TROIS CLASSES SONT SOLIDAIRES, mesuré le 2026-08-01 :
+            — le PLAFOND DE LARGEUR est celui qui agit. Sous `flex-wrap`, le
+              retour à la ligne est décidé AVANT la répartition des largeurs
+              flexibles, sur la taille hypothétique de chaque item — laquelle vaut
+              sa largeur de contenu. Un titre long ouvre donc une ligne à lui seul
+              et s'y étale : `min-w-0` + troncature seuls ne changent RIEN au
+              seuil de rupture (mesuré : 0 px de gain). Seul un plafond borne la
+              taille hypothétique, donc le besoin de la barre.
+            — `min-w-0` est nécessaire au plafond : en `white-space: nowrap`, la
+              largeur min-content d'un texte vaut la chaîne entière, et un
+              `min-width` l'emporte sur un `max-width` — sans lui le plafond est
+              inopérant.
+            — `truncate` rend la perte lisible par une ellipse.
+
+            LE PLAFOND N'EST PLUS UNE CONSTANTE, ET C'EST UN CORRECTIF. Il vaut
+            256 px (160 au palier icônes) PENDANT LA MESURE, où il borne la taille
+            hypothétique ; en rendu il vaut ce plafond PLUS tout le mou que le
+            palier retenu laisse dans la barre. `useToolbarTier` l'écrit dans
+            `--tp-toolbar-title-max`, seul écrivain de cette propriété.
+
+            Pourquoi : relevé à l'écran le 2026-08-01, un nom d'événement était
+            amputé de 144 px pendant que 463 px restaient VIDES sur la même ligne.
+            Un plafond permanent coupe du texte alors qu'il reste la place — le
+            défaut d'origine de ce chantier, en miniature, sur la seule exception
+            que le plan lui avait accordée. Le repli `16rem` de la déclaration
+            couvre le rendu d'avant la première mesure ; il n'est jamais peint.
+
+            La troncature ne survient donc plus que lorsque la place manque
+            réellement, et elle recule continûment à mesure que la fenêtre
+            s'élargit.
+
+            `aria-hidden` sur un texte VISIBLE, ce qui demande une raison : ce
+            titre est le troisième porteur de la même chaîne. Le `DialogTitle` en
+            `sr-only` de l'enveloppe la donne déjà comme nom du dialogue ET comme
+            titre de niveau 2 ; mesuré dans l'arbre de Chrome le 2026-08-01, un nom
+            d'événement de 200 caractères était annoncé trois fois d'affilée, soit
+            ~600 caractères avant le premier contrôle. Rien n'est perdu pour une
+            aide technique — la chaîne reste exposée deux fois en amont.
+
+            Le `title` est une infobulle de SOURIS, et rien d'autre : le `<p>`
+            n'est pas focalisable, donc aucune restitution au clavier, et il n'y a
+            pas de survol au doigt. Vérifié le 2026-08-01 avec une chaîne sonde :
+            ce `title` n'apparaît nulle part dans l'arbre d'accessibilité. Ne pas
+            écrire qu'il « restitue » le nom complet — il le restitue à la souris.
+            Ce qui restitue vraiment le nom entier, c'est le `textContent`, que la
+            troncature ne touche pas (elle est purement visuelle). */}
+        <p
+          className="min-w-0 max-w-[var(--tp-toolbar-title-max,16rem)] truncate text-base font-semibold"
+          title={headerTitle}
+          aria-hidden="true"
+        >
+          {headerTitle}
+        </p>
         <EmailIdentityMenu
           ownerKind={ownerKind}
           onPreviewChange={setPreviewOverrides}
@@ -1057,19 +1460,77 @@ export default function MjmlEditorOverlayInner({
           templateKey={templateKey}
           ownerKind={ownerKind}
           ownerId={ownerId}
-          disabled={isDirty || identityDirty || saving || resetting}
+          disabled={isDirty || identityDirty || subjectDirty || saving || resetting}
         />
         {templateSwitcher && (
           <Select
             value={templateSwitcher.value}
             onValueChange={(v) => templateSwitcher.onRequestSwitch(v)}
           >
+            {/* `aria-label` OBLIGATOIRE, ce n'est pas du confort : pour le rôle
+                `combobox`, le nom accessible ne se calcule PAS depuis le contenu
+                — le libellé affiché devient la VALEUR. Sans lui, l'arbre de
+                Chrome expose `combobox value="Invitation"` sans nom du tout, et
+                un lecteur d'écran annonce « Invitation, zone de liste » sans
+                jamais dire de quoi il s'agit (WCAG 4.1.2, niveau A ; relevé par
+                axe le 2026-08-01 sur les 8 surfaces qui portent ce sélecteur).
+                Aucun risque côté « Label in Name » : ce déclencheur n'a pas de
+                libellé visible propre, seulement une valeur. */}
             <SelectTrigger
               size="sm"
-              className="w-auto min-w-[10rem]"
+              className="w-auto group-data-[toolbar-tier=resserre]/toolbar:w-8 group-data-[toolbar-tier=resserre]/toolbar:justify-center group-data-[toolbar-tier=resserre]/toolbar:border-0 group-data-[toolbar-tier=resserre]/toolbar:bg-transparent group-data-[toolbar-tier=resserre]/toolbar:px-0 group-data-[toolbar-tier=resserre]/toolbar:text-foreground group-data-[toolbar-tier=resserre]/toolbar:shadow-none group-data-[toolbar-tier=resserre]/toolbar:[&>svg:last-child]:hidden group-data-[toolbar-tier=icones]/toolbar:w-8 group-data-[toolbar-tier=icones]/toolbar:justify-center group-data-[toolbar-tier=icones]/toolbar:border-0 group-data-[toolbar-tier=icones]/toolbar:bg-transparent group-data-[toolbar-tier=icones]/toolbar:px-0 group-data-[toolbar-tier=icones]/toolbar:text-foreground group-data-[toolbar-tier=icones]/toolbar:shadow-none group-data-[toolbar-tier=icones]/toolbar:[&>svg:last-child]:hidden"
+              aria-label="Modèle d'e-mail"
               data-testid="mjml-editor-template-switcher"
             >
-              <SelectValue placeholder="Modèle" />
+              {/* PALIERS RESSERRÉ ET ICÔNES — la valeur passe en `sr-only`, le
+                  cadre et le chevron disparaissent, il ne reste que l'icône du
+                  modèle courant : 204,5 → 32 px, le plus gros gain unitaire de la
+                  barre après le groupe d'actions. C'est CE gain qui justifie le
+                  palier `resserre` : il coupe en deux la marche vers les icônes,
+                  qui abandonnait 434 px d'un coup sur la barre système.
+
+                  Le geste n'est pas une économie opportuniste : sur cette barre,
+                  la valeur du sélecteur est LE MÊME TEXTE que le titre affiché à
+                  trois éléments de là (`editingSubtabLabel` alimente les deux).
+                  Ce qui quitte le sélecteur reste donc lisible à l'écran. Et rien
+                  n'est perdu pour une aide technique : `sr-only` garde la valeur
+                  dans l'arbre d'accessibilité, là où `display: none` l'en
+                  sortirait.
+
+                  L'ICÔNE N'EST PAS DÉCORATIVE ICI, elle est ce qui empêche le
+                  contrôle de devenir une boîte vide. Premier jet sans elle, jugé
+                  sur la capture le 2026-08-01 : un cadre bordé ne contenant qu'un
+                  chevron se lit comme un bouton cassé.
+
+                  LE CADRE ET LE CHEVRON PARTENT AVEC LA VALEUR, décision de la
+                  relecture d'écran : gardés, ils faisaient du sélecteur le seul
+                  élément à surface et à bordure au milieu de carrés transparents
+                  — deux fois la largeur de ses voisins pour le contenu le plus
+                  dégradé. Le chevron y était en outre à 1,98:1 sur fond blanc
+                  (`opacity-50` de la primitive), sous le seuil de 3:1 de
+                  WCAG 1.4.11, à côté de voisins à 19:1 : le contrôle se lisait
+                  comme DÉSACTIVÉ. `text-foreground` remplace le
+                  `text-muted-foreground` de la primitive pour la même raison. Le
+                  rôle `combobox` reste exposé par le balisage, il n'a pas besoin
+                  du chevron pour être annoncé.
+
+                  Pas de `title` en échange. Le nom de ce combobox vient de son
+                  `aria-label` ; une infobulle portant la valeur retomberait en
+                  description accessible et ferait annoncer deux fois la même
+                  chaîne — le défaut corrigé sur « Fermer » le 2026-08-01.
+
+                  PLUS DE `min-w-[10rem]` : ce plancher laissait 25,8 px vides
+                  entre la valeur et le chevron sur la barre Invitation, soit un
+                  champ visiblement à moitié rempli. */}
+              {CurrentTemplateIcon && (
+                <CurrentTemplateIcon
+                  className="hidden h-4 w-4 shrink-0 group-data-[toolbar-tier=resserre]/toolbar:block group-data-[toolbar-tier=icones]/toolbar:block"
+                  aria-hidden="true"
+                />
+              )}
+              <span className="group-data-[toolbar-tier=resserre]/toolbar:sr-only group-data-[toolbar-tier=icones]/toolbar:sr-only">
+                <SelectValue placeholder="Modèle" />
+              </span>
             </SelectTrigger>
             <SelectContent>
               {templateSwitcher.options.map((option) => (
@@ -1086,26 +1547,119 @@ export default function MjmlEditorOverlayInner({
           </Select>
         )}
 
+        {/* RÉGION LIVE MONTÉE EN PERMANENCE, et vide hors sélection.
+
+            `role="status"` sert ici parce que le badge apparaît en réaction à une
+            sélection faite à l'AUTRE bout de l'écran, dans le canvas : sans région
+            live, son apparition est entièrement silencieuse pour une aide
+            technique — le signal issu de l'incident du 2026-07-30 n'existait alors
+            que pour les personnes voyantes (WCAG 4.1.3 Status Messages, niveau AA).
+            `status` annonce sans déplacer le focus : la sélection reste dans le
+            canvas.
+
+            MAIS une région live insérée EN MÊME TEMPS que son contenu n'est pas
+            annoncée par beaucoup de lecteurs d'écran — mécanisme documenté de
+            longue date, et c'est ce que faisait la version précédente : le
+            conteneur ET son texte arrivaient dans la même validation React. La
+            région est donc montée en permanence et c'est son CONTENU qui varie.
+
+            Elle porte aussi le signal là où le badge visuel n'existe pas : celui-ci
+            est en `hidden md:flex`, donc absent sous 768 px de fenêtre, où
+            sélectionner un bloc verrouillé ne produisait plus rien du tout sur les
+            barres de modèle (le panneau d'héritage, lui, ne se rend qu'au niveau
+            événement). Le signal VISUEL sous 768 px reste une décision produit
+            ouverte ; le signal pour aide technique, lui, ne coûte rien et est rendu.
+
+            `sr-only` la met en `position: absolute` : elle n'est donc PAS un item
+            flex, ne contribue ni à la largeur de la barre ni à ses gouttières, et
+            n'entre pas dans la mesure des paliers. */}
+        <div
+          className="sr-only"
+          role="status"
+          data-testid="mjml-editor-structural-badge-live"
+        >
+          {selectedLockedPart
+            ? `${selectedLockedPart === 'header' ? 'En-tête' : 'Pied'} — ${
+                structuralBadgeWording(badgeInherited).long
+              }`
+            : ''}
+        </div>
+
         {selectedLockedPart && (
-          // Story 26-2 fix realigning to the email-shell customization policy — the
-          // structural badge appears "au-dessus du bloc sélectionné". We
-          // render it inside the editor header toolbar rather than
-          // absolutely-positioned over the canvas iframe: the canvas
-          // iframe has its own GrapesJS toolbar that
-          // overlaps absolute children at the top, causing the badge to
-          // disappear behind it. The toolbar position is fully visible,
-          // fixed, and unambiguously tied to the current selection state.
+          // Badge rendu dans la BARRE D'OUTILS, alors que la politique de
+          // personnalisation de la coque email le veut « au-dessus de chaque bloc
+          // quand il est sélectionné ». Écart assumé et acté dans cette policy
+          // (amendement 2026-07-31) : emplacement stable, jamais masqué, lié sans
+          // ambiguïté à l'état de sélection courant.
+          //
+          // ⚠️ La justification qui figurait ici — « le chrome GrapesJS recouvre
+          // les enfants absolus en haut du canvas » — est PÉRIMÉE : le panneau
+          // d'héritage ci-dessous prouve depuis le 2026-07-30 qu'un `z-index`
+          // suffit à régler cet empilement. Ce qui reste vrai est plus étroit :
+          // au-dessus du bloc, ce badge entrerait en concurrence avec l'étiquette
+          // de nom de composant de GrapesJS, qui vit dans le document HÔTE (donc
+          // hors d'atteinte de tout z-index posé depuis l'iframe) et se rabat à
+          // l'INTÉRIEUR du bloc le plus haut du canvas — collision systématique
+          // sur l'en-tête, déjà payée une fois par la pastille de structure et son
+          // `top: 24px`.
+          //
+          // `aria-hidden` : la région live ci-dessus porte déjà cette phrase. Sans
+          // lui, elle serait exposée deux fois à l'arbre d'accessibilité.
           <div
             className="hidden md:flex items-center"
+            aria-hidden="true"
             data-testid="mjml-editor-structural-badge-overlay"
           >
             <StructuralBadge
               label={selectedLockedPart === 'header' ? 'En-tête' : 'Pied'}
+              // Prédicat calculé plus haut, parce que la barre en a aussi besoin
+              // pour sa signature de contenu : les deux variantes du badge ne
+              // font pas la même largeur.
+              inherited={badgeInherited}
             />
           </div>
         )}
 
-        <div className="ml-auto flex items-center gap-2">
+        {/* MOTIF DU BLOCAGE DE « ENREGISTRER » — règle R11 du système de design.
+
+            R11 exige que le motif d'une action bloquée PRÉCÈDE le bouton dans
+            l'ordre du DOM. La ligne Objet, elle, est SOUS la barre : elle ne
+            peut donc pas porter la cible d'`aria-describedby`. Ce `<p>` la
+            porte, ici, avant le groupe d'actions.
+
+            IL EST `sr-only`, ET C'EST UN CHOIX MESURÉ, pas une économie.
+            `useToolbarTier` mesure la barre en `width: max-content` puis lit sa
+            largeur intrinsèque : TOUT descendant EN FLUX y contribue. Un motif
+            visible, même borné en largeur, ferait donc changer la barre de
+            palier au moment précis où l'administrateur lit une erreur — le
+            borner rend sa contribution constante QUAND IL EST LÀ, pas entre
+            présent et absent. `sr-only` le met en `position: absolute` : il
+            sort du flux, ne devient pas un item flex, ne crée pas de gouttière,
+            et sa contribution est nulle dans les deux états. Même argument que
+            la région live du badge de structure, quelques lignes plus haut.
+
+            LE SIGNAL VISUEL N'EST PAS PERDU pour autant, il est juste ailleurs
+            — et plus près de la faute : la ligne Objet remplace son aperçu par
+            ce même motif et passe son crayon en icône d'alerte. Le bouton, lui,
+            porte la phrase en infobulle de souris.
+
+            ÉCART AU PLAN (2026-08-01) : le plan demandait un `<p>` VISIBLE dans
+            la barre, borné en largeur. Sa propre exigence — « contribution
+            constante, présent ou absent » — est inatteignable ainsi. */}
+        {subjectBlockReason && (
+          <p id="mjml-editor-subject-block-reason" className="sr-only">
+            {subjectBlockReason}
+          </p>
+        )}
+
+        {/* `gap-1` au palier icônes : à ce palier la gouttière de premier niveau
+            tombe elle aussi à 8 px, et le groupe d'actions cessait d'être un
+            groupe — cinq glyphes en file homogène, la seule chose qui distinguait
+            encore les actions étant le vide laissé par le `ml-auto`. Resserrer le
+            groupe rétablit la lecture sans rien coûter en largeur. Les cibles
+            restent séparées : 32 px de côté, 4 px entre elles, aucun
+            chevauchement. */}
+        <div className="ml-auto flex items-center gap-2 group-data-[toolbar-tier=icones]/toolbar:gap-1">
           {/* Gate capability : le reset n'apparaît que là où onReset est câblé. handleResetConfirmed hot-patch le canvas via wrapBodyForEditing(defaultBodyMjml, ..., { ownerKind, isSystem }) — tout futur appelant câblant onReset hors événement doit garantir des defaultBodyMjml/ownerKind cohérents. */}
           {onReset && (
             <Button
@@ -1114,44 +1668,220 @@ export default function MjmlEditorOverlayInner({
               size="sm"
               onClick={() => setShowResetConfirm(true)}
               disabled={saving || resetting || !isCustom}
+              // Le libellé RACCOURCIT puis se masque, il n'est jamais renommé : la
+              // politique de personnalisation de la coque email légifère
+              // l'unicité du reset et son périmètre, pas sa formulation. Trois
+              // garde-fous — la boîte de confirmation garde la phrase complète,
+              // donc rien de destructif n'arrive sans elle ; le libellé court
+              // est seulement masqué visuellement, pas retiré, donc le nom
+              // accessible du bouton ne devient jamais vide. Ce `title` restitue
+              // la phrase complète sous le palier entier ; il ne remplace PAS un
+              // `aria-label`, qui casserait « Label in Name » (WCAG 2.5.3) en
+              // annonçant un nom que le libellé visible court ne contient pas.
+              title="Revenir au modèle par défaut"
+              className="group-data-[toolbar-tier=icones]/toolbar:w-8 group-data-[toolbar-tier=icones]/toolbar:px-0"
               data-testid="mjml-editor-reset-btn"
             >
-              <RotateCcw className="h-4 w-4 mr-1" aria-hidden="true" />
-              Revenir au modèle par défaut
+              <RotateCcw
+                className="mr-1 h-4 w-4 group-data-[toolbar-tier=icones]/toolbar:mr-0"
+                aria-hidden="true"
+              />
+              {/* L'INTERDICTION DE L'ICÔNE SEULE SUR CE BOUTON EST LEVÉE
+                  (décision du 2026-08-01). Elle reposait sur la lecture « annuler
+                  ma dernière action » de la flèche circulaire, devant une action
+                  qui efface TOUTE la personnalisation de l'événement. Deux faits
+                  la désamorcent : ce bouton n'agit pas au clic — il ouvre une
+                  confirmation qui porte la phrase entière — et le palier où il
+                  perd son mot n'apparaît que dans une fenêtre que l'utilisateur a
+                  lui-même réduite.
+
+                  ⚠️ CORRECTION D'UNE AFFIRMATION FAUSSE qui figurait ici : « son
+                  nom accessible reste “Réinitialiser” aux trois paliers ». Non.
+                  Le nom vient du CONTENU et suit donc le libellé VISIBLE : Chrome
+                  expose « Revenir au modèle par défaut » au palier entier, et
+                  « Réinitialiser » aux trois autres (relevé dans l'arbre
+                  d'accessibilité le 2026-08-01). C'est le comportement VOULU et
+                  non un défaut — « Label in Name » (WCAG 2.5.3) exige que le nom
+                  CONTIENNE le libellé visible, ce qui serait rompu par un
+                  `aria-label` figé sur la forme courte pendant que l'écran affiche
+                  la longue. Un nom invariant ne s'obtient donc qu'au prix d'une
+                  non-conformité : on garde le nom variable. */}
+              <span className="sr-only group-data-[toolbar-tier=court]/toolbar:not-sr-only group-data-[toolbar-tier=resserre]/toolbar:not-sr-only group-data-[toolbar-tier=entier]/toolbar:hidden">
+                Réinitialiser
+              </span>
+              <span className="hidden group-data-[toolbar-tier=entier]/toolbar:inline">
+                Revenir au modèle par défaut
+              </span>
             </Button>
           )}
 
+          {/* « ENREGISTRER » CÈDE COMME LES AUTRES au palier icônes, et cette
+              décision en ANNULE une précédente (« garde son mot à tous les
+              paliers », 2026-08-01, matinée). Les deux motifs invoqués alors ne
+              tiennent pas à l'épreuve de l'écran : la pastille d'état modifié se
+              pose aussi bien sur une icône (elle passe dans l'angle du bouton,
+              voir la feuille de l'éditeur), et l'état « Enregistrement… » a déjà
+              son sablier animé. Ce qui ne tient pas du tout, en revanche, c'est un
+              bouton en toutes lettres au milieu de quatre icônes.
+
+              EFFET DE BORD BIENVENU : le grossissement transitoire de
+              « Enregistrer » vers « Enregistrement… » (+41 px) n'existe plus au
+              palier icônes, donc il ne peut plus faire changer de palier en cours
+              de sauvegarde.
+
+              `relative` sert à la pastille d'angle, pas au bouton. */}
+          {/* DEUX CAUSES D'INACTIVITÉ, DEUX TRAITEMENTS — dérogation R11
+              « Repos, pas blocage » : c'est la cause ACTIVE qui se motive,
+              jamais l'expression entière.
+
+              — REPOS et indisponibilité opérationnelle (rien à enregistrer,
+                enregistrement ou réinitialisation en cours) → vrai `disabled`,
+                aucun motif dû. La primitive pose `disabled:pointer-events-none`,
+                donc ce bouton-là ne reçoit ni survol ni infobulle : c'est
+                cohérent, il n'a rien à expliquer.
+              — INVALIDITÉ DE CONTENU (l'objet ne peut pas partir) →
+                `aria-disabled` + `aria-describedby`, bouton toujours
+                FOCALISABLE, et `handleSave` s'arrête en tête. Une aide
+                technique atteint donc le bouton et entend pourquoi il n'agit
+                pas ; la souris a l'infobulle.
+
+              Cohérence des deux : quand un motif existe, `subjectDirty` est
+              vrai, donc `disabled` est faux, donc le bouton est bien focalisable
+              et `aria-disabled` fait son office. */}
           <Button
             type="button"
             size="sm"
             onClick={handleSave}
-            disabled={(!isDirty && !identityDirty) || saving || resetting}
-            className="save-button"
-            data-dirty={isDirty || identityDirty}
+            disabled={(!isDirty && !identityDirty && !subjectDirty) || saving || resetting}
+            aria-disabled={subjectBlockReason !== null}
+            aria-describedby={subjectBlockReason ? 'mjml-editor-subject-block-reason' : undefined}
+            title={subjectBlockReason ?? undefined}
+            className="save-button relative group-data-[toolbar-tier=icones]/toolbar:w-8 group-data-[toolbar-tier=icones]/toolbar:px-0"
+            data-dirty={isDirty || identityDirty || subjectDirty}
             data-testid="mjml-editor-save-btn"
           >
             {saving ? (
-              <Loader2 className="h-4 w-4 mr-1 animate-spin" aria-hidden="true" />
+              <Loader2
+                className="mr-1 h-4 w-4 animate-spin group-data-[toolbar-tier=icones]/toolbar:mr-0"
+                aria-hidden="true"
+              />
             ) : (
-              <Save className="h-4 w-4 mr-1" aria-hidden="true" />
+              <Save
+                className="mr-1 h-4 w-4 group-data-[toolbar-tier=icones]/toolbar:mr-0"
+                aria-hidden="true"
+              />
             )}
-            {saving ? 'Enregistrement…' : 'Enregistrer'}
+            <span className="group-data-[toolbar-tier=icones]/toolbar:sr-only">
+              {saving ? 'Enregistrement…' : 'Enregistrer'}
+            </span>
           </Button>
 
+          {/* « FERMER » RENTRE DANS LE RANG. Il passait en icône dès le palier
+              intermédiaire, seul de tous les boutons de la barre — une exception
+              qui se lisait comme un accident. Il garde désormais son mot au palier
+              court et ne cède qu'au palier icônes, avec les autres. Coût mesuré :
+              65,6 px au palier court, sans conséquence puisque c'est la mesure qui
+              décide.
+
+              `w-8 px-0` plutôt que `size="icon-sm"` : le `size` est une prop, pas
+              une classe, donc inconditionnel. Le résultat est le même carré
+              32 × 32 que `icon-sm` (`sm` donne déjà `h-8`) — un bouton icône-seule
+              doit être carré, un rectangle décale son centre optique.
+
+              Cible tactile CALCULÉE : 32 × 32 px, mesurés (icône centrée au pixel,
+              `gap-2` de 8 px avec le bouton voisin). Au-dessus du minimum WCAG
+              2.5.8 (24 px) avec 33 % de marge ; en dessous des 44 px de 2.5.5
+              (AAA). Ce qui écarte les 44 px, c'est la règle du système de design
+              pour l'administration — la cible tactile de 44 px y est explicitement
+              évacuée, l'admin étant pensée « desktop-first » — et RIEN D'AUTRE.
+              En particulier, pas le type de pointeur : la première version de ce
+              commentaire disait « sur une fenêtre de bureau réduite ou une
+              tablette, au pointeur fin », ce qui est faux et a été relevé le
+              2026-08-01. Le prédicat de capacité d'affichage de l'éditeur accepte
+              un iPad mini (744 × 1133) et un iPad 10,9" (820 × 1180) — ses propres
+              tests unitaires l'assèrent. À 744 px, la barre générale d'un modèle
+              système, la plus chargée, est déjà au palier ICÔNES (elle y passe
+              sous 844 px, mesuré) : ces cibles de 32 px apparaissent donc bel et
+              bien au pointeur grossier. Les barres plus légères, elles, y sont
+              encore au palier court — c'est le principe même de la dégradation au
+              débordement, et non une incohérence. Deux autres imprécisions
+              corrigées avec : ce
+              prédicat lit une taille d'écran en pixels CSS (sensible au zoom), pas
+              un écran « physique », et il a un repli ouvert — mesure absente ou
+              absurde, il renvoie vrai et ne refuse rien. Ne pas réécrire
+              « ne s'ouvre jamais ».
+
+              MOTIF UNIQUE DES BOUTONS ICÔNE SEULE. Le libellé reste dans le DOM
+              et n'est que MASQUÉ VISUELLEMENT (`sr-only` posé au seul palier
+              icônes) ; il n'y a PAS d'`aria-label`. Le
+              nom accessible vient donc du CONTENU à tous les paliers, et le
+              `title` ajoute une description DIFFÉRENTE — « Fermer l'éditeur »
+              contre « Fermer ». La version précédente combinait `aria-label` et
+              `<span class="hidden">` : le nom et la description valaient la même
+              chaîne, annoncée deux fois (« Fermer l'éditeur, bouton, Fermer
+              l'éditeur », relevé dans l'arbre de Chrome le 2026-08-01). C'est ce
+              motif que les trois autres boutons icône seule réutilisent, et il
+              tient « Label in Name » (WCAG 2.5.3) : le libellé visible « Fermer »
+              EST le nom accessible.
+
+              `sr-only` sort l'élément du flux (`position: absolute`) : il ne
+              contribue donc ni à la largeur du bouton ni à la gouttière `gap-2`
+              de la primitive. Mesuré le 2026-08-01, pas supposé — le bouton reste
+              à 32 × 32 au palier icônes et à 97,6 px au-dessus, inchangé.
+              Même valeur de boîte que le bouton de fermeture du panneau
+              d'héritage, dans ce même fichier. */}
           <Button
             type="button"
             variant="ghost"
             size="sm"
             onClick={onRequestCancel}
             disabled={saving || resetting}
+            className="group-data-[toolbar-tier=icones]/toolbar:w-8 group-data-[toolbar-tier=icones]/toolbar:px-0"
             data-testid="mjml-editor-cancel-btn"
-            aria-label="Fermer l'éditeur"
+            title="Fermer l'éditeur"
           >
-            <X className="h-4 w-4 mr-1" aria-hidden="true" />
-            Fermer
+            {/* `!size-5` au palier icônes, et le `!` est nécessaire : la primitive
+                `Button` impose `[&_svg]:size-4`, dont le sélecteur descendant
+                l'emporte sur une classe posée à plat sur l'icône. Mesuré au
+                2026-08-01 sur les pixels rendus : le tracé du X n'occupe que 60 %
+                de sa zone de dessin (34,6 px² d'encre contre 72 à 97 pour ses
+                voisins), donc au palier où les glyphes SONT la barre, la sortie
+                était l'affordance la plus légère. Le centre optique, lui, était
+                déjà juste : écart nul en x comme en y sur les quatre boutons. */}
+            <X
+              className="mr-1 h-4 w-4 group-data-[toolbar-tier=icones]/toolbar:mr-0 group-data-[toolbar-tier=icones]/toolbar:!size-5"
+              aria-hidden="true"
+            />
+            <span className="group-data-[toolbar-tier=icones]/toolbar:sr-only">
+              Fermer
+            </span>
           </Button>
         </div>
-      </header>
+      </div>
+
+      {/* LA LIGNE OBJET — entre la barre d'outils et le canevas, jamais dans
+          le canevas (tranché) ni dans la barre (elle y ferait basculer deux
+          configurations sur six dès 1280 px, mesuré).
+
+          Elle est un frère du conteneur de canevas, lequel est en
+          `flex-1 min-h-0` : la place qu'elle prend est retirée du canevas par
+          la mise en page, sans que rien n'ait à la calculer. Coût mesuré à
+          1280 × 720 : 671 → 642 px de conteneur, soit −4,3 %.
+
+          Sa hauteur est CONSTANTE par construction (cf. le composant) — c'est
+          ce qui met hors de portée la famille de bugs de désynchronisation des
+          poignées GrapesJS, déjà payée deux fois ici. */}
+      {subjectLine && (
+        <EmailSubjectLine
+          subject={subjectLine.subject}
+          fallbackSubject={subjectLine.fallbackSubject}
+          level={subjectLine.level}
+          subjectAdmin={subjectLine.subjectAdmin}
+          fallbackSubjectAdmin={subjectLine.fallbackSubjectAdmin}
+          variables={subjectLine.variables}
+          onStateChange={setSubjectState}
+        />
+      )}
 
       <div className="relative flex-1 min-h-0">
         <div
@@ -1185,8 +1915,32 @@ export default function MjmlEditorOverlayInner({
             ownerKind,
             isSystem,
           }) && (
+            // `z-20` OBLIGATOIRE, mesuré dans l'éditeur réel le 2026-07-30 :
+            // sans z-index, ce panneau est intégralement enterré et son bouton
+            // ne reçoit aucun clic souris. GrapesJS empile son conteneur de
+            // canvas (`.gjs-cv-canvas`, z-index 1) et son panneau latéral droit
+            // (`.gjs-pn-views-container`, z-index 3) dans le MÊME contexte
+            // d'empilement (`.gjs-editor` est en z-index auto) : un enfant
+            // absolu en z-auto passe donc DERRIÈRE les deux — l'iframe couvrait
+            // la moitié gauche du panneau, la barre latérale la moitié droite.
+            // Même famille de piège que le badge structurel, contourné à
+            // l'époque en le déplaçant dans la barre d'outils (cf. son
+            // commentaire) ; ici on empile au-dessus.
+            //
+            // La valeur 20 n'est pas « n'importe quoi > 3 » : le même contexte
+            // d'empilement contient aussi `.gjs-toolbar` et `.gjs-rte-toolbar`
+            // (10), `.gjs-dropzone` (11) et surtout `.gjs-mdl-container` (100).
+            // 20 passe au-dessus des quatre premiers et RESTE SOUS les modales —
+            // ce qui est voulu : une modale doit couvrir ce panneau.
+            //
+            // Le décalage droit borne le panneau à la ZONE CANVAS au lieu de la
+            // barre latérale : mesuré le 2026-07-30, l'ancrage `right-2`
+            // recouvrait 184 des 192 px de `.gjs-pn-views-container` et
+            // interceptait ses clics tant que le panneau restait ouvert.
+            // `--gjs-left-width` est déclarée par GrapesJS sur `:root` (défaut
+            // 15 %), donc héritée ici ; le repli couvre sa disparition.
             <div
-              className="absolute top-2 right-2 w-80 max-w-[40vw] rounded-md border bg-white shadow-lg"
+              className="absolute top-2 right-[calc(var(--gjs-left-width,15%)+0.5rem)] z-20 w-80 max-w-[40vw] rounded-md border bg-white shadow-lg"
               data-testid="mjml-editor-locked-panel-overlay"
             >
               <div className="flex items-center justify-between border-b px-3 py-1.5">
@@ -1196,7 +1950,11 @@ export default function MjmlEditorOverlayInner({
                 <Button
                   type="button"
                   variant="ghost"
-                  size="sm"
+                  // `icon-sm` et non `sm` : un bouton icône-seule doit être carré
+                  // (h-8 w-8) ; `sm` y ajoute `px-3` et produit un rectangle au
+                  // centre optique décalé, forme donnée en contre-exemple par le
+                  // système de design.
+                  size="icon-sm"
                   onClick={() => setSelectedLockedPart(null)}
                   aria-label="Fermer le panneau d'héritage"
                   data-testid="mjml-editor-locked-panel-close-btn"
@@ -1207,6 +1965,8 @@ export default function MjmlEditorOverlayInner({
               <LockedShellInfoPanel
                 origin={editorContext[selectedLockedPart].origin}
                 partKind={selectedLockedPart}
+                onCustomize={handleCustomizeLockedPart}
+                isCustomizing={customizing}
               />
             </div>
           )}
@@ -1218,7 +1978,9 @@ export default function MjmlEditorOverlayInner({
             <AlertDialogHeader>
               <AlertDialogTitle>Revenir au modèle par défaut&nbsp;?</AlertDialogTitle>
               <AlertDialogDescription>
-                L&apos;événement reviendra au modèle par défaut. Les éditions non sauvegardées du corps, de l&apos;en-tête et du pied seront perdues.
+                {/* Énumération CLOSE : elle ment dès qu'elle est incomplète.
+                    L'objet y entre avec le reste. */}
+                L&apos;événement reviendra au modèle par défaut. Les éditions non sauvegardées de l&apos;objet, du corps, de l&apos;en-tête et du pied seront perdues.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>

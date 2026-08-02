@@ -117,7 +117,17 @@ describe('UserModal', () => {
     })
 
     it('échec serveur : le message est affiché dans une bannière annoncée', async () => {
-      mockOnSave.mockRejectedValue({ response: { data: { error: 'Cet email est déjà utilisé' } } })
+      // Forme réelle de POST /admin/users en 409 : message plat + code frère.
+      // Seul un code de la liste blanche laisse remonter le message serveur ;
+      // c'est ce mécanisme que ce test verrouille.
+      mockOnSave.mockRejectedValue({
+        response: {
+          data: {
+            error: 'Un utilisateur avec cet email existe déjà',
+            code: 'EMAIL_ALREADY_EXISTS'
+          }
+        }
+      })
       render(
         <UserModal mode="create" onSave={mockOnSave} onClose={mockOnClose} currentUser={null} />
       )
@@ -129,7 +139,9 @@ describe('UserModal', () => {
       // role="alert" vient de <Banner> : sans lui, l'échec serveur resterait muet
       // pour un lecteur d'écran (l'ancien <div> n'en portait aucun).
       await waitFor(() =>
-        expect(screen.getByRole('alert')).toHaveTextContent('Cet email est déjà utilisé')
+        expect(screen.getByRole('alert')).toHaveTextContent(
+          'Un utilisateur avec cet email existe déjà'
+        )
       )
     })
 
@@ -213,8 +225,13 @@ describe('UserModal', () => {
       const user = userEvent.setup()
       const adminUser: User = { ...mockUser, role: 'admin' }
       const currentUser = { id: adminUser.id, email: adminUser.email, role: 'admin' as const, hasMemberAccess: false }
+      // Forme réelle de PUT /admin/users/:id en 409 : message plat + code frère
+      // `LAST_ADMIN`, qui EST sur la liste blanche — c'est précisément pour rendre
+      // ce refus lisible que le code a été ajouté côté serveur.
       mockOnSave.mockRejectedValueOnce({
-        response: { data: { error: 'Impossible de rétrograder le dernier administrateur' } }
+        response: {
+          data: { error: 'Impossible de rétrograder le dernier administrateur', code: 'LAST_ADMIN' }
+        }
       })
 
       render(
@@ -232,7 +249,8 @@ describe('UserModal', () => {
       fireEvent.click(screen.getByText('Enregistrer'))
       await user.click(await screen.findByText('Confirmer'))
 
-      // Le backend rejette : le bandeau d'erreur s'affiche
+      // Le refus du serveur est montrable : c'est lui qui dit POURQUOI, là où le
+      // repli générique de l'appelant ne le dirait pas.
       await waitFor(() => {
         expect(
           screen.getByText('Impossible de rétrograder le dernier administrateur')
@@ -251,7 +269,8 @@ describe('UserModal', () => {
       // soumission directe via handleSubmit -> performSubmission.
       const user = userEvent.setup()
       const otherUser: User = { ...mockUser, role: 'user' }
-      // Rejet réseau : pas de response.data.error => repli sur err.message.
+      // Rejet réseau sans code de transport identifiable : repli de l'appelant,
+      // jamais le texte technique d'axios (« Network Error »).
       mockOnSave.mockRejectedValueOnce(new Error('Network Error'))
 
       render(
@@ -268,10 +287,13 @@ describe('UserModal', () => {
       await user.click(screen.getByLabelText('Administrateur'))
       fireEvent.click(screen.getByText('Enregistrer'))
 
-      // Le bandeau d'erreur (repli sur err.message) s'affiche
+      // Le bandeau d'erreur (repli de l'appelant) s'affiche
       await waitFor(() => {
-        expect(screen.getByText('Network Error')).toBeInTheDocument()
+        expect(
+          screen.getByText("L'enregistrement a échoué. Vos modifications sont toujours à l'écran, réessayez.")
+        ).toBeInTheDocument()
       })
+      expect(screen.queryByText('Network Error')).not.toBeInTheDocument()
       // Aucun dialogue d'auto-rétrogradation sur ce chemin
       expect(screen.queryByText('Confirmation requise')).not.toBeInTheDocument()
       // Le radio revient sur Membre (rôle réellement persisté)

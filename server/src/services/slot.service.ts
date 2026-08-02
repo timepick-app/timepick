@@ -7,6 +7,7 @@ import { computeSlotDiff } from '../utils/slot-diff'
 import { formatSlotEmailDate, formatSlotEmailTime } from '../utils/slotEmailFormat'
 import { formatFullName } from '../utils/nameUtils'
 import { VOLUNTEERS_AGG_FRAGMENT } from '../utils/slotSql'
+import { ERROR_CODES } from '@timepick/shared'
 import type { Slot } from '@timepick/shared'
 
 // Slot : forme wire unifiée (source unique @timepick/shared). Historiquement
@@ -198,7 +199,7 @@ export const slotService = {
       [id]
     )
     if (result.rows.length === 0) {
-      throw new NotFoundError('Créneau non trouvé')
+      throw new NotFoundError('Créneau non trouvé', ERROR_CODES.SLOT_NOT_FOUND)
     }
     return result.rows[0] as Slot
   },
@@ -229,7 +230,7 @@ export const slotService = {
         'SELECT * FROM slots WHERE id = $1 FOR UPDATE',
         [id]
       )
-      if (lockRes.rows.length === 0) throw new NotFoundError('Créneau non trouvé')
+      if (lockRes.rows.length === 0) throw new NotFoundError('Créneau non trouvé', ERROR_CODES.SLOT_NOT_FOUND)
       const beforeRow = lockRes.rows[0]
       if (beforeRow.cancelled_at !== null) {
         throw new ConflictError('Ce créneau est annulé et ne peut plus être modifié.', 'SLOT_CANCELLED')
@@ -359,7 +360,7 @@ export const slotService = {
         if (exists.rows.length > 0) {
           throw new ConflictError('Ce créneau est déjà annulé.', 'SLOT_ALREADY_CANCELLED')
         }
-        throw new NotFoundError('Créneau non trouvé')
+        throw new NotFoundError('Créneau non trouvé', ERROR_CODES.SLOT_NOT_FOUND)
       }
 
       const users = await client.query<SlotCancellationRow>(

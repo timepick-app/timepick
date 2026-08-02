@@ -3,6 +3,7 @@ import { reservationService } from '../services/reservation.service'
 import { NotFoundError } from '../errors/NotFoundError'
 import { ConflictError } from '../errors/ConflictError'
 import { createReservationSchema } from '../validators/reservation.validator'
+import { ERROR_CODES } from '@timepick/shared'
 
 /**
  * Contrôleur pour les routes de réservations
@@ -34,7 +35,7 @@ export const createReservation = async (req: Request, res: Response): Promise<vo
   try {
     const userId = req.user?.userId
     if (!userId) {
-      res.status(401).json({ error: 'Authentification requise' })
+      res.status(401).json({ error: 'Authentification requise', code: ERROR_CODES.UNAUTHORIZED })
       return
     }
 
@@ -43,6 +44,7 @@ export const createReservation = async (req: Request, res: Response): Promise<vo
     if (!validationResult.success) {
       res.status(400).json({
         error: 'Données invalides',
+        code: ERROR_CODES.VALIDATION_ERROR,
         details: validationResult.error.issues.map(e => ({ field: e.path[0], message: e.message }))
       })
       return
@@ -59,7 +61,7 @@ export const createReservation = async (req: Request, res: Response): Promise<vo
     })
   } catch (error) {
     if (error instanceof NotFoundError) {
-      res.status(404).json({ error: error.message })
+      res.status(404).json({ error: error.message, code: error.code })
       return
     }
     if (error instanceof ConflictError) {
@@ -91,7 +93,7 @@ export const cancelReservation = async (req: Request, res: Response): Promise<vo
   try {
     const userId = req.user?.userId
     if (!userId) {
-      res.status(401).json({ error: 'Authentification requise' })
+      res.status(401).json({ error: 'Authentification requise', code: ERROR_CODES.UNAUTHORIZED })
       return
     }
 
@@ -102,7 +104,7 @@ export const cancelReservation = async (req: Request, res: Response): Promise<vo
     res.json({ message: 'Réservation annulée' })
   } catch (error) {
     if (error instanceof NotFoundError) {
-      res.status(404).json({ error: error.message })
+      res.status(404).json({ error: error.message, code: error.code })
       return
     }
     console.error('[Reservation] Error canceling reservation:', error)
@@ -122,7 +124,7 @@ export const getMyReservations = async (req: Request, res: Response): Promise<vo
   try {
     const userId = req.user?.userId
     if (!userId) {
-      res.status(401).json({ error: 'Authentification requise' })
+      res.status(401).json({ error: 'Authentification requise', code: ERROR_CODES.UNAUTHORIZED })
       return
     }
 
@@ -154,7 +156,7 @@ export const cancelReservationBySlot = async (req: Request, res: Response): Prom
   try {
     const userId = req.user?.userId
     if (!userId) {
-      res.status(401).json({ error: 'Authentification requise' })
+      res.status(401).json({ error: 'Authentification requise', code: ERROR_CODES.UNAUTHORIZED })
       return
     }
 

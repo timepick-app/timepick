@@ -14,16 +14,77 @@
   --gjs-quaternary-color: #ffffff;
 }
 
-/* Dirty indicator on the Save button: subtle dot before the label. */
+/* La colonne latérale ne descend jamais sous la largeur de sa propre bande
+ * d'onglets.
+ *
+ * GrapesJS dimensionne toute la colonne de droite avec une seule variable,
+ * `--gjs-left-width: 15%` — consommée par `.gjs-cv-canvas`, `.gjs-pn-commands`
+ * (`width: calc(100% - var(…))`), `.gjs-pn-options` (`right: var(…)`),
+ * `.gjs-pn-views` et `.gjs-pn-views-container` (`width: var(…)`). Or la bande
+ * des 4 onglets réclame 140 px incompressibles (décalage de 5 px + 4 × 30 px +
+ * 3 × 5 px d'écart = 140, mesuré) avec un débordement `visible` : sous ~933 px
+ * de fenêtre, 15 % passe sous 140 et l'onglet « Blocs » sort de l'écran sans
+ * barre de défilement pour le rattraper — mesuré totalement absent à 700 px.
+ *
+ * Poser un plancher sur la variable elle-même corrige les cinq règles d'un
+ * coup et garde canevas et panneaux cohérents par construction : c'est le
+ * canevas qui cède la place, ce qui se voit. Au-dessus de 933 px la valeur
+ * reste 15 % à l'identique (vérifié : géométrie inchangée à 1280 px, le format
+ * des captures de référence).
+ *
+ * Un onglet supplémentaire dans cette bande invaliderait le 140 — le remesurer
+ * alors, ne pas l'ajuster au jugé. */
+.timepick-email-editor {
+  --gjs-left-width: max(15%, 140px);
+}
+
+/* Pastille d'état modifié sur « Enregistrer ».
+ *
+ * PAS DE `margin-right` : le bouton est un conteneur flex et ce pseudo-élément
+ * en est un ITEM, donc la gouttière `gap` de la primitive (6 px en taille `sm`)
+ * s'applique déjà. Une marge de 6 px s'y AJOUTAIT — mesuré le 2026-08-01 : le
+ * bouton passait de 123,5 à 143,5 px à l'état modifié, soit 20 px au lieu de 14,
+ * et la pastille se retrouvait plus loin de l'icône que l'icône du libellé. Ces
+ * 6 px avaient une conséquence de PALIER : ils décalaient la frontière de
+ * 845/844 à 865/864 px, si bien qu'entre ces deux largeurs taper un caractère
+ * dans le canvas faisait disparaître tous les libellés de la barre.
+ * `display: inline-block` et `vertical-align` sont sans effet en contexte flex ;
+ * ils restent pour les contextes non flex éventuels.
+ *
+ * Contraste : `currentColor` sur le fond du bouton — 16,97:1 mesuré, très
+ * au-dessus des 3:1 de WCAG 1.4.11. */
 .timepick-email-editor .save-button[data-dirty='true']::before {
   content: '';
   display: inline-block;
   width: 8px;
   height: 8px;
-  margin-right: 6px;
   border-radius: 50%;
   background-color: currentColor;
   vertical-align: middle;
+}
+
+/* Au palier icônes, « Enregistrer » n'est plus qu'un carré de 32 px : la
+ * pastille ne peut plus précéder un libellé qui n'existe plus — inline, elle
+ * réclamerait une place que le bouton n'a pas. Elle se pose alors dans l'angle,
+ * hors du flux, donc sans rien coûter à la largeur du bouton.
+ *
+ * TOUT EST EN `em`, et ce n'est pas du zèle : le rayon du coin vient de
+ * `rounded-md`, exprimé en rem, donc il grandit avec la taille de texte de
+ * l'utilisateur. Avec des pixels absolus, la concentricité n'était qu'une
+ * coïncidence arithmétique à 100 % — à 200 % (WCAG 1.4.4) le centre de l'arc
+ * partait à (50, 14) pendant que la pastille restait à (58, 6), et 2,2 % de son
+ * disque tombait HORS de la silhouette du bouton, sur un fond où sa couleur
+ * `currentColor` se confond exactement : on ne voyait plus un témoin, on voyait
+ * une entaille dans le coin. En `em`, pastille et rayon suivent la même échelle.
+ */
+.timepick-email-editor
+  [data-toolbar-tier='icones']
+  .save-button[data-dirty='true']::before {
+  position: absolute;
+  top: 0.1875em;
+  right: 0.1875em;
+  width: 0.375em;
+  height: 0.375em;
 }
 
 /* Hide shadcn Dialog's default close button — the toolbar already provides

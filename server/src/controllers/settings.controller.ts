@@ -1,3 +1,4 @@
+import { ERROR_CODES } from '@timepick/shared'
 import type { Request, Response } from 'express'
 import { getSmtpSettings, saveSmtpSettings, clearSmtpSettings } from '../db/settings.db'
 import { getEmailProviderConfig, saveEmailProviderConfig, clearEmailProviderConfig, type EmailProvider } from '../db/email-provider.db'
@@ -43,7 +44,7 @@ export const getSmtpSettingsHandler = async (req: Request, res: Response): Promi
     })
   } catch (error) {
     console.error('[SettingsController] Error fetching SMTP settings:', error)
-    res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Erreur lors de la récupération des paramètres SMTP' } })
+    res.status(500).json({ error: { code: ERROR_CODES.INTERNAL_ERROR, message: 'Erreur lors de la récupération des paramètres SMTP' } })
   }
 }
 
@@ -71,7 +72,7 @@ export const saveSmtpSettingsHandler = async (req: Request, res: Response): Prom
       const meta = getProviderMeta(validatedData.provider)
       if (!meta) {
         // Filet défensif — déjà rejeté par le schéma ci-dessus en principe.
-        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Fournisseur email non supporté' } })
+        res.status(400).json({ error: { code: ERROR_CODES.VALIDATION_ERROR, message: 'Fournisseur email non supporté' } })
         return
       }
 
@@ -82,7 +83,7 @@ export const saveSmtpSettingsHandler = async (req: Request, res: Response): Prom
       const { raw, missingLabels } = resolveProviderCredentials(meta, validatedData.credentials, stored.provider, stored.credentials)
       if (missingLabels.length > 0) {
         res.status(400).json({
-          error: { code: 'VALIDATION_ERROR', message: `Champ(s) requis manquant(s) : ${missingLabels.join(', ')}.` },
+          error: { code: ERROR_CODES.VALIDATION_ERROR, message: `Champ(s) requis manquant(s) : ${missingLabels.join(', ')}.` },
         })
         return
       }
@@ -107,7 +108,7 @@ export const saveSmtpSettingsHandler = async (req: Request, res: Response): Prom
   } catch (error) {
     console.error('[SettingsController] Error saving SMTP settings:', error)
     const validationError = formatApiError(error, 'Erreur lors de la sauvegarde des paramètres SMTP')
-    const statusCode = validationError.code === 'VALIDATION_ERROR' ? 400 : 500
+    const statusCode = validationError.code === ERROR_CODES.VALIDATION_ERROR ? 400 : 500
     res.status(statusCode).json({ error: validationError })
   }
 }
@@ -119,7 +120,7 @@ export const saveSmtpSettingsHandler = async (req: Request, res: Response): Prom
  */
 async function resolveAdminEmail(req: Request, res: Response): Promise<string | null> {
   if (!req.user) {
-    res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Authentification requise' } })
+    res.status(401).json({ error: { code: ERROR_CODES.UNAUTHORIZED, message: 'Authentification requise' } })
     return null
   }
 
@@ -127,7 +128,7 @@ async function resolveAdminEmail(req: Request, res: Response): Promise<string | 
   const adminEmail = result.rows[0]?.email
 
   if (!adminEmail) {
-    res.status(400).json({ error: { code: 'USER_NOT_FOUND', message: 'Impossible de trouver votre adresse email' } })
+    res.status(400).json({ error: { code: ERROR_CODES.USER_NOT_FOUND, message: 'Impossible de trouver votre adresse email' } })
     return null
   }
 
@@ -161,7 +162,7 @@ export const testSmtpConnectionHandler = async (req: Request, res: Response): Pr
 
       const meta = getProviderMeta(validated.provider)
       if (!meta) {
-        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Fournisseur email non supporté' } })
+        res.status(400).json({ error: { code: ERROR_CODES.VALIDATION_ERROR, message: 'Fournisseur email non supporté' } })
         return
       }
 
@@ -191,7 +192,7 @@ export const testSmtpConnectionHandler = async (req: Request, res: Response): Pr
     res.json(await sendBrandedSmtpTest(params, adminEmail))
   } catch (error) {
     const validationError = formatApiError(error, 'Erreur lors du test de connexion SMTP')
-    const statusCode = validationError.code === 'VALIDATION_ERROR' ? 400 : 500
+    const statusCode = validationError.code === ERROR_CODES.VALIDATION_ERROR ? 400 : 500
     if (statusCode === 500) {
       console.error('[SettingsController] SMTP test error:', error)
     }
@@ -212,6 +213,6 @@ export const deleteSmtpSettingsHandler = async (_req: Request, res: Response): P
     res.status(204).send()
   } catch (error) {
     console.error('[SettingsController] Error clearing SMTP settings:', error)
-    res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Erreur lors de la suppression des paramètres SMTP' } })
+    res.status(500).json({ error: { code: ERROR_CODES.INTERNAL_ERROR, message: 'Erreur lors de la suppression des paramètres SMTP' } })
   }
 }

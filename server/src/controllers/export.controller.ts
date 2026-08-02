@@ -52,7 +52,7 @@ export const exportEventReservations = async (req: Request, res: Response): Prom
     res.send(csvContent)
   } catch (error) {
     if (error instanceof NotFoundError) {
-      res.status(404).json({ error: error.message })
+      res.status(404).json({ error: error.message, code: error.code })
       return
     }
     console.error('[Export] Error exporting reservations:', error)

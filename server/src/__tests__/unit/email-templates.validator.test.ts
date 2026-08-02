@@ -26,6 +26,13 @@ describe('email-templates.validator', () => {
         expect(result.error.issues[0].message).toContain("templateKey doit être l'un de")
       }
     })
+
+    it('rejects slot_modification — corps dynamique hors périmètre édition (exclu de EDITABLE_TEMPLATE_KEYS)', () => {
+      // slot_modification a un body assemblé au runtime (blocs conditionnels),
+      // jamais éditable via cet éditeur : le param schema doit le refuser
+      // comme n'importe quelle clé inconnue, avant d'atteindre la projection.
+      expect(templateKeyParamSchema.safeParse('slot_modification').success).toBe(false)
+    })
   })
 
   // =========================================================

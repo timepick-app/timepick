@@ -4,8 +4,10 @@ import { eventService } from '../services/event.service'
 import { eventUsersService } from '../services/eventUsers.service'
 import { createEventSchema, updateEventSchema, updateOpeningDateSchema, formatZodError } from '../validators/event.validator'
 import { NotFoundError } from '../errors/NotFoundError'
+import { ValidationError } from '../errors/ValidationError'
 import { NotPublishedError } from '../errors/NotPublishedError'
 import { UUID_RE } from '../lib/constants'
+import { ERROR_CODES } from '@timepick/shared'
 
 /**
  * Vérifie si l'erreur est une violation de contrainte unique PostgreSQL
@@ -30,12 +32,12 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
     res.status(201).json({ data: event })
   } catch (error) {
     if (error instanceof z.ZodError) {
-      res.status(400).json({ error: formatZodError(error) })
+      res.status(400).json({ error: formatZodError(error), code: ERROR_CODES.VALIDATION_ERROR })
       return
     }
     // Détecter la violation de contrainte unique (nom d'événement dupliqué)
     if (isUniqueConstraintError(error)) {
-      res.status(409).json({ error: 'Un événement avec ce nom existe déjà. Choisissez un autre nom.' })
+      res.status(409).json({ error: 'Un événement avec ce nom existe déjà. Choisissez un autre nom.', code: ERROR_CODES.EVENT_NAME_TAKEN })
       return
     }
     console.error('Error creating event:', error)
@@ -67,7 +69,7 @@ export const getEventById = async (req: Request, res: Response): Promise<void> =
     res.json({ data: event })
   } catch (error) {
     if (error instanceof NotFoundError) {
-      res.status(404).json({ error: error.message })
+      res.status(404).json({ error: error.message, code: error.code })
       return
     }
     console.error('Error fetching event:', error)
@@ -86,20 +88,20 @@ export const updateEvent = async (req: Request, res: Response): Promise<void> =>
     res.json({ data: event })
   } catch (error) {
     if (error instanceof z.ZodError) {
-      res.status(400).json({ error: formatZodError(error) })
+      res.status(400).json({ error: formatZodError(error), code: ERROR_CODES.VALIDATION_ERROR })
       return
     }
     if (error instanceof NotFoundError) {
-      res.status(404).json({ error: error.message })
+      res.status(404).json({ error: error.message, code: error.code })
       return
     }
-    if (error instanceof Error && error.message === 'Aucun champ à mettre à jour') {
-      res.status(400).json({ error: 'Aucun champ à mettre à jour' })
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message, code: error.code })
       return
     }
     // Détecter la violation de contrainte unique (nom d'événement dupliqué)
     if (isUniqueConstraintError(error)) {
-      res.status(409).json({ error: 'Un événement avec ce nom existe déjà. Choisissez un autre nom.' })
+      res.status(409).json({ error: 'Un événement avec ce nom existe déjà. Choisissez un autre nom.', code: ERROR_CODES.EVENT_NAME_TAKEN })
       return
     }
     console.error('Error updating event:', error)
@@ -115,7 +117,7 @@ export const deleteEvent = async (req: Request, res: Response): Promise<void> =>
   try {
     const deleted = await eventService.deleteEvent(req.params.id)
     if (!deleted) {
-      res.status(404).json({ error: 'Événement non trouvé' })
+      res.status(404).json({ error: 'Événement non trouvé', code: ERROR_CODES.EVENT_NOT_FOUND })
       return
     }
     res.status(204).send()
@@ -135,12 +137,11 @@ export const publishEvent = async (req: Request, res: Response): Promise<void> =
     res.json({ data: event })
   } catch (error) {
     if (error instanceof NotFoundError) {
-      res.status(404).json({ error: error.message })
+      res.status(404).json({ error: error.message, code: error.code })
       return
     }
-    // Handle validation errors (e.g., empty name)
-    if (error instanceof Error && error.message.includes('nom')) {
-      res.status(400).json({ error: error.message })
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message, code: error.code })
       return
     }
     console.error('Error publishing event:', error)
@@ -158,7 +159,7 @@ export const unpublishEvent = async (req: Request, res: Response): Promise<void>
     res.json({ data: event })
   } catch (error) {
     if (error instanceof NotFoundError) {
-      res.status(404).json({ error: error.message })
+      res.status(404).json({ error: error.message, code: error.code })
       return
     }
     console.error('Error unpublishing event:', error)
@@ -176,11 +177,11 @@ export const getPublicEvent = async (req: Request, res: Response): Promise<void>
     res.json({ data: event })
   } catch (error) {
     if (error instanceof NotPublishedError) {
-      res.status(404).json({ error: 'Événement non trouvé ou non publié' })
+      res.status(404).json({ error: 'Événement non trouvé ou non publié', code: ERROR_CODES.EVENT_NOT_PUBLISHED })
       return
     }
     if (error instanceof NotFoundError) {
-      res.status(404).json({ error: error.message })
+      res.status(404).json({ error: error.message, code: error.code })
       return
     }
     console.error('Error fetching public event:', error)
@@ -216,11 +217,11 @@ export const setOpeningDate = async (req: Request, res: Response): Promise<void>
     res.json({ data: event })
   } catch (error) {
     if (error instanceof z.ZodError) {
-      res.status(400).json({ error: formatZodError(error) })
+      res.status(400).json({ error: formatZodError(error), code: ERROR_CODES.VALIDATION_ERROR })
       return
     }
     if (error instanceof NotFoundError) {
-      res.status(404).json({ error: error.message })
+      res.status(404).json({ error: error.message, code: error.code })
       return
     }
     console.error('Error setting opening date:', error)
@@ -285,7 +286,8 @@ export const getPublicEventWithAuth = async (req: Request, res: Response): Promi
 
     if (!isAuthorized) {
       res.status(403).json({
-        error: "Vous n'êtes pas autorisé à accéder à cet événement"
+        error: "Vous n'êtes pas autorisé à accéder à cet événement",
+        code: ERROR_CODES.EVENT_ACCESS_DENIED
       })
       return
     }
@@ -311,11 +313,11 @@ export const getPublicEventWithAuth = async (req: Request, res: Response): Promi
     // bypass into the service, or (b) collapse 403/404 into a single 404 to avoid the leak.
     // See findings F1+F2 from pre-E4 cleanup adversarial review (2026-05-02).
     if (error instanceof NotPublishedError) {
-      res.status(403).json({ error: error.message, code: 'EVENT_NOT_PUBLISHED' })
+      res.status(403).json({ error: error.message, code: ERROR_CODES.EVENT_NOT_PUBLISHED })
       return
     }
     if (error instanceof NotFoundError) {
-      res.status(404).json({ error: 'Événement non trouvé', code: 'EVENT_NOT_FOUND' })
+      res.status(404).json({ error: 'Événement non trouvé', code: ERROR_CODES.EVENT_NOT_FOUND })
       return
     }
     console.error('Error fetching public event:', error)
@@ -350,7 +352,7 @@ export const duplicateEvent = async (req: Request, res: Response): Promise<void>
     res.status(201).json({ data: duplicatedEvent })
   } catch (error) {
     if (error instanceof NotFoundError) {
-      res.status(404).json({ error: error.message })
+      res.status(404).json({ error: error.message, code: error.code })
       return
     }
     console.error('Error duplicating event:', error)
@@ -366,15 +368,15 @@ export const bulkDeleteEvents = async (req: Request, res: Response): Promise<voi
   const { ids } = req.body
 
   if (!Array.isArray(ids) || ids.length === 0 || !ids.every((id: unknown) => typeof id === 'string')) {
-    res.status(400).json({ error: 'ids doit être un tableau non vide de chaînes' })
+    res.status(400).json({ error: 'ids doit être un tableau non vide de chaînes', code: ERROR_CODES.VALIDATION_ERROR })
     return
   }
   if (ids.length > 100) {
-    res.status(400).json({ error: 'ids ne peut contenir plus de 100 éléments' })
+    res.status(400).json({ error: 'ids ne peut contenir plus de 100 éléments', code: ERROR_CODES.VALIDATION_ERROR })
     return
   }
   if (!(ids as string[]).every((id) => UUID_RE.test(id))) {
-    res.status(400).json({ error: 'ids doit contenir des UUID valides' })
+    res.status(400).json({ error: 'ids doit contenir des UUID valides', code: ERROR_CODES.VALIDATION_ERROR })
     return
   }
 

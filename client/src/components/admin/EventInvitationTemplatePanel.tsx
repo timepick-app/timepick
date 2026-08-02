@@ -22,6 +22,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Typography } from '@/components/ui/typography'
 import { MjmlEditorOverlay } from './email-editor/MjmlEditorOverlay'
 import { EmailCompatibilityWarningCard } from './email-editor/EmailCompatibilityWarningCard'
+import { EmailEditorScreenRequirement } from './email-editor/EmailEditorScreenRequirement'
 import {
   useEventEmailTemplate,
   useEventEmailTemplatePreview,
@@ -34,6 +35,8 @@ import {
   INVITATION_VARIABLES,
   findMissingCriticalVariables,
 } from '@/lib/email-template-constants'
+import { canDeviceDisplayEmailEditor } from '@/lib/email-editor-capability'
+import type { SubjectPatch } from '@/services/email-templates.service'
 
 interface Props {
   eventId: string
@@ -74,10 +77,16 @@ export const EventInvitationTemplatePanel = ({ eventId }: Props) => {
   const hasTemplateError = !!templateError
   const hasPreviewError = !!previewError && !hasTemplateError
   const templateReady = !!template && !isTemplateLoading && !hasTemplateError
+  // Capacité de l'ÉCRAN, pas taille de la fenêtre — et constante sur la
+  // session, donc un simple appel au rendu suffit.
+  const canOpenEditor = canDeviceDisplayEmailEditor()
 
-  const handleSave = async (bodyMjml: string) => {
+  const handleSave = async (bodyMjml: string, subject?: SubjectPatch) => {
     const missing = findMissingCriticalVariables(bodyMjml)
-    await patchMutation.mutateAsync({ bodyMjml })
+    // Corps et objet dans la MÊME requête (A10). Le serveur ramène à NULL une
+    // surcharge identique à l'héritée — l'événement continue alors de suivre
+    // le modèle général au lieu d'en figer une copie.
+    await patchMutation.mutateAsync({ bodyMjml, ...subject })
     // Warning émis seulement après persistance confirmée : si le PATCH rejette,
     // mutateAsync propage et l'overlay surface l'erreur — on n'affirme jamais un
     // enregistrement qui n'a pas eu lieu (audit toasts 2026-06-07, D1).
@@ -180,28 +189,50 @@ export const EventInvitationTemplatePanel = ({ eventId }: Props) => {
             scopeKey={`event:${eventId}`}
           />
           {!editorOpen && (
-            <iframe
-              srcDoc={preview.html}
-              sandbox=""
-              title="Aperçu email invitation pour cet événement"
-              data-testid="event-invitation-preview-iframe"
-              className="block w-full h-[min(70vh,640px)] rounded-md border focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-offset-0"
-            />
+            <>
+              {/* L'OBJET AU-DESSUS DE L'APERÇU. Sans lui, l'aperçu prétend
+                  montrer l'e-mail et en cache la partie la plus lue. C'est le
+                  serveur qui l'interpole ici — même cascade que l'envoi réel,
+                  surcharge d'événement comprise. */}
+              <div className="space-y-1.5" data-testid="event-invitation-subject">
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-medium">Objet</h4>
+                  <Badge
+                    variant={template.subject !== null ? 'info' : 'default'}
+                    size="sm"
+                  >
+                    {template.subject !== null ? 'Personnalisé' : 'Hérité du modèle'}
+                  </Badge>
+                </div>
+                <p className="text-sm text-muted-foreground">{preview.subject}</p>
+              </div>
+              <iframe
+                srcDoc={preview.html}
+                sandbox=""
+                title="Aperçu email invitation pour cet événement"
+                data-testid="event-invitation-preview-iframe"
+                className="block w-full h-[min(70vh,640px)] rounded-md border focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-offset-0"
+              />
+            </>
           )}
         </>
       )}
 
       {templateReady && !isPreviewLoading && (
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <Button
-            type="button"
-            onClick={() => setEditorOpen(true)}
-            disabled={isCtaDisabled}
-            data-testid="event-invitation-open-editor-btn"
-          >
-            Personnaliser avec l&apos;éditeur
-          </Button>
-        </div>
+        canOpenEditor ? (
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button
+              type="button"
+              onClick={() => setEditorOpen(true)}
+              disabled={isCtaDisabled}
+              data-testid="event-invitation-open-editor-btn"
+            >
+              Personnaliser avec l&apos;éditeur
+            </Button>
+          </div>
+        ) : (
+          <EmailEditorScreenRequirement />
+        )
       )}
 
       {editorOpen && template && (
@@ -217,6 +248,12 @@ export const EventInvitationTemplatePanel = ({ eventId }: Props) => {
           ownerKind="event"
           ownerId={eventId}
           isCustom={template.isCustom}
+          subjectLine={{
+            subject: template.subject,
+            fallbackSubject: template.inheritedSubject,
+            level: 'event',
+            variables: template.subjectVariables,
+          }}
           title={event?.name ?? 'Invitation'}
         />
       )}

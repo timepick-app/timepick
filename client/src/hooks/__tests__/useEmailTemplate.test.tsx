@@ -35,6 +35,9 @@ const invitationDto: InvitationTemplate = {
   bodyMjml: '<mj-section>body</mj-section>',
   defaultBodyMjml: '<mj-section>default</mj-section>',
   updatedAt: '2026-05-01T10:00:00Z',
+  subject: null,
+  defaultSubject: 'Inscription participation - {{event_name}}',
+  subjectVariables: [],
 }
 
 const magicLinkLoginDto: SystemTemplate = {
@@ -44,6 +47,9 @@ const magicLinkLoginDto: SystemTemplate = {
   defaultIntroText: 'Bonjour par défaut',
   defaultSignatureText: 'Cordialement par défaut',
   updatedAt: '2026-05-01T10:00:00Z',
+  subject: null,
+  defaultSubject: 'Connexion à TimePick',
+  subjectVariables: [],
 }
 
 const previewDto = {

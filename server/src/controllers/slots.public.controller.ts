@@ -4,6 +4,7 @@ import { NotFoundError } from '../errors/NotFoundError'
 import { eventUsersService } from '../services/eventUsers.service'
 import { query, getClient } from '../db'
 import { VOLUNTEERS_AGG_FRAGMENT } from '../utils/slotSql'
+import { ERROR_CODES } from '@timepick/shared'
 
 /**
  * Contrôleur pour les routes publiques de slots
@@ -47,7 +48,7 @@ export const getPublicEventSlots = async (req: Request, res: Response): Promise<
       )
 
       if (eventResult.rows.length === 0) {
-        res.status(404).json({ error: 'Événement non trouvé' })
+        res.status(404).json({ error: 'Événement non trouvé', code: ERROR_CODES.EVENT_NOT_FOUND })
         return
       }
 
@@ -62,7 +63,7 @@ export const getPublicEventSlots = async (req: Request, res: Response): Promise<
       const isAuthorized = await eventUsersService.isUserAuthorizedForEvent(eventId, userId)
 
       if (!isAuthorized) {
-        res.status(403).json({ error: "Vous n'êtes pas autorisé à accéder à cet événement" })
+        res.status(403).json({ error: "Vous n'êtes pas autorisé à accéder à cet événement", code: ERROR_CODES.EVENT_ACCESS_DENIED })
         return
       }
     }
@@ -71,7 +72,7 @@ export const getPublicEventSlots = async (req: Request, res: Response): Promise<
     res.json({ data: slots })
   } catch (error) {
     if (error instanceof NotFoundError) {
-      res.status(404).json({ error: error.message })
+      res.status(404).json({ error: error.message, code: error.code })
       return
     }
 

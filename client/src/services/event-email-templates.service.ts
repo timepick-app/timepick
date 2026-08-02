@@ -10,6 +10,7 @@
  * stay in sync; there is no shared types package between client and server.
  */
 import api, { type ApiResponse } from './api'
+import type { SubjectVariable } from '@/lib/email-subject'
 
 export interface EventEmailTemplate {
   eventId: string
@@ -17,16 +18,28 @@ export interface EventEmailTemplate {
   bodyMjml: string
   defaultBodyMjml: string
   isCustom: boolean
+  /**
+   * Surcharge d'objet DE CET ÉVÉNEMENT. `null` = hérite. Distinct de
+   * `isCustom`, qui agrège corps et coque : l'objet a son propre héritage.
+   */
+  subject: string | null
+  /** L'objet dont cet événement hérite (modèle personnalisé, sinon usine). */
+  inheritedSubject: string
+  subjectVariables: SubjectVariable[]
   updatedAt: string
 }
 
 export interface EventEmailTemplatePatch {
   bodyMjml: string
+  /** Absent = ne touche pas ; `null` = revenir à l'héritage. */
+  subject?: string | null
 }
 
 export interface EventEmailTemplatePreview {
   html: string
   text: string
+  /** Objet interpolé, passé par la même cascade que l'envoi réel. */
+  subject: string
   templateKey: 'invitation'
   eventId: string
 }

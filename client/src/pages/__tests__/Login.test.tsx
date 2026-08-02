@@ -280,8 +280,10 @@ describe('Login — magic link one-shot verify', () => {
   // Régression : sans le garde verifiedTokenRef, l'effet de vérification boucle
   // (~500ms d'oscillation loading/success) car login() re-rend AuthProvider
   // (nouvelle identité de verifyAndLogin) et fait basculer isAuthenticated —
-  // tous deux en deps — et /auth/verify étant stateless chaque re-vérif réussit.
-  // Ce test s'assure qu'un token donné n'appelle /auth/verify qu'une seule fois.
+  // tous deux en deps. Ce garde n'est plus une simple optimisation : /auth/verify
+  // consomme désormais le lien magique (usage unique), donc un second appel avec
+  // le même token échouerait en 401 TOKEN_ALREADY_USED — un double rendu sans
+  // garde déconnecterait l'utilisateur alors que le lien était valide.
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -442,54 +444,54 @@ describe("renvoi d'invitation expirée", () => {
     vi.restoreAllMocks();
   });
 
-  /** Amène le composant dans l'état « lien expiré + canResend » et retourne le bouton. */
-  const renderAndGetResendButton = async () => {
+  /** Programme les deux réponses api.post (verify rejeté, puis renvoi) et rend :
+   * le renvoi part tout seul à l'atterrissage, sans clic (cf. Login.tsx). */
+  const renderWithAutoResend = (resend: { ok: true } | { code: string }) => {
     mockedApiPost.mockRejectedValueOnce(tokenExpiredError);
+    if ('ok' in resend) mockedApiPost.mockResolvedValueOnce({ data: { message: 'ok' } });
+    else mockedApiPost.mockRejectedValueOnce({ response: { data: { error: { code: resend.code } } } });
     renderLogin('/login?token=expired-token');
-    return screen.findByRole('button', { name: /demander un nouveau lien/i });
   };
 
-  it('succès → alerte verte "Un nouveau lien vous a été envoyé par email"', async () => {
-    const user = userEvent.setup();
-    const button = await renderAndGetResendButton();
-
-    mockedApiPost.mockResolvedValueOnce({ data: { message: 'ok' } });
-    await user.click(button);
+  it('succès → alerte verte "Un nouveau lien vous a été envoyé par email", sans clic', async () => {
+    renderWithAutoResend({ ok: true });
 
     expect(
       await screen.findByText(/un nouveau lien vous a été envoyé par email/i),
     ).toBeInTheDocument();
-    // Le bouton « Demander » disparaît (état 'sent').
+    // Le bouton « Demander » n'apparaît jamais : le renvoi est parti tout seul.
     expect(
       screen.queryByRole('button', { name: /demander un nouveau lien/i }),
     ).not.toBeInTheDocument();
+    expect(
+      mockedApiPost.mock.calls.filter((c) => c[0] === '/auth/resend-invitation'),
+    ).toHaveLength(1);
   });
 
-  it('EMAIL_SERVICE_UNAVAILABLE → message indisponible + bouton Réessayer présent', async () => {
+  it('EMAIL_SERVICE_UNAVAILABLE → message indisponible + bouton Réessayer relance /auth/resend-invitation', async () => {
     const user = userEvent.setup();
-    const button = await renderAndGetResendButton();
-
-    mockedApiPost.mockRejectedValueOnce({
-      response: { data: { error: { code: 'EMAIL_SERVICE_UNAVAILABLE' } } },
-    });
-    await user.click(button);
+    renderWithAutoResend({ code: 'EMAIL_SERVICE_UNAVAILABLE' });
 
     expect(
       await screen.findByText(/temporairement indisponible/i),
     ).toBeInTheDocument();
+    const retryButton = screen.getByRole('button', { name: /réessayer/i });
+    expect(retryButton).toBeInTheDocument();
+
+    // Ce chemin reste manuel : cliquer sur « Réessayer » relance le renvoi.
+    mockedApiPost.mockResolvedValueOnce({ data: { message: 'ok' } });
+    await user.click(retryButton);
+
     expect(
-      screen.getByRole('button', { name: /réessayer/i }),
+      await screen.findByText(/un nouveau lien vous a été envoyé par email/i),
     ).toBeInTheDocument();
+    expect(
+      mockedApiPost.mock.calls.filter((c) => c[0] === '/auth/resend-invitation'),
+    ).toHaveLength(2);
   });
 
   it('RESEND_NOT_AVAILABLE → message "Impossible de renvoyer … administrateur"', async () => {
-    const user = userEvent.setup();
-    const button = await renderAndGetResendButton();
-
-    mockedApiPost.mockRejectedValueOnce({
-      response: { data: { error: { code: 'RESEND_NOT_AVAILABLE' } } },
-    });
-    await user.click(button);
+    renderWithAutoResend({ code: 'RESEND_NOT_AVAILABLE' });
 
     expect(
       await screen.findByText(/impossible de renvoyer un lien pour cette invitation/i),
@@ -497,13 +499,7 @@ describe("renvoi d'invitation expirée", () => {
   });
 
   it('RATE_LIMITED → message "Un lien a déjà été envoyé récemment"', async () => {
-    const user = userEvent.setup();
-    const button = await renderAndGetResendButton();
-
-    mockedApiPost.mockRejectedValueOnce({
-      response: { data: { error: { code: 'RATE_LIMITED' } } },
-    });
-    await user.click(button);
+    renderWithAutoResend({ code: 'RATE_LIMITED' });
 
     expect(
       await screen.findByText(/un lien a déjà été envoyé récemment/i),
@@ -511,13 +507,7 @@ describe("renvoi d'invitation expirée", () => {
   });
 
   it('erreur sans code connu → message générique, pas de retour silencieux au bouton initial', async () => {
-    const user = userEvent.setup();
-    const button = await renderAndGetResendButton();
-
-    mockedApiPost.mockRejectedValueOnce({
-      response: { data: { error: { code: 'UNEXPECTED_CODE' } } },
-    });
-    await user.click(button);
+    renderWithAutoResend({ code: 'UNEXPECTED_CODE' });
 
     expect(
       await screen.findByText(/une erreur est survenue/i),
@@ -570,25 +560,28 @@ describe("renvoi d'invitation expirée — lien admin (isAdmin)", () => {
     vi.restoreAllMocks();
   });
 
-  it('(a) token expiré admin → bouton "Demander un nouveau lien" + helper "envoyé à votre adresse email" visibles', async () => {
-    mockedApiPost.mockRejectedValueOnce(tokenExpiredAdminError);
-    renderLogin('/login?token=expired-admin-token');
+  /** Programme le rejet de /auth/verify puis la réponse du renvoi automatique, et rend. */
+  const renderWithAutoResend = (
+    verifyError: typeof tokenExpiredAdminError,
+    route: string,
+    resend: { ok: true } | { code: string },
+  ) => {
+    mockedApiPost.mockRejectedValueOnce(verifyError);
+    if ('ok' in resend) mockedApiPost.mockResolvedValueOnce({ data: { message: 'ok' } });
+    else mockedApiPost.mockRejectedValueOnce({ response: { data: { error: { code: resend.code } } } });
+    renderLogin(route);
+  };
 
-    const button = await screen.findByRole('button', { name: /demander un nouveau lien/i });
-    expect(button).toBeInTheDocument();
-    expect(
-      await screen.findByText(/envoyé à votre adresse email/i),
-    ).toBeInTheDocument();
+  it('(a) token expiré admin → renvoi automatique déclenché sans clic (POST /auth/resend-invitation avec le token)', async () => {
+    renderWithAutoResend(tokenExpiredAdminError, '/login?token=expired-admin-token', { ok: true });
+
+    await waitFor(() => {
+      expect(mockedApiPost).toHaveBeenCalledWith('/auth/resend-invitation', { token: 'expired-admin-token' });
+    });
   });
 
-  it('(b) clic → POST /auth/resend-invitation, succès → message "Un nouveau lien vous a été envoyé par email"', async () => {
-    const user = userEvent.setup();
-    mockedApiPost.mockRejectedValueOnce(tokenExpiredAdminError);
-    renderLogin('/login?token=expired-admin-token');
-
-    const button = await screen.findByRole('button', { name: /demander un nouveau lien/i });
-    mockedApiPost.mockResolvedValueOnce({ data: { message: 'ok' } });
-    await user.click(button);
+  it('(b) succès → message "Un nouveau lien vous a été envoyé par email", bouton "Demander" absent', async () => {
+    renderWithAutoResend(tokenExpiredAdminError, '/login?token=expired-admin-token', { ok: true });
 
     expect(
       await screen.findByText(/un nouveau lien vous a été envoyé par email/i),
@@ -599,15 +592,7 @@ describe("renvoi d'invitation expirée — lien admin (isAdmin)", () => {
   });
 
   it('(c) erreur 503 EMAIL_SERVICE_UNAVAILABLE + isAdmin → lien /emergency-login visible', async () => {
-    const user = userEvent.setup();
-    mockedApiPost.mockRejectedValueOnce(tokenExpiredAdminError);
-    renderLogin('/login?token=expired-admin-token');
-
-    const button = await screen.findByRole('button', { name: /demander un nouveau lien/i });
-    mockedApiPost.mockRejectedValueOnce({
-      response: { data: { error: { code: 'EMAIL_SERVICE_UNAVAILABLE' } } },
-    });
-    await user.click(button);
+    renderWithAutoResend(tokenExpiredAdminError, '/login?token=expired-admin-token', { code: 'EMAIL_SERVICE_UNAVAILABLE' });
 
     const emergencyLink = await screen.findByRole('link', { name: /code de secours/i });
     expect(emergencyLink).toBeInTheDocument();
@@ -615,15 +600,7 @@ describe("renvoi d'invitation expirée — lien admin (isAdmin)", () => {
   });
 
   it('(d) erreur 503 SANS isAdmin → PAS de lien /emergency-login', async () => {
-    const user = userEvent.setup();
-    mockedApiPost.mockRejectedValueOnce(tokenExpiredUserError);
-    renderLogin('/login?token=expired-user-token');
-
-    const button = await screen.findByRole('button', { name: /demander un nouveau lien/i });
-    mockedApiPost.mockRejectedValueOnce({
-      response: { data: { error: { code: 'EMAIL_SERVICE_UNAVAILABLE' } } },
-    });
-    await user.click(button);
+    renderWithAutoResend(tokenExpiredUserError, '/login?token=expired-user-token', { code: 'EMAIL_SERVICE_UNAVAILABLE' });
 
     await screen.findByText(/temporairement indisponible/i);
     expect(
@@ -752,5 +729,82 @@ describe('lien de setup déjà utilisé — SETUP_ALREADY_DONE', () => {
     expect(
       await screen.findByText(/un nouveau lien vous a été envoyé par email/i),
     ).toBeInTheDocument();
+  });
+});
+
+describe('lien magique déjà utilisé — TOKEN_ALREADY_USED', () => {
+  /** Erreur renvoyée par /auth/verify pour un lien magique déjà consommé. */
+  const tokenAlreadyUsedError = {
+    response: {
+      data: {
+        error: {
+          code: 'TOKEN_ALREADY_USED',
+          message: 'Ce lien de connexion a déjà été utilisé.',
+          context: { canResend: true, isAdmin: false },
+        },
+      },
+    },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockedGetPublicHealth.mockResolvedValue({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      services: { smtp: 'ok' },
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Programme le rejet de /auth/verify puis la réponse du renvoi automatique, et rend :
+   * le renvoi part tout seul à l'atterrissage, sans clic (cf. Login.tsx). */
+  const renderWithAutoResend = (resend: { ok: true } | { code: string }) => {
+    mockedApiPost.mockRejectedValueOnce(tokenAlreadyUsedError);
+    if ('ok' in resend) mockedApiPost.mockResolvedValueOnce({ data: { message: 'ok' } });
+    else mockedApiPost.mockRejectedValueOnce({ response: { data: { error: { code: resend.code } } } });
+    renderLogin('/login?token=used-token');
+  };
+
+  it('affiche la carte "Lien déjà utilisé" — plus de bouton, le renvoi part tout seul', async () => {
+    renderWithAutoResend({ ok: true });
+
+    expect(
+      await screen.findByText('Lien déjà utilisé'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /demander un nouveau lien/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("n'affiche aucune date d'expiration — le lien n'a pas expiré, il a servi", async () => {
+    renderWithAutoResend({ ok: true });
+
+    await screen.findByText('Lien déjà utilisé');
+    expect(screen.queryByText(/Expirait le/i)).not.toBeInTheDocument();
+  });
+
+  it('le renvoi automatique appelle POST /auth/resend-invitation avec le token du lien', async () => {
+    renderWithAutoResend({ ok: true });
+
+    await waitFor(() => {
+      expect(mockedApiPost).toHaveBeenCalledWith('/auth/resend-invitation', { token: 'used-token' });
+    });
+  });
+
+  it("aucune interaction utilisateur requise pour recevoir un nouveau lien — verrouille l'intention produit", async () => {
+    renderWithAutoResend({ ok: true });
+
+    // Rien n'a été cliqué ci-dessus : le seul rendu suffit à déclencher le renvoi
+    // et à afficher le bandeau de succès. Ce test échouerait si le bouton
+    // « Demander un nouveau lien » redevenait nécessaire.
+    expect(
+      await screen.findByText(/un nouveau lien vous a été envoyé par email/i),
+    ).toBeInTheDocument();
+    expect(mockedApiPost).toHaveBeenCalledWith('/auth/resend-invitation', { token: 'used-token' });
   });
 });

@@ -4,10 +4,13 @@ import { AlertCircle } from 'lucide-react'
 import { Banner, BannerDescription } from '@/components/ui/banner'
 import { useEmailTemplate } from '@/hooks/useEmailTemplate'
 import { EmailVariablesHelp } from './EmailVariablesHelp'
+import { EmailSubjectSummary } from './EmailSubjectSummary'
+import { EmailEditorScreenRequirement } from './email-editor/EmailEditorScreenRequirement'
 import {
   SYSTEM_TEMPLATE_VARIABLE_HELP,
   type SystemTemplateKey,
 } from '@/lib/email-system-template-constants'
+import { canDeviceDisplayEmailEditor } from '@/lib/email-editor-capability'
 
 /**
  * E2.S5 / L3a — carte « muette » d'un template d'email système
@@ -76,8 +79,11 @@ export const EmailSystemTemplatePanel = ({
 }: EmailSystemTemplatePanelProps) => {
   const labels = SYSTEM_TEMPLATE_LABELS[templateKey]
 
-  const { isLoading, error } = useEmailTemplate(templateKey)
+  const { data: template, isLoading, error } = useEmailTemplate(templateKey)
   const hasError = !!error
+  // Capacité de l'ÉCRAN, pas taille de la fenêtre — et constante sur la
+  // session, donc un simple appel au rendu suffit.
+  const canOpenEditor = canDeviceDisplayEmailEditor()
 
   return (
     <Card data-testid={`email-system-template-panel-${templateKey}`}>
@@ -108,6 +114,15 @@ export const EmailSystemTemplatePanel = ({
           </div>
         )}
 
+        {template && !hasError && (
+          <EmailSubjectSummary
+            subject={template.subject}
+            defaultSubject={template.defaultSubject}
+            variables={template.subjectVariables}
+            data-testid={`system-template-subject-${templateKey}`}
+          />
+        )}
+
         {!hasError && (
           <EmailVariablesHelp
             variables={SYSTEM_TEMPLATE_VARIABLE_HELP[templateKey]}
@@ -116,16 +131,20 @@ export const EmailSystemTemplatePanel = ({
         )}
 
         {!isLoading && !hasError && (
-          <div className="flex flex-wrap items-center justify-end gap-3">
-            <Button
-              type="button"
-              onClick={onOpenEditor}
-              disabled={isLoading}
-              data-testid={`system-open-editor-btn-${templateKey}`}
-            >
-              Personnaliser avec l&apos;éditeur
-            </Button>
-          </div>
+          canOpenEditor ? (
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              <Button
+                type="button"
+                onClick={onOpenEditor}
+                disabled={isLoading}
+                data-testid={`system-open-editor-btn-${templateKey}`}
+              >
+                Personnaliser avec l&apos;éditeur
+              </Button>
+            </div>
+          ) : (
+            <EmailEditorScreenRequirement />
+          )
         )}
       </CardContent>
     </Card>

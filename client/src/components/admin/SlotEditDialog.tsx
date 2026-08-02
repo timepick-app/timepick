@@ -438,7 +438,9 @@ export function SlotEditDialog({ slot, open, onOpenChange }: SlotEditDialogProps
 
             {/* Incohérence de plage : message clair sous les champs (AC3). */}
             {endBeforeStart && (
-              <p id="edit-end-error" role="alert" aria-live="polite" className="text-xs text-destructive">
+              // R9 — role="alert" implique déjà aria-live="assertive" ; un
+              // aria-live="polite" à côté contredirait l'annonce (retiré).
+              <p id="edit-end-error" role="alert" className="text-xs text-destructive">
                 La date/heure de fin doit être après le début.
               </p>
             )}

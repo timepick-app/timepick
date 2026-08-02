@@ -1,5 +1,6 @@
 import { test, expect, type APIRequestContext } from '@playwright/test'
 import { loginAsAdmin, TEST_ADMIN } from './helpers/auth'
+import { waitForGrapesEditorReady } from './helpers/email-editor'
 
 /**
  * Visual regression baseline for the MJML editor overlay (Story 23-3, AC15;
@@ -14,6 +15,45 @@ import { loginAsAdmin, TEST_ADMIN } from './helpers/auth'
  * run via `--grep-invert @slow`. Locally, refresh the baselines with
  * `npx playwright test email-editor-overlay --update-snapshots --grep "@slow"`
  * whenever editor visuals legitimately change.
+ *
+ * ⚠️ CE QUE CES BASELINES VOIENT, ET CE QU'ELLES NE VOIENT PAS.
+ * Une tolérance `maxDiffPixelRatio: 0.02` sur une surface de 1280×720
+ * (921 600 px) laisse **18 432 px de budget** : le bouton « Réserver mon
+ * créneau » du corps par défaut mesure ~189×27 px ≈ 5 100 px, donc **sa
+ * disparition complète ne ferait pas échouer le test**. Mesuré : le diff entre
+ * les deux versions de `email-editor-initial.png` du 2026-07-30 valait 8 081 px
+ * = 0,877 % — l'ancienne baseline passait encore alors qu'elle documentait une
+ * grammaire visuelle retirée du produit.
+ *
+ * Deux leviers ont été mesurés le 2026-07-31, un seul sert :
+ * - **Cadrage : sans effet ici.** Scoper la capture de l'éditeur sur
+ *   `[data-testid="mjml-editor-inner"]` au lieu de la page produit une baseline
+ *   **rigoureusement identique** — cet élément est une surcouche plein écran,
+ *   son cadre EST le viewport. Le cadrage reste écrit parce qu'il dit la cible,
+ *   mais il ne resserre rien.
+ * - **Seuil : c'est le levier.** Trois exécutions consécutives à `maxDiffPixels: 0`
+ *   passent — le rendu est **pixel-exact** sur une même machine, il n'y a aucun
+ *   bruit d'anti-aliasing à absorber. Les 2 % n'étaient donc pas une marge
+ *   technique mais du mou. La capture de l'éditeur est descendue à **0,002**
+ *   (≈ 1 843 px), au-dessus du bruit constaté (nul) et ~3× sous le plus petit
+ *   élément qu'on veut voir disparaître.
+ *   Portée de cette mesure : **une machine, une version de Chromium**. Police,
+ *   hinting, DPI et version du navigateur font dériver le rendu texte bien
+ *   au-delà de 0,2 % ailleurs — mais bien au-delà de 2 % aussi, donc le seuil
+ *   n'est pas ce qui rendrait ces baselines portables. Elles ne le sont pas, et
+ *   c'est déjà le cas : suffixées `-chromium-darwin`, régénérées à la main,
+ *   exclues de la CI. Le seuil bas ne coûte donc rien de plus qu'avant, et
+ *   rapporte de voir ce que 2 % laissait passer.
+ *
+ * Les 5 autres captures restent à 0,02 : déjà scopées à un panneau, donc sur une
+ * surface bien plus petite où 2 % est un filet autrement plus fin. Les descendre
+ * exigerait de mesurer puis régénérer chacune — non fait, donc non promis.
+ *
+ * Reste vrai dans tous les cas : ces tests protègent des **ruptures de mise en
+ * page larges**. Ce qui est petit, textuel ou ponctuel se garde ailleurs —
+ * contraste calculé et sélecteurs dans les tests unitaires de
+ * `client/src/components/admin/email-editor/__tests__/`, comportement dans
+ * `email-shell-parts-26-2d.spec.ts`.
  */
 
 const SERVER_BASE = 'http://localhost:3000'
@@ -106,9 +146,23 @@ test.describe('@slow MJML editor overlay — visual baseline', () => {
   test('initial load with body content matches snapshot', async ({ page }) => {
     await page.goto('/admin/settings?tab=email-template&subtab=template-invitation')
     await page.getByTestId('invitation-open-editor-btn').click()
-    await page.getByTestId('mjml-editor-inner').waitFor()
-    await expect(page).toHaveScreenshot('email-editor-initial.png', {
-      maxDiffPixelRatio: 0.02,
+    const editor = page.getByTestId('mjml-editor-inner')
+    await editor.waitFor()
+    // Attendre le montage de l'enveloppe React ne suffit PAS : c'est la seule des
+    // 6 captures de ce fichier qui photographie le canvas GrapesJS vivant (les
+    // autres visent l'aperçu compilé ou un panneau statique). Sans attendre que
+    // la passe de verrouillage/décoration ait tourné, la référence peut se figer
+    // sur un état transitoire — et l'inspection à l'œil d'une capture unique ne
+    // le verrait pas. `waitForGrapesEditorReady` est le garde-fou déjà standard
+    // partout ailleurs dans la suite quand on touche l'éditeur réel.
+    await waitForGrapesEditorReady(page)
+    // Cadrée sur l'éditeur : ne resserre rien (l'élément est plein écran, mesuré
+    // le 2026-07-31), mais dit la cible. Ce qui resserre, c'est le seuil — 0,002
+    // au lieu de 0,02, au-dessus d'un bruit mesuré NUL sur 3 exécutions et sous
+    // les ~5 100 px du plus petit élément qu'on veut voir disparaître. Détail et
+    // limites : avertissement en tête de fichier.
+    await expect(editor).toHaveScreenshot('email-editor-initial.png', {
+      maxDiffPixelRatio: 0.002,
     })
   })
 })

@@ -2,7 +2,9 @@ import { query, withTransaction } from '../db'
 import type { CreateEventInput, UpdateEventInput } from '../validators/event.validator'
 import { NotFoundError } from '../errors/NotFoundError'
 import { NotPublishedError } from '../errors/NotPublishedError'
+import { ValidationError } from '../errors/ValidationError'
 import { deleteShellPartsForOwner } from './shell-parts.service'
+import { ERROR_CODES } from '@timepick/shared'
 
 /**
  * Constante pour le suffixe de duplication d'événement
@@ -76,7 +78,7 @@ export const eventService = {
       [id]
     )
     if (result.rows.length === 0) {
-      throw new NotFoundError('Événement non trouvé')
+      throw new NotFoundError('Événement non trouvé', ERROR_CODES.EVENT_NOT_FOUND)
     }
     return result.rows[0] as Event
   },
@@ -93,7 +95,7 @@ export const eventService = {
       [id]
     )
     if (check.rows.length === 0) {
-      throw new NotFoundError('Événement non trouvé')
+      throw new NotFoundError('Événement non trouvé', ERROR_CODES.EVENT_NOT_FOUND)
     }
     if (!check.rows[0].is_published) {
       throw new NotPublishedError("Cet événement n'est pas encore accessible")
@@ -135,7 +137,7 @@ export const eventService = {
       [uuid]
     )
     if (check.rows.length === 0) {
-      throw new NotFoundError('Événement non trouvé')
+      throw new NotFoundError('Événement non trouvé', ERROR_CODES.EVENT_NOT_FOUND)
     }
     if (!check.rows[0].is_published) {
       throw new NotPublishedError("Cet événement n'est pas encore accessible")
@@ -181,7 +183,14 @@ export const eventService = {
     }
 
     if (updates.length === 0) {
-      throw new Error('Aucun champ à mettre à jour')
+      // `ValidationError` typée, et non un `Error` nu reconnu par comparaison de
+      // chaîne dans le contrôleur : renommer le message ne casse plus la
+      // détection en silence. Formulation alignée sur les deux autres émetteurs
+      // du même code (`admin.controller`, `me.service`).
+      throw new ValidationError(
+        'Aucune donnée à mettre à jour. Modifiez au moins une information avant d\'enregistrer.',
+        ERROR_CODES.NO_FIELDS_TO_UPDATE,
+      )
     }
 
     values.push(id)
@@ -190,7 +199,7 @@ export const eventService = {
       values
     )
     if (result.rows.length === 0) {
-      throw new NotFoundError('Événement non trouvé')
+      throw new NotFoundError('Événement non trouvé', ERROR_CODES.EVENT_NOT_FOUND)
     }
     return result.rows[0] as Event
   },
@@ -219,14 +228,20 @@ export const eventService = {
    * Publier un événement
    * @param id - UUID de l'événement
    * @returns L'événement publié (is_published = true)
-   * @throws Error si l'événement n'existe pas ou si le nom est vide
+   * @throws NotFoundError si l'événement n'existe pas, ValidationError si le nom est vide
    */
   async publishEvent(id: string): Promise<Event> {
     // First, check if the event exists and has a valid name
     const event = await this.getEventById(id)
 
     if (!event.name || event.name.trim() === '') {
-      throw new Error('Le nom de l\'événement est requis pour la publication')
+      // `ValidationError` et non `Error` : le refus est actionnable — l'admin
+      // doit nommer son événement — donc son message doit pouvoir s'afficher,
+      // ce qui suppose un code nommé plutôt que le défaut VALIDATION_ERROR.
+      throw new ValidationError(
+        'Le nom de l\'événement est requis pour la publication',
+        ERROR_CODES.EVENT_NAME_REQUIRED,
+      )
     }
 
     const result = await query(
@@ -238,7 +253,7 @@ export const eventService = {
     )
 
     if (result.rows.length === 0) {
-      throw new NotFoundError('Événement non trouvé')
+      throw new NotFoundError('Événement non trouvé', ERROR_CODES.EVENT_NOT_FOUND)
     }
 
     return result.rows[0] as Event
@@ -260,7 +275,7 @@ export const eventService = {
     )
 
     if (result.rows.length === 0) {
-      throw new NotFoundError('Événement non trouvé')
+      throw new NotFoundError('Événement non trouvé', ERROR_CODES.EVENT_NOT_FOUND)
     }
 
     return result.rows[0] as Event
@@ -283,7 +298,7 @@ export const eventService = {
     )
 
     if (result.rows.length === 0) {
-      throw new NotFoundError('Événement non trouvé')
+      throw new NotFoundError('Événement non trouvé', ERROR_CODES.EVENT_NOT_FOUND)
     }
 
     return result.rows[0] as Event

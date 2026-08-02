@@ -68,7 +68,7 @@ export async function processOrganizationLogo(
   const ft = await fileTypeMod.fileTypeFromBuffer(buffer)
 
   if (!ft || !Object.prototype.hasOwnProperty.call(ALLOWED_MIME, ft.mime)) {
-    throw new UnsupportedOrganizationLogoError("Format d'image non supporté")
+    throw new UnsupportedOrganizationLogoError("Ce format d'image n'est pas pris en charge. Utilisez un fichier JPEG, PNG ou WebP.")
   }
 
   // Same image-bomb DoS guard as processEmailImage (50 MP cap).
@@ -90,10 +90,10 @@ export async function processOrganizationLogo(
       console.error('[Organization] sharp processing failed:', msg)
     }
     if (/limitInputPixels|too large|input image exceeds/i.test(msg)) {
-      throw new UnsupportedOrganizationLogoError('Image trop grande (limite : 50 mégapixels)')
+      throw new UnsupportedOrganizationLogoError('Cette image est trop grande pour être traitée. Réduisez ses dimensions, puis réessayez.')
     }
     if (/read error|invalid|unsupported|truncated|corrupt/i.test(msg)) {
-      throw new UnsupportedOrganizationLogoError('Image illisible ou corrompue')
+      throw new UnsupportedOrganizationLogoError('Cette image est illisible ou endommagée. Choisissez un autre fichier.')
     }
     throw new OrganizationLogoProcessingError("Erreur lors du décodage de l'image")
   }

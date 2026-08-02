@@ -1,4 +1,4 @@
-import { generateMagicLink, verifyToken } from '../../services/auth.service';
+import { generateMagicLink, magicLinkTokenHash, verifyToken } from '../../services/auth.service';
 import { query } from '../../db';
 import jwt from 'jsonwebtoken';
 
@@ -28,13 +28,12 @@ describe('AuthService', () => {
       expect(query).toHaveBeenCalled();
       const calls = (query as jest.Mock).mock.calls;
       expect(calls.length).toBeGreaterThan(0);
-      expect(calls[0][0]).toContain('UPDATE users');
-      expect(calls[0][0]).toContain('magic_link_token');
-      expect(calls[0][0]).toContain('token_expires_at');
+      expect(calls[0][0]).toContain('INSERT INTO magic_link_tokens');
+      expect(calls[0][0]).toContain('(user_id, token_hash, expires_at)');
     });
 
 
-    it('stocke le token et l\'expiration en base de données', async () => {
+    it('stocke l\'empreinte du token et l\'expiration en base de données', async () => {
       (query as jest.Mock).mockResolvedValue({ rows: [] });
 
       const result = await generateMagicLink({
@@ -46,10 +45,17 @@ describe('AuthService', () => {
       expect(query).toHaveBeenCalled();
       const calls = (query as jest.Mock).mock.calls;
       expect(calls.length).toBeGreaterThan(0);
-      expect(calls[0][0]).toContain('UPDATE users');
-      expect(calls[0][0]).toContain('magic_link_token');
-      expect(calls[0][0]).toContain('token_expires_at');
-      expect(calls[0][1]).toBeTruthy(); // token
+      expect(calls[0][0]).toContain('INSERT INTO magic_link_tokens');
+      expect(calls[0][0]).toContain('(user_id, token_hash, expires_at)');
+      const [userId, stored, exp] = calls[0][1];
+      expect(userId).toBe('user-uuid-1234');
+      expect(exp).toBeGreaterThan(Math.floor(Date.now() / 1000));
+
+      // Ce qui part en base est l'empreinte du lien, jamais le lien : une fuite de
+      // `magic_link_tokens` ne doit rien livrer de rejouable.
+      const emitted = new URL(result.link).searchParams.get('token') as string;
+      expect(stored).not.toBe(emitted);
+      expect(stored).toBe(magicLinkTokenHash(emitted));
     });
 
     it('lance une erreur si ttl absent', async () => {

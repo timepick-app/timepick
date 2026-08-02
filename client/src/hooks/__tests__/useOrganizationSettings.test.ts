@@ -106,7 +106,7 @@ describe('useOrganizationSettings hooks', () => {
     expect(toastError).not.toHaveBeenCalled()
   })
 
-  it('affiche un toast d\'erreur si la sauvegarde échoue', async () => {
+  it("affiche le message de repli si la sauvegarde échoue (pas le message serveur brut)", async () => {
     mockPut.mockRejectedValueOnce({ response: { data: { error: 'Nom invalide' } } })
 
     const { result } = renderHook(() => useUpdateOrganizationSettings(), { wrapper })
@@ -115,7 +115,10 @@ describe('useOrganizationSettings hooks', () => {
       await result.current.mutateAsync({ name: '' }).catch(() => {})
     })
 
-    expect(toastError).toHaveBeenCalledWith('Nom invalide')
+    expect(toastError).toHaveBeenCalledWith(
+      "L'enregistrement de l'identité de l'organisation a échoué. Vos modifications sont toujours à l'écran, réessayez."
+    )
+    expect(toastError.mock.calls[0][0]).not.toContain('Nom invalide')
   })
 
   it('téléverse le logo via POST multipart avec le champ "logo"', async () => {

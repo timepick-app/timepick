@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import api, { type ApiResponse } from '../services/api'
 import { toast } from 'sonner'
 import type { MagicLinkConfig } from './useMagicLinkConfig'
-import { extractErrorMessage } from '@/lib/extractErrorMessage'
+import { userFacingErrorMessage } from '@/lib/userFacingErrorMessage'
 
 /**
  * Limites des TTL pour les magic links (en secondes)
@@ -53,8 +53,12 @@ export const useUpdateMagicLinkConfig = () => {
       toast.success('Configuration des magic links mise à jour')
     },
     onError: (err) => {
-      const errorMsg = extractErrorMessage(err, 'Erreur lors de la mise à jour')
-      toast.error(`Erreur: ${errorMsg}`)
+      toast.error(
+        userFacingErrorMessage(
+          err,
+          "L'enregistrement des réglages de lien magique a échoué. Vos modifications sont toujours à l'écran, réessayez."
+        )
+      )
     }
   })
 }

@@ -317,7 +317,7 @@ describe('PUT /api/admin/shell-parts/:ownerKind/:ownerId/:partKind', () => {
         .set('Authorization', `Bearer ${adminToken}`)
         .send({ contentMjml: VALID_HEADER })
       expect(res.status).toBe(404)
-      expect(res.body.error.code).toBe('NOT_FOUND')
+      expect(res.body.error.code).toBe('EVENT_NOT_FOUND')
     })
 
     it('200 when ownerKind=event and the event row exists', async () => {
@@ -613,7 +613,7 @@ describe('PUT /api/admin/shell-parts/:ownerKind/:ownerId/:partKind', () => {
         .send({ contentMjml: VALID_MJ_BODY })
 
       expect(res.status).toBe(404)
-      expect(res.body.error.code).toBe('NOT_FOUND')
+      expect(res.body.error.code).toBe('EVENT_NOT_FOUND')
     })
 
     it('idempotence — PUT × 2 mj-body identique → une seule row', async () => {

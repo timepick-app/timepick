@@ -13,6 +13,7 @@ import { configService } from '../services/config.service'
 import * as authService from '../services/auth.service'
 import { UUID_RE } from '../lib/constants'
 import { importUsersCsv, CsvFormatError } from '../services/user-import.service'
+import { ERROR_CODES } from '@timepick/shared'
 
 export const getDashboardStats = async (req: Request, res: Response) => {
   try {
@@ -49,7 +50,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
 export const createSlots = async (req: Request, res: Response) => {
   const { slots } = req.body
   if (!Array.isArray(slots)) {
-    res.status(400).json({ error: 'Invalid payload' })
+    res.status(400).json({ error: 'Invalid payload', code: ERROR_CODES.VALIDATION_ERROR })
     return
   }
 
@@ -172,11 +173,11 @@ export const exportUsers = async (req: Request, res: Response): Promise<void> =>
 export const importUsers = async (req: Request, res: Response): Promise<void> => {
   try {
     if (!req.file) {
-      res.status(400).json({ error: 'Aucun fichier reçu' })
+      res.status(400).json({ error: 'Aucun fichier reçu. Sélectionnez un fichier, puis réessayez.', code: ERROR_CODES.NO_FILE_RECEIVED })
       return
     }
     if (req.file.size === 0) {
-      res.status(400).json({ error: 'Fichier vide' })
+      res.status(400).json({ error: 'Ce fichier est vide. Choisissez un autre fichier.', code: ERROR_CODES.EMPTY_FILE })
       return
     }
     const content = req.file.buffer.toString('utf-8')
@@ -194,7 +195,7 @@ export const importUsers = async (req: Request, res: Response): Promise<void> =>
     res.json(result)
   } catch (err) {
     if (err instanceof CsvFormatError) {
-      res.status(400).json({ error: err.message })
+      res.status(400).json({ error: err.message, code: ERROR_CODES.CSV_FORMAT_ERROR })
       return
     }
     console.error('[Import Users Error]:', err)
@@ -219,7 +220,7 @@ export const getUserDetails = async (req: Request, res: Response) => {
     `, [id])
 
     if (userResult.rows.length === 0) {
-      res.status(404).json({ error: 'Utilisateur non trouvé' })
+      res.status(404).json({ error: 'Utilisateur non trouvé', code: ERROR_CODES.USER_NOT_FOUND })
       return
     }
 
@@ -259,7 +260,7 @@ export const createUser = async (req: Request, res: Response) => {
     )
 
     if (existingUser.rows.length > 0) {
-      res.status(409).json({ error: 'Un utilisateur avec cet email existe déjà' })
+      res.status(409).json({ error: 'Un utilisateur avec cet email existe déjà', code: ERROR_CODES.EMAIL_ALREADY_EXISTS })
       return
     }
 
@@ -296,7 +297,7 @@ export const createUser = async (req: Request, res: Response) => {
     res.status(201).json(createdUser)
   } catch (err) {
     if (err instanceof ZodError) {
-      res.status(400).json({ error: formatZodError(err) })
+      res.status(400).json({ error: formatZodError(err), code: ERROR_CODES.VALIDATION_ERROR })
       return
     }
     console.error(err)
@@ -317,7 +318,7 @@ export const updateUser = async (req: Request, res: Response) => {
     )
 
     if (existingUser.rows.length === 0) {
-      res.status(404).json({ error: 'Utilisateur non trouvé' })
+      res.status(404).json({ error: 'Utilisateur non trouvé', code: ERROR_CODES.USER_NOT_FOUND })
       return
     }
 
@@ -330,7 +331,7 @@ export const updateUser = async (req: Request, res: Response) => {
         "SELECT COUNT(*) FROM users WHERE role = 'admin'"
       )
       if (parseInt(adminCount.rows[0].count) <= 1) {
-        res.status(409).json({ error: 'Impossible de rétrograder le dernier administrateur' })
+        res.status(409).json({ error: 'Impossible de rétrograder le dernier administrateur', code: ERROR_CODES.LAST_ADMIN })
         return
       }
     }
@@ -383,7 +384,7 @@ export const updateUser = async (req: Request, res: Response) => {
     }
 
     if (updates.length === 0) {
-      res.status(400).json({ error: 'Aucune donnée à mettre à jour' })
+      res.status(400).json({ error: 'Aucune donnée à mettre à jour', code: ERROR_CODES.NO_FIELDS_TO_UPDATE })
       return
     }
 
@@ -447,7 +448,7 @@ export const updateUser = async (req: Request, res: Response) => {
     res.json(responseData)
   } catch (err) {
     if (err instanceof ZodError) {
-      res.status(400).json({ error: formatZodError(err) })
+      res.status(400).json({ error: formatZodError(err), code: ERROR_CODES.VALIDATION_ERROR })
       return
     }
     console.error(err)
@@ -472,14 +473,14 @@ export const deleteUser = async (req: Request, res: Response) => {
 
     if (existingUser.rows.length === 0) {
       await client.query('ROLLBACK')
-      res.status(404).json({ error: 'Utilisateur non trouvé' })
+      res.status(404).json({ error: 'Utilisateur non trouvé', code: ERROR_CODES.USER_NOT_FOUND })
       return
     }
 
     // Prevent self-deletion
     if (id === currentUserId) {
       await client.query('ROLLBACK')
-      res.status(409).json({ error: 'Vous ne pouvez pas supprimer votre propre compte' })
+      res.status(409).json({ error: 'Vous ne pouvez pas supprimer votre propre compte', code: ERROR_CODES.SELF_DELETE_FORBIDDEN })
       return
     }
 
@@ -490,7 +491,7 @@ export const deleteUser = async (req: Request, res: Response) => {
       )
       if (parseInt(adminCount.rows[0].count) <= 1) {
         await client.query('ROLLBACK')
-        res.status(409).json({ error: 'Impossible de supprimer le dernier administrateur' })
+        res.status(409).json({ error: 'Impossible de supprimer le dernier administrateur', code: ERROR_CODES.LAST_ADMIN })
         return
       }
     }
@@ -527,18 +528,18 @@ export const bulkDeleteUsers = async (req: Request, res: Response) => {
 
   // Validate body
   if (!Array.isArray(ids) || ids.length === 0 || !ids.every((id: unknown) => typeof id === 'string')) {
-    res.status(400).json({ error: 'ids doit être un tableau non vide de chaînes' })
+    res.status(400).json({ error: 'ids doit être un tableau non vide de chaînes', code: ERROR_CODES.VALIDATION_ERROR })
     return
   }
   if (ids.length > 100) {
-    res.status(400).json({ error: 'ids ne peut contenir plus de 100 éléments' })
+    res.status(400).json({ error: 'ids ne peut contenir plus de 100 éléments', code: ERROR_CODES.VALIDATION_ERROR })
     return
   }
 
   // Format UUID requis (colonne uuid) : un id malformé ferait échouer toute la
   // requête en 500 au lieu d'un 400 propre.
   if (!(ids as string[]).every((id) => UUID_RE.test(id))) {
-    res.status(400).json({ error: 'ids doit contenir des UUID valides' })
+    res.status(400).json({ error: 'ids doit contenir des UUID valides', code: ERROR_CODES.VALIDATION_ERROR })
     return
   }
 

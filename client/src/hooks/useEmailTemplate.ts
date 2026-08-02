@@ -9,7 +9,7 @@ import {
   type PatchForKey,
 } from '../services/email-templates.service'
 import { toast } from 'sonner'
-import { extractErrorMessage } from '@/lib/extractErrorMessage'
+import { userFacingErrorMessage } from '@/lib/userFacingErrorMessage'
 
 export const emailTemplateQueryKey = (templateKey: TemplateKey) =>
   ['settings', 'email-template', templateKey] as const
@@ -54,7 +54,7 @@ export const useResetAllEmailTemplates = () => {
       toast.success('Tous les modèles d’emails ont été réinitialisés.')
     },
     onError: (err: unknown) => {
-      toast.error(extractErrorMessage(err, 'Erreur lors de la réinitialisation des modèles'))
+      toast.error(userFacingErrorMessage(err, "La réinitialisation des modèles d'e-mails a échoué. Vos modèles actuels sont conservés, réessayez."))
     },
   })
 }

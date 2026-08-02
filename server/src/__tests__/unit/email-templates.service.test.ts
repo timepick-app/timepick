@@ -118,6 +118,10 @@ function makeRow(key: string, body: string, defaultBody: string): EmailTemplateR
     templateKey: key as EmailTemplateRow['templateKey'],
     bodyMjml: body,
     defaultBodyMjml: defaultBody,
+    // Pas de personnalisation d'objet : la projection de ce service ne porte
+    // que le corps, ces deux champs ne font que compléter la forme de la row.
+    subject: null,
+    subjectAdmin: null,
     updatedAt: new Date('2026-05-01T12:00:00Z'),
   }
 }

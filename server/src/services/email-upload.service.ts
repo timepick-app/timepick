@@ -58,7 +58,7 @@ export async function processEmailImage(
   const ft = await fileTypeMod.fileTypeFromBuffer(buffer)
 
   if (!ft || !Object.prototype.hasOwnProperty.call(ALLOWED_MIME, ft.mime)) {
-    throw new UnsupportedImageError("Format d'image non supporté")
+    throw new UnsupportedImageError("Ce format d'image n'est pas pris en charge. Utilisez un fichier JPEG, PNG ou WebP.")
   }
 
   // F12 fix: cap input pixels to prevent image-bomb DoS (a small compressed
@@ -78,13 +78,13 @@ export async function processEmailImage(
       console.error('[EmailUpload] sharp processing failed:', msg)
     }
     if (/limitInputPixels|too large|input image exceeds/i.test(msg)) {
-      throw new UnsupportedImageError('Image trop grande (limite : 50 mégapixels)')
+      throw new UnsupportedImageError('Cette image est trop grande pour être traitée. Réduisez ses dimensions, puis réessayez.')
     }
     // Decoder errors (corrupt headers, libspng read errors) are user-input
     // problems — surface as 415 so the client can correct the file rather
     // than retry blindly.
     if (/read error|invalid|unsupported|truncated|corrupt/i.test(msg)) {
-      throw new UnsupportedImageError('Image illisible ou corrompue')
+      throw new UnsupportedImageError('Cette image est illisible ou endommagée. Choisissez un autre fichier.')
     }
     throw new ImageProcessingError("Erreur lors du décodage de l'image")
   }

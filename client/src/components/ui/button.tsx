@@ -28,8 +28,16 @@ export const __buttonSizeKeys = [
 type ButtonVariantKey = typeof __buttonVariantKeys[number]
 type ButtonSizeKey = typeof __buttonSizeKeys[number]
 
+// Anneau de focus (WCAG 1.4.11, non-text contrast, seuil 3:1) : jeton
+// --ring (zinc-500, cf. index.css:root) à PLEINE opacité. Pour un bouton
+// icône-seule (`size="icon"`/`"icon-sm"`), cet anneau est le SEUL repère de
+// focus visible — `ring-ring/50` composité ne montait qu'à 1,42:1 sur
+// #fafafa (zinc-50) / 1,44:1 sur blanc ; `ring-ring` plein sur zinc-500
+// atteint 4,63:1 / 4,83:1 (calcul WCAG 2.x, verrouillé par
+// __tests__/focusRingContrast.test.ts). Ne jamais réintroduire `/50` ici
+// ni surcharger localement — le correctif vit dans la primitive partagée.
 const buttonVariants = cva(
-  "inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:ring-offset-0 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:border-ring focus-visible:ring-ring focus-visible:ring-[3px] focus-visible:ring-offset-0 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {

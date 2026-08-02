@@ -115,11 +115,13 @@ export function FileDropzone({
   const handleFile = (file: File | undefined) => {
     if (!file) return
     if (accept && !accept.split(',').some((mime) => mime.trim() === file.type)) {
-      fail('Format de fichier non supporté')
+      fail("Format de fichier non supporté. Rien n'a été envoyé, choisissez un autre fichier.")
       return
     }
     if (maxSizeBytes !== undefined && file.size > maxSizeBytes) {
-      fail(`Fichier trop volumineux (max ${maxSizeBytes / 1024 / 1024} Mo)`)
+      fail(
+        `Fichier trop volumineux (max ${maxSizeBytes / 1024 / 1024} Mo). Rien n'a été envoyé, choisissez un fichier plus léger.`
+      )
       return
     }
     setError(null)

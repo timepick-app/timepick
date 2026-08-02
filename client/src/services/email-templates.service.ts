@@ -1,4 +1,5 @@
 import api, { type ApiResponse } from './api'
+import type { SubjectVariable } from '@/lib/email-subject'
 
 export type TemplateKey =
   | 'invitation'
@@ -10,7 +11,20 @@ export type TemplateKey =
   | 'role_demoted'
   | 'unregistration_confirmation'
 
-export interface InvitationTemplate {
+/**
+ * Part « objet » commune aux deux formes de DTO. Le serveur est propriétaire de
+ * `subjectVariables` : le client n'entretient PAS sa propre liste de variables
+ * autorisées, elle dépend de ce que la fonction d'envoi passe au rendu.
+ */
+interface SubjectFields {
+  /** Personnalisation, ou `null` = objet d'usine. Forme SOURCE, à jetons. */
+  subject: string | null
+  /** Objet d'usine, forme SOURCE. Point de départ de l'édition. */
+  defaultSubject: string
+  subjectVariables: SubjectVariable[]
+}
+
+export interface InvitationTemplate extends SubjectFields {
   templateKey: 'invitation'
   bodyMjml: string
   defaultBodyMjml: string
@@ -21,12 +35,19 @@ export interface InvitationTemplate {
   updatedAt: string
 }
 
-export interface SystemTemplate {
+export interface SystemTemplate extends SubjectFields {
   templateKey: Exclude<TemplateKey, 'invitation'>
   introText: string
   signatureText: string
   defaultIntroText: string
   defaultSignatureText: string
+  /**
+   * `magic_link_login` SEUL : ce modèle a deux objets, choisis à l'envoi sur le
+   * rôle du destinataire. Leur PRÉSENCE est le prédicat qui fait apparaître le
+   * sélecteur « Membre / Administrateur » dans le popover.
+   */
+  subjectAdmin?: string | null
+  defaultSubjectAdmin?: string
   updatedAt: string
 }
 
@@ -37,9 +58,16 @@ export type TemplateForKey<K extends TemplateKey> = K extends 'invitation'
   ? InvitationTemplate
   : SystemTemplate
 
-export type PatchForKey<K extends TemplateKey> = K extends 'invitation'
+/** Tri-état par champ : absent = ne touche pas, `null` = efface, chaîne = écrit. */
+export interface SubjectPatch {
+  subject?: string | null
+  subjectAdmin?: string | null
+}
+
+export type PatchForKey<K extends TemplateKey> = (K extends 'invitation'
   ? { bodyMjml: string }
-  : { introText: string; signatureText: string }
+  : { introText: string; signatureText: string }) &
+  SubjectPatch
 
 export const getEmailTemplate = async <K extends TemplateKey>(
   templateKey: K,

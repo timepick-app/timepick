@@ -1,5 +1,6 @@
 import { getClient, query } from '../db'
 import { NotFoundError } from '../errors/NotFoundError'
+import { ERROR_CODES } from '@timepick/shared'
 
 /**
  * Type User pour les réponses API (camelCase)
@@ -31,7 +32,7 @@ export const eventUsersService = {
     // Vérifier que l'événement existe
     const eventCheck = await query('SELECT id FROM events WHERE id = $1', [eventId])
     if (eventCheck.rows.length === 0) {
-      throw new NotFoundError('Événement non trouvé')
+      throw new NotFoundError('Événement non trouvé', ERROR_CODES.EVENT_NOT_FOUND)
     }
 
     // Vérifier que tous les utilisateurs existent
@@ -42,7 +43,7 @@ export const eventUsersService = {
         [uniqueUserIds]
       )
       if (usersCheck.rows.length !== uniqueUserIds.length) {
-        throw new NotFoundError('Un ou plusieurs utilisateurs non trouvés')
+        throw new NotFoundError('Un ou plusieurs utilisateurs non trouvés', ERROR_CODES.USER_NOT_FOUND)
       }
     }
 
@@ -109,13 +110,13 @@ export const eventUsersService = {
     // Vérifier que l'utilisateur existe
     const userCheck = await query('SELECT id FROM users WHERE id = $1', [userId])
     if (userCheck.rows.length === 0) {
-      throw new NotFoundError('Utilisateur non trouvé')
+      throw new NotFoundError('Utilisateur non trouvé', ERROR_CODES.USER_NOT_FOUND)
     }
 
     // Vérifier que l'événement existe
     const eventCheck = await query('SELECT id FROM events WHERE id = $1', [eventId])
     if (eventCheck.rows.length === 0) {
-      throw new NotFoundError('Événement non trouvé')
+      throw new NotFoundError('Événement non trouvé', ERROR_CODES.EVENT_NOT_FOUND)
     }
 
     try {

@@ -1,3 +1,4 @@
+import { ERROR_CODES } from '@timepick/shared';
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { query } from '../db';
@@ -86,7 +87,7 @@ export const createFirstAdmin = async (req: Request, res: Response): Promise<voi
     const { link, expirationDate } = generateBootstrapAdminLink(email, firstName, lastName)
     const sent = await sendSetupAdminEmail(email, link, expirationDate, firstName, lastName)
     if (!sent) {
-      res.status(500).json({ error: { code: 'EMAIL_SEND_FAILED', message: "Échec de l'envoi du lien. Vérifiez la configuration SMTP de l'étape précédente." } })
+      res.status(500).json({ error: { code: ERROR_CODES.EMAIL_SEND_FAILED, message: "Échec de l'envoi du lien. Vérifiez la configuration SMTP de l'étape précédente." } })
       return
     }
     res.status(202).json({ data: { message: 'Lien de connexion envoyé. Vérifiez votre boîte mail.' } })

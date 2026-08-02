@@ -29,6 +29,7 @@
  *   the assumption rather than discover it the hard way.
  */
 
+import { ERROR_CODES } from '@timepick/shared'
 import type { Request, Response } from 'express'
 import { ZodError } from 'zod'
 import {
@@ -86,7 +87,7 @@ export const putShellPartHandler = async (
       })
       res
         .status(400)
-        .json({ error: { code: 'VALIDATION_ERROR', message: contentResult.error } })
+        .json({ error: { code: ERROR_CODES.VALIDATION_ERROR, message: contentResult.error } })
       return
     }
 
@@ -107,7 +108,7 @@ export const putShellPartHandler = async (
       })
       res
         .status(404)
-        .json({ error: { code: 'NOT_FOUND', message: error.message } })
+        .json({ error: { code: error.code, message: error.message } })
       return
     }
 
@@ -129,7 +130,7 @@ export const putShellPartHandler = async (
       "Erreur lors de l'enregistrement du bloc",
     )
     res
-      .status(apiError.code === 'VALIDATION_ERROR' ? 400 : 500)
+      .status(apiError.code === ERROR_CODES.VALIDATION_ERROR ? 400 : 500)
       .json({ error: apiError })
   }
 }
@@ -180,7 +181,7 @@ export const deleteShellPartHandler = async (
       })
       res
         .status(404)
-        .json({ error: { code: 'NOT_FOUND', message: error.message } })
+        .json({ error: { code: error.code, message: error.message } })
       return
     }
 
@@ -199,7 +200,7 @@ export const deleteShellPartHandler = async (
     console.error('[ShellParts][DELETE] unexpected error', error)
     const apiError = formatApiError(error, 'Erreur lors de la suppression du bloc')
     res
-      .status(apiError.code === 'VALIDATION_ERROR' ? 400 : 500)
+      .status(apiError.code === ERROR_CODES.VALIDATION_ERROR ? 400 : 500)
       .json({ error: apiError })
   }
 }

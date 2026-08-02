@@ -1,3 +1,4 @@
+import { ERROR_CODES } from '@timepick/shared'
 import { Router } from 'express'
 import rateLimit from 'express-rate-limit'
 import { requireAdmin } from '../middleware/adminAuth'
@@ -18,7 +19,7 @@ const emergencyLoginLimiter = rateLimit({
   limit: 5,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { code: 'RATE_LIMITED' },
+  message: { code: ERROR_CODES.RATE_LIMITED },
 })
 
 export const recoveryPublicRoutes = Router()

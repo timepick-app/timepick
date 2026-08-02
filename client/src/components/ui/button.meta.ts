@@ -99,6 +99,11 @@ export const buttonMeta: ComponentMeta = {
       correct: '<p id="save-reason" className="text-xs text-muted-foreground">Renseignez un nom pour enregistrer.</p>\n<Button disabled={reason !== null} aria-describedby={reason ? "save-reason" : undefined}>Enregistrer</Button>',
       wrong: '<Button onClick={() => { if (!name.trim()) { setError(\'Le nom est requis\'); return } save() }}>Enregistrer</Button>',
     },
+    {
+      rule: 'L\'anneau de focus-visible est le SEUL repère pour un bouton icône-seule (`size="icon"`/`"icon-sm"`) : jeton `--ring` en PLEINE opacité (`focus-visible:ring-ring`, sans `/50`) — WCAG 1.4.11 (non-text contrast), seuil 3:1. Calcul (luminance relative, (L1+0,05)/(L2+0,05)) : 4,63:1 sur #fafafa (zinc-50) et 4,83:1 sur blanc (`--background`). Ne jamais réintroduire `ring-ring/50` ni surcharger `--ring` localement dans un composant consommateur — l\'ancienne valeur (240 4.8% 70%, opacité 50%) ne montait qu\'à 1,42:1 / 1,44:1.',
+      correct: '<Button variant="ghost" size="icon"><Pencil /></Button> {/* hérite focus-visible:ring-ring plein de la base cva */}',
+      wrong: '<Button variant="ghost" size="icon" className="focus-visible:ring-ring/50"><Pencil /></Button> {/* réintroduit l\'anneau à 50% d\'opacité, sous le seuil 3:1 */}',
+    },
   ],
   antiPatterns: [
     {
@@ -111,7 +116,11 @@ export const buttonMeta: ComponentMeta = {
     },
     {
       title: 'size="icon" (36px) pour une action de ligne de data-table',
-      description: 'Dans une data-table, un bouton icône-seule doit rester à fleur de la rangée compacte h-8. Utiliser `size="icon-sm"` (carré 32px), pas `size="icon"` (36px) ni un override `className="h-8 w-8"`.',
+      description: 'Dans une data-table, un bouton icône-seule doit rester à fleur de la rangée compacte h-8. Utiliser `size="icon-sm"` (carré 32px), pas `size="icon"` (36px) ni un override `className="h-8 w-8"` — sauf bascule conditionnelle, cf. l\'entrée suivante.',
+    },
+    {
+      title: 'Override de boîte hors échelle quand la bascule est conditionnelle',
+      description: 'Un `size` est une prop React : aucune requête de conteneur ni aucun point de rupture ne peut le commuter. Quand un bouton doit changer de forme selon la largeur de son conteneur (icône-seule en étroit, icône + libellé en large), l\'override par `className` est donc le seul geste possible — et il est ADMIS à une condition : reproduire exactement une boîte de l\'échelle, jamais en inventer une. `size="sm" className="w-8 px-0 @[…]:w-auto @[…]:px-3"` redonne au pixel la boîte de `icon-sm` (32 × 32), parce que `sm` porte déjà `h-8` et que `tailwind-merge` élimine son `px-3` au lieu de l\'empiler ; `className="h-10 w-10"` invente une boîte et désaligne la rangée. Même famille que les métriques conditionnées par conteneur déjà en place sur les listes de créneaux (`min-h-11 @xl/agenda:min-h-9`).',
     },
     {
       title: 'Hauteurs mixtes dans une paire d\'actions (footer / barre d\'actions)',

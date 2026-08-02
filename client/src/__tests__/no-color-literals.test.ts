@@ -30,7 +30,35 @@ describe('Garde anti-littéral couleur de fond email', () => {
 
   // Auto-exclusion (sinon ce fichier se scannerait lui-même).
   const SELF = '../__tests__/no-color-literals.test.ts'
+
+  /**
+   * Exceptions documentées, chemin → raison — la collision que la LIMITE CONNUE
+   * ci-dessus annonçait, survenue le 2026-08-01.
+   *
+   * Une exception se justifie PAR ÉCRIT et se borne à un chemin. Le test
+   * « aucune exception documentée n'est morte » ci-dessous refuse toute entrée
+   * qui ne protège plus rien : une exception périmée rouvre un trou dans la
+   * garde sans que personne le voie.
+   */
+  const DOCUMENTED_EXCEPTIONS: Record<string, string> = {
+    '../components/ui/__tests__/focusRingContrast.test.ts':
+      "MJ_BODY_BACKGROUND_COLOR vaut aujourd'hui la même valeur que zinc-50, le " +
+      "fond de la barre d'outils de l'éditeur. Ce test CALCULE un rapport de " +
+      'contraste WCAG contre ce fond : la valeur y est le sujet du calcul, pas ' +
+      'une donnée de fixture. Un placeholder rendrait le test faux, et importer ' +
+      'MJ_BODY_BACKGROUND_COLOR coupleraient deux couleurs sans rapport — ce que ' +
+      'la LIMITE CONNUE interdit explicitement.',
+  }
+
   const forbidden = MJ_BODY_BACKGROUND_COLOR // valeur runtime, jamais figée
+
+  // Token hex ENTIER (frontières non-hex), insensible à la casse : '#fafafa'
+  // matche, mais '#fafafaaa' (8-digits), '#faf' (3-digits) ou le littéral
+  // embarqué dans un identifiant (ex. un import) ne matchent pas.
+  const literalRe = new RegExp(
+    `(?<![0-9a-fA-F])${forbidden.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![0-9a-fA-F])`,
+    'i',
+  )
 
   it('la sonde est un hex 6-digits valide (sinon le garde serait inopérant)', () => {
     // Garde-fou : si la constante n'est plus un hex 6-digits (ex. '#fff', ''),
@@ -44,14 +72,22 @@ describe('Garde anti-littéral couleur de fond email', () => {
     expect(Object.keys(testFiles).length).toBeGreaterThan(0)
   })
 
+  it('aucune exception documentée n’est morte', () => {
+    // Une exception qui ne protège plus rien est pire qu'absente : elle rouvre
+    // un trou dans la garde sans que personne le voie. Même discipline que la
+    // table `IMPACTS` du détecteur de dérive documentaire.
+    const dead = Object.keys(DOCUMENTED_EXCEPTIONS).filter(
+      (path) => !literalRe.test(testFiles[path] ?? ''),
+    )
+    expect(
+      dead,
+      `Exception(s) devenue(s) inutile(s) — le littéral « ${forbidden} » n'y est plus (ou le fichier a été déplacé) :\n${dead.join('\n')}\n\nRetirer l'entrée de DOCUMENTED_EXCEPTIONS.`,
+    ).toEqual([])
+  })
+
   it('aucun test client ne recopie en littéral la valeur de MJ_BODY_BACKGROUND_COLOR', () => {
-    // Token hex ENTIER (frontières non-hex), insensible à la casse : '#fafafa' matche,
-    // mais '#fafafaaa' (8-digits), '#faf' (3-digits) ou le littéral embarqué dans un
-    // identifiant (ex. un import) ne matchent pas.
-    const escaped = forbidden.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const literalRe = new RegExp(`(?<![0-9a-fA-F])${escaped}(?![0-9a-fA-F])`, 'i')
     const offenders = Object.entries(testFiles)
-      .filter(([path]) => path !== SELF)
+      .filter(([path]) => path !== SELF && !(path in DOCUMENTED_EXCEPTIONS))
       .filter(([, source]) => literalRe.test(source))
       .map(([path]) => path)
 
@@ -59,7 +95,7 @@ describe('Garde anti-littéral couleur de fond email', () => {
       offenders,
       `Littéral « ${forbidden} » (couleur de fond email) trouvé dans :\n${offenders.join('\n')}\n\n` +
         `• Si c'est le fond email → importe MJ_BODY_BACKGROUND_COLOR depuis '@timepick/shared' au lieu du littéral.\n` +
-        `• Si c'est une AUTRE couleur (bouton, carte, marque…) → FAUX POSITIF : remplace par un placeholder arbitraire distinct (ne couple PAS un champ non-fond à la constante).`,
+        `• Si c'est une AUTRE couleur (bouton, carte, marque…) → FAUX POSITIF : remplace par un placeholder arbitraire distinct (ne couple PAS un champ non-fond à la constante), ou inscris une exception DOCUMENTÉE dans DOCUMENTED_EXCEPTIONS.`,
     ).toEqual([])
   })
 })

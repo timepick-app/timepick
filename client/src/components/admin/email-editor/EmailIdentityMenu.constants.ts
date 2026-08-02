@@ -11,6 +11,14 @@ export { MAX_BUTTON_RADIUS } from '@/lib/email-brand-constants'
 
 export const IDENTITY_MENU_BUTTON_LABEL = "Identité visuelle"
 
+/**
+ * Libellé raccourci du déclencheur, affiché au palier « court » de la barre
+ * d'outils. Il RACCOURCIT le libellé, il ne le renomme pas : « Identité »
+ * reste un mot porteur et non une abréviation, donc le nom accessible court
+ * n'entre pas en conflit avec « Label in Name » (WCAG 2.5.3).
+ */
+export const IDENTITY_MENU_BUTTON_LABEL_SHORT = "Identité"
+
 export const IDENTITY_MENU_TITLE = "Identité visuelle des emails"
 
 export const FIELD_LABEL_LOGO = "Logo"

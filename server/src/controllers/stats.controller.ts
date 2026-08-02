@@ -24,7 +24,7 @@ export const getAllEventsStats = async (req: Request, res: Response): Promise<vo
   } catch (error) {
     // Si c'est une NotFoundError (événement non trouvé), retourner 404
     if (error instanceof NotFoundError) {
-      res.status(404).json({ error: error.message })
+      res.status(404).json({ error: error.message, code: error.code })
       return
     }
     console.error('Error fetching all events stats:', error)

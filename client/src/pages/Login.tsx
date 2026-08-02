@@ -42,7 +42,7 @@ interface ApiError {
 }
 
 type LoginStatus = 'idle' | 'loading' | 'success' | 'error';
-type LinkState = 'loading' | 'success' | 'expired' | 'setupDone' | 'invalid' | 'error';
+type LinkState = 'loading' | 'success' | 'expired' | 'alreadyUsed' | 'setupDone' | 'invalid' | 'error';
 type ResendStatus = 'idle' | 'sending' | 'sent' | 'rate_limited' | 'error';
 
 export default function Login() {
@@ -69,6 +69,42 @@ export default function Login() {
     retry: false,
   });
   const smtpDegraded = healthData?.services?.smtp === 'degraded';
+
+  /**
+   * Demande un lien neuf pour le jeton présenté. Prend le jeton en paramètre plutôt
+   * que de lire `currentToken` : l'appel automatique ci-dessus part depuis le `catch`
+   * de la vérification, avant que React n'ait committé cet état.
+   */
+  const requestFreshLink = useCallback(async (token: string) => {
+    setResendError(null);
+    setResendErrorCode(null);
+    setResendStatus('sending');
+    try {
+      await api.post('/auth/resend-invitation', { token });
+      setResendStatus('sent');
+    } catch (err: unknown) {
+      const apiError = err as ApiError;
+      const errorCode = apiError.response?.data?.error?.code;
+      setResendErrorCode(errorCode ?? null);
+      if (errorCode === 'RATE_LIMITED') {
+        setResendStatus('rate_limited');
+      } else if (errorCode === 'EMAIL_SERVICE_UNAVAILABLE') {
+        setResendError("Le service d'envoi d'email est temporairement indisponible. Veuillez réessayer plus tard.");
+        setResendStatus('error');
+      } else if (errorCode === 'RESEND_NOT_AVAILABLE') {
+        setResendError("Impossible de renvoyer un lien pour cette invitation. Contactez l'administrateur.");
+        setResendStatus('error');
+      } else {
+        setResendError('Une erreur est survenue. Veuillez réessayer.');
+        setResendStatus('error');
+      }
+    }
+  }, []);
+
+  const handleResend = () => {
+    if (!currentToken || resendStatus === 'sending') return;
+    void requestFreshLink(currentToken);
+  };
 
   // Vérification du magic link : déclarée en useCallback AVANT l'effet pour
   // satisfaire react-hooks (exhaustive-deps, immutability). Les re-exécutions
@@ -105,16 +141,36 @@ export default function Login() {
       const errorMessage = apiError.response?.data?.error?.message;
       const context = apiError.response?.data?.error?.context;
 
+      // Lien mort mais renvoyable : on n'attend pas un clic de plus. Arriver ici
+      // EST la demande — l'intention du porteur du lien n'a pas d'ambiguïté, et lui
+      // faire cliquer « Demander un nouveau lien » n'ajoutait qu'une étape entre lui
+      // et sa boîte mail. Le garde one-shot `verifiedTokenRef` borne l'envoi à un
+      // par jeton présenté ; au-delà, le rate-limit serveur (1/min) prend le relais.
+      const canResend = (context?.canResend as boolean | undefined) ?? false;
+
       if (errorCode === 'TOKEN_EXPIRED') {
         setLinkState('expired');
         setExpiredContext({
           eventName: context?.eventName as string | undefined,
           eventId: context?.eventId as string | undefined,
           expiredAt: context?.expiredAt as string | undefined,
-          canResend: (context?.canResend as boolean | undefined) ?? false,
+          canResend,
           isAdmin: (context?.isAdmin as boolean | undefined) ?? false,
         });
         setError('Ce lien de connexion a expiré.');
+        if (canResend) void requestFreshLink(token);
+      } else if (errorCode === 'TOKEN_ALREADY_USED') {
+        // Un lien ne vaut qu'une session. Pas d'`expiredAt` ici : le lien n'a pas
+        // expiré, il a servi — afficher une date d'expiration serait mensonger.
+        setLinkState('alreadyUsed');
+        setExpiredContext({
+          eventName: context?.eventName as string | undefined,
+          eventId: context?.eventId as string | undefined,
+          canResend,
+          isAdmin: (context?.isAdmin as boolean | undefined) ?? false,
+        });
+        setError('Ce lien de connexion a déjà été utilisé.');
+        if (canResend) void requestFreshLink(token);
       } else if (errorCode === 'INVALID_TOKEN') {
         setLinkState('invalid');
         setError('Ce lien de connexion est invalide.');
@@ -129,7 +185,7 @@ export default function Login() {
         setError(errorMessage || 'Une erreur est survenue lors de la connexion.');
       }
     }
-  }, [login, navigate]);
+  }, [login, navigate, requestFreshLink]);
 
   // Vérifie le token de magic link présent dans l'URL — one-shot par token.
   useEffect(() => {
@@ -152,33 +208,6 @@ export default function Login() {
     }
   }, [searchParams, isAuthenticated, navigate, verifyAndLogin, user]);
 
-  const handleResend = async () => {
-    if (!currentToken || resendStatus === 'sending') return;
-
-    setResendError(null);
-    setResendErrorCode(null);
-    setResendStatus('sending');
-    try {
-      await api.post('/auth/resend-invitation', { token: currentToken });
-      setResendStatus('sent');
-    } catch (err: unknown) {
-      const apiError = err as ApiError;
-      const errorCode = apiError.response?.data?.error?.code;
-      setResendErrorCode(errorCode ?? null);
-      if (errorCode === 'RATE_LIMITED') {
-        setResendStatus('rate_limited');
-      } else if (errorCode === 'EMAIL_SERVICE_UNAVAILABLE') {
-        setResendError("Le service d'envoi d'email est temporairement indisponible. Veuillez réessayer plus tard.");
-        setResendStatus('error');
-      } else if (errorCode === 'RESEND_NOT_AVAILABLE') {
-        setResendError("Impossible de renvoyer un lien pour cette invitation. Contactez l'administrateur.");
-        setResendStatus('error');
-      } else {
-        setResendError('Une erreur est survenue. Veuillez réessayer.');
-        setResendStatus('error');
-      }
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -212,6 +241,17 @@ export default function Login() {
     if (linkState === 'success') return <MagicLinkSuccess />;
     if (linkState === 'expired') return (
       <MagicLinkExpired
+        expiredContext={expiredContext}
+        resendStatus={resendStatus}
+        resendError={resendError}
+        showEmergencyLink={(expiredContext?.isAdmin ?? false) && resendErrorCode === 'EMAIL_SERVICE_UNAVAILABLE'}
+        onResend={handleResend}
+        onBackToLogin={backToLogin}
+      />
+    );
+    if (linkState === 'alreadyUsed') return (
+      <MagicLinkExpired
+        variant="already-used"
         expiredContext={expiredContext}
         resendStatus={resendStatus}
         resendError={resendError}

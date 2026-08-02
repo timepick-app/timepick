@@ -37,7 +37,7 @@ export const globalConventions: GlobalConventions = {
         "- **D3 — Destructif + constructif dans le même groupe** : ancrer le destructif à gauche via `mr-auto` (ou `justify-between`), le groupe constructif à droite. Ne jamais coller le destructif au CTA.",
         "- **D4 — Navigation wizard** : `justify-between` (Précédent à gauche / Suivant-Terminer à droite).",
         '- **D5 — En-tête de page** (titre/stats + CTA) : outer `justify-between` (titre/stats à gauche, groupe de boutons à droite) ; le groupe de boutons interne suit R1 (`flex flex-wrap justify-end gap-2` + `max-sm:[&>button]:flex-1`).',
-        "- **D6 — Toolbar et actions inline de ligne de table** : hors règle (layout fonctionnel ; `size=\"sm\"`/`icon-sm` ; bouton de fermeture `X` et menu kebab à l'extrême droite par convention).",
+        "- **D6 — Toolbar et actions inline de ligne de table** : hors règle (layout fonctionnel ; `size=\"sm\"`/`icon-sm` ; bouton de fermeture `X` et menu kebab à l'extrême droite par convention). La dérogation couvre aussi **la micro-copie en primitives texte** (titre, libellé de verrou, hors `<Typography>`) et **le comportement responsive** de ces barres : des paliers — entier, libellés raccourcis, sélecteur réduit à son icône, icônes seules — choisis par **dégradation au débordement**, jamais par un seuil en pixels. La barre mesure ce dont elle a besoin dans chaque tenue et retient **la plus lisible qui tient** : un seuil fixe, calé sur la barre la plus chargée, fait disparaître des libellés alors qu'il reste 600 px de vide sur les barres plus légères. Même règle pour le titre : son plafond de largeur vaut le plafond de mesure PLUS le mou restant, sinon il coupe du texte devant une barre à moitié vide. `flex-wrap` reste en plancher SOUS le palier icônes, filet de sécurité et jamais la réponse au manque de place. **Aucune exception par bouton** : si un palier met les libellés en icônes, il les met TOUS en icônes, action principale comprise. Un palier « icônes seules » garde son libellé DANS le DOM, masqué par `sr-only` et non `hidden` : le nom accessible vient alors du contenu et le `title` reste libre de porter une description DIFFÉRENTE. Le couple `aria-label` + `<span class=\"hidden\">` est proscrit — nom et description identiques, donc double annonce.",
       ].join('\n'),
       examples: [
         {
@@ -100,6 +100,44 @@ export const globalConventions: GlobalConventions = {
         {
           label: 'Incorrect — bannière pour un résultat éphémère',
           code: '<Banner variant="destructive">\n  <BannerDescription>Créneau supprimé</BannerDescription>\n</Banner>',
+        },
+      ],
+    },
+    {
+      heading: "Contenu d'un message d'échec",
+      body: [
+        "R7 à R9 disent **où** va un message. R14 dit **ce qu'il contient** — le vide qui a laissé l'application afficher pendant des mois le message brut du serveur ou celui de la couche réseau, jamais la phrase française écrite pour l'utilisateur.",
+        '',
+        "**R14 — Un message d'échec répond à trois questions, toujours, dans cet ordre :**",
+        '',
+        "1. **que ça a échoué** — sans jargon : jamais un nom de champ de l'API, une unité machine, un identifiant interne, ni un mot anglais ;",
+        "2. **si le travail de l'utilisateur est perdu ou conservé** — la question qui transforme un incident en panique, et celle qui manquait partout ;",
+        "3. **quoi faire maintenant.**",
+        '',
+        "Un message qui ne répond pas aux trois n'est pas terminé, quelle que soit sa qualité de langue. « Erreur lors de la sauvegarde » répond à la première et se tait sur les deux autres.",
+        '',
+        "**R14 bis — Ne jamais affirmer un état qu'on n'a pas vérifié.** Une absence totale de réponse (réseau coupé, hôte injoignable) autorise à affirmer que rien n'est parti. Un délai dépassé, non : on ne sait pas si le serveur a traité la demande, et le message doit inviter à vérifier plutôt que de trancher. Deux causes distinctes, donc deux phrases distinctes — jamais une seule qui mentirait une fois sur deux.",
+        '',
+        "**R14 ter — Le message du serveur n'est pas un message d'utilisateur par défaut.** Il est aussi lu dans les journaux par un développeur : un seul texte pour deux publics est la mécanique même qui a produit l'incident. Un message serveur ne s'affiche que si son code d'erreur figure dans la liste blanche explicite du client (`userFacingErrorCodes`), qui exclut par construction les codes relayant du jargon de validation. Un code inconnu est invisible : c'est la phrase de l'appelant qui s'affiche. Le préfixe « Erreur : » ne s'ajoute jamais devant — le message se suffit à lui-même.",
+        '',
+        "**L'incident fondateur.** Trois mois de jargon affiché à l'administrateur parce qu'une fonction s'appelait `extractErrorMessage` : sous ce nom, faire remonter le message du serveur en premier était le comportement évident, et le troisième paramètre s'appelait naturellement « fallback » — un secours, pas un défaut. Quarante-cinq appelants ont écrit consciencieusement une bonne phrase française en croyant qu'elle serait affichée. Le nom a fixé la sémantique, et la sémantique a fixé la priorité.",
+      ].join('\n'),
+      examples: [
+        {
+          label: 'Conforme — échec d\'enregistrement, formulaire toujours ouvert',
+          code: 'toast.error("L\'enregistrement a échoué. Vos modifications sont toujours à l\'écran, réessayez.")',
+        },
+        {
+          label: 'Conforme — délai dépassé, aucun état affirmé (R14 bis)',
+          code: 'toast.error("Le serveur n\'a pas répondu à temps. Vérifiez si votre modification a été prise en compte avant de réessayer.")',
+        },
+        {
+          label: 'Incorrect — dit l\'échec, se tait sur le sort du travail et sur la suite',
+          code: 'toast.error("Erreur lors de la sauvegarde")',
+        },
+        {
+          label: 'Incorrect — message serveur brut, préfixé, en jargon',
+          code: 'toast.error(`Erreur: ${err.response.data.error.message}`)',
         },
       ],
     },
@@ -173,6 +211,32 @@ export const globalConventions: GlobalConventions = {
         {
           label: 'Incorrect — emoji dans un span décoratif',
           code: '<Label htmlFor="user-ttl">\n  <span className="flex items-center gap-2">\n    <span className="text-base">👤</span>\n    <span>Connexion Membre</span>\n  </span>\n</Label>',
+        },
+      ],
+    },
+    {
+      heading: 'Couleur sur une surface sans classes utilitaires',
+      body: [
+        "**R13 — Le littéral hexadécimal est admis là où Tailwind n'existe pas, et sa provenance est gardée par un test.** Certaines surfaces sont rendues hors de l'application React — aujourd'hui le canvas de l'éditeur d'e-mails est la seule : son document est un e-mail, dans une iframe qui n'a ni les classes utilitaires ni les variables CSS du thème. Le seul canal de couleur y est la valeur littérale. Trois obligations, aucune dérogation :",
+        '',
+        "1. **Provenance.** Chaque littéral est soit la conversion d'un token `:root` du thème (neutres : fonds, bordures, texte), soit la valeur d'une famille sémantique **déjà** employée par un composant `ui/` (`warning` → amber, `success` → green, `error` → red). Aucune teinte inventée, aucune famille nouvelle.",
+        "2. **Le thème clair fait foi.** La conversion se lit dans `:root`, jamais dans `.dark`. Ce n'est pas une dérogation mais la conséquence du support : la cible de rendu est un e-mail à fond clair, pas l'interface d'administration. Un futur thème sombre de l'admin ne s'applique pas à ces surfaces — appliqué, il rendrait le texte illisible sur son propre fond.",
+        "3. **Garde mécanique, non optionnelle.** Un test vérifie **chaque** littéral contre sa provenance : les neutres sont comparés au token dont ils dérivent, relu dans `src/index.css` et converti ; les signaux sont comparés à la famille Tailwind dont ils se réclament. Sans cela, la parenté n'est qu'un commentaire : un ajustement de token laisserait les tests verts et la surface désalignée, en silence. Le même test **calcule** les rapports de contraste au lieu de les affirmer.",
+        '',
+        "La garde ESLint qui signale la palette brute ne couvre pas ces fichiers : elle inspecte les `className`, et ces couleurs vivent dans des chaînes CSS. Le test est donc le seul filet.",
+      ].join('\n'),
+      examples: [
+        {
+          label: "Neutre — conversion d'un token, garde croisée",
+          code: '/* #f4f4f5 = --muted (240 4.8% 95.9%) converti ; comparé au thème dans\n   __tests__/lockedShellSignalCss.test.ts */\nbackground-color: #f4f4f5;',
+        },
+        {
+          label: 'Signal — famille sémantique déjà employée par ui/',
+          code: "/* #d97706 = amber-600, la famille `warning` du Badge. Aucune couleur\n   nouvelle n'est introduite. */\nbackground-color: #d97706;",
+        },
+        {
+          label: "Incorrect — teinte choisie à l'œil, sans provenance ni garde",
+          code: 'background-color: #ffb020;',
         },
       ],
     },

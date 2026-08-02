@@ -17,7 +17,7 @@ function formatExpirationDate(dateString: string): string {
 }
 
 interface MagicLinkExpiredProps {
-  variant?: 'expired' | 'setup-already-done';
+  variant?: 'expired' | 'already-used' | 'setup-already-done';
   expiredContext: {
     eventName?: string;
     eventId?: string;
@@ -32,6 +32,39 @@ interface MagicLinkExpiredProps {
   onBackToLogin: () => void;
 }
 
+/**
+ * Copie de la carte selon la variante. `canResend` choisit la phrase de sortie :
+ * annoncer le lien neuf déjà parti (l'envoi est déclenché à l'atterrissage, sans
+ * clic — cf. Login.tsx), ou renvoyer vers la page de connexion quand le renvoi
+ * automatique n'est pas possible.
+ */
+function cardCopy(variant: NonNullable<MagicLinkExpiredProps['variant']>, canResend: boolean) {
+  const wayOut = canResend
+    ? 'Un nouveau vous est envoyé à l\'instant.'
+    : 'Retournez à la page de connexion pour en recevoir un nouveau.';
+
+  switch (variant) {
+    case 'setup-already-done':
+      return {
+        title: 'Configuration déjà effectuée',
+        headerDescription: "Ce lien d'installation a déjà servi à créer le compte administrateur. Recevez un lien de connexion pour accéder au tableau de bord.",
+        idleButtonLabel: 'Recevoir un lien de connexion',
+      };
+    case 'already-used':
+      return {
+        title: 'Lien déjà utilisé',
+        headerDescription: `Ce lien a déjà servi à ouvrir une session : pour votre sécurité, il ne fonctionne qu'une seule fois. ${wayOut}`,
+        idleButtonLabel: 'Demander un nouveau lien',
+      };
+    case 'expired':
+      return {
+        title: 'Lien expiré',
+        headerDescription: `Pour votre sécurité, les liens de connexion expirent après un délai. ${wayOut}`,
+        idleButtonLabel: 'Demander un nouveau lien',
+      };
+  }
+}
+
 export function MagicLinkExpired({
   variant = 'expired',
   expiredContext,
@@ -41,14 +74,7 @@ export function MagicLinkExpired({
   onResend,
   onBackToLogin,
 }: MagicLinkExpiredProps) {
-  const isSetupDone = variant === 'setup-already-done';
-  const title = isSetupDone ? 'Configuration déjà effectuée' : 'Lien expiré';
-  const headerDescription = isSetupDone
-    ? "Ce lien d'installation a déjà servi à créer le compte administrateur. Recevez un lien de connexion pour accéder au tableau de bord."
-    : expiredContext?.canResend
-      ? 'Pour votre sécurité, les liens de connexion expirent après un délai. Demandez-en un nouveau ci-dessous.'
-      : 'Pour votre sécurité, les liens de connexion expirent après un délai. Retournez à la page de connexion pour en recevoir un nouveau.';
-  const idleButtonLabel = isSetupDone ? 'Recevoir un lien de connexion' : 'Demander un nouveau lien';
+  const { title, headerDescription, idleButtonLabel } = cardCopy(variant, expiredContext?.canResend ?? false);
   return (
     <AuthShell>
       <Card>

@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express'
+import { ERROR_CODES } from '@timepick/shared'
 import {
   getOrganizationSettings,
   saveOrganizationSettings,
@@ -8,7 +9,6 @@ import {
   processOrganizationLogo,
   deleteOrganizationLogoFile,
   UnsupportedOrganizationLogoError,
-  OrganizationLogoProcessingError,
 } from '../services/organization-logo.service'
 import { organizationSettingsSchema } from '../validators/organization.validator'
 import { formatApiError } from '../validators/config.validator'
@@ -28,7 +28,7 @@ export const getOrganizationHandler = async (_req: Request, res: Response): Prom
   } catch (error) {
     console.error('[Organization] Error fetching settings:', error)
     res.status(500).json({
-      error: { code: 'INTERNAL_ERROR', message: "Erreur lors de la récupération de l'organisation" },
+      error: { code: ERROR_CODES.INTERNAL_ERROR, message: "Erreur lors de la récupération de l'organisation" },
     })
   }
 }
@@ -59,11 +59,11 @@ export const putOrganizationSettingsHandler = async (req: Request, res: Response
  */
 export const uploadOrganizationLogoHandler = async (req: Request, res: Response): Promise<void> => {
   if (!req.file) {
-    res.status(400).json({ error: 'Aucun fichier reçu' })
+    res.status(400).json({ error: 'Aucun fichier reçu. Sélectionnez un fichier, puis réessayez.', code: ERROR_CODES.NO_FILE_RECEIVED })
     return
   }
   if (req.file.size === 0) {
-    res.status(400).json({ error: 'Fichier vide' })
+    res.status(400).json({ error: 'Ce fichier est vide. Choisissez un autre fichier.', code: ERROR_CODES.EMPTY_FILE })
     return
   }
 
@@ -87,11 +87,7 @@ export const uploadOrganizationLogoHandler = async (req: Request, res: Response)
     res.json({ data: { logo: logoUrl } })
   } catch (error) {
     if (error instanceof UnsupportedOrganizationLogoError) {
-      res.status(415).json({ error: error.message })
-      return
-    }
-    if (error instanceof OrganizationLogoProcessingError) {
-      res.status(500).json({ error: error.message })
+      res.status(415).json({ error: error.message, code: ERROR_CODES.UNSUPPORTED_IMAGE })
       return
     }
     console.error('[Organization] Unexpected error uploading logo:', error)
@@ -121,7 +117,7 @@ export const deleteOrganizationLogoHandler = async (_req: Request, res: Response
   } catch (error) {
     console.error('[Organization] Error deleting logo:', error)
     res.status(500).json({
-      error: { code: 'INTERNAL_ERROR', message: 'Erreur lors de la suppression du logo' },
+      error: { code: ERROR_CODES.INTERNAL_ERROR, message: 'Erreur lors de la suppression du logo' },
     })
   }
 }

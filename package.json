@@ -1,6 +1,6 @@
 {
   "name": "timepick",
-  "version": "0.35.0",
+  "version": "0.36.0",
   "license": "FSL-1.1-MIT",
   "type": "module",
   "workspaces": [
@@ -55,6 +55,6 @@
     "**/*.mjml": "npm run verify:mjml-strict --"
   },
   "dependencies": {
-    "zod": "^4.4.3"
+    "zod": "4.4.3"
   }
 }

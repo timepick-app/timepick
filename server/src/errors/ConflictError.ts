@@ -5,13 +5,12 @@
  * Examples: slot at capacity, duplicate booking, resource locked
  */
 import { HttpError } from './HttpError'
+import { ERROR_CODES, type ErrorCode } from '@timepick/shared'
 
 export class ConflictError extends HttpError {
   public readonly name = 'ConflictError'
-  public readonly code: string
 
-  constructor(message: string, code: string = 'CONFLICT') {
-    super(409, message)
-    this.code = code
+  constructor(message: string, code: ErrorCode = ERROR_CODES.CONFLICT) {
+    super(409, message, code)
   }
 }

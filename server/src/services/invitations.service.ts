@@ -1,9 +1,10 @@
 import { query } from '../db'
 import { generateMagicLink } from './auth.service'
-import { sendEventInvitation } from './email.service'
+import { sendEventInvitation, loadSubjectOverrides } from './email.service'
 import { NotFoundError } from '../errors/NotFoundError'
 import { EmailDeliveryError } from '../errors/EmailDeliveryError'
 import { configService } from './config.service'
+import { ERROR_CODES } from '@timepick/shared'
 
 export const UNANSWERED_OVER_3_DAYS =
   "status = 'sent' AND clicked_at IS NULL AND sent_at < NOW() - INTERVAL '3 days'"
@@ -96,6 +97,9 @@ async function dispatchInvitations(
   // UNANSWERED_OVER_3_DAYS (alerte effacée + invitation jamais re-relançable). Elle reste
   // 'sent' avec son sent_at d'origine → re-relançable.
   const recordFailures = opts.recordFailures ?? true
+  // Une seule lecture des surcharges d'objet pour tout le lot : elles portent
+  // sur (modèle, événement), identiques pour chaque destinataire.
+  const subjectOverrides = await loadSubjectOverrides('invitation', eventId)
   const settled = await Promise.allSettled(
     users.map(async (user) => {
       try {
@@ -118,6 +122,7 @@ async function dispatchInvitations(
           expirationDate,
           user.first_name,
           user.last_name,
+          subjectOverrides,
         )
 
         if (!emailSent) {
@@ -218,7 +223,7 @@ export const invitationsService = {
       [eventId]
     )
     if (eventResult.rows.length === 0) {
-      throw new NotFoundError('Événement non trouvé')
+      throw new NotFoundError('Événement non trouvé', ERROR_CODES.EVENT_NOT_FOUND)
     }
     const eventData = eventResult.rows[0]
 
@@ -282,7 +287,7 @@ export const invitationsService = {
       [eventId]
     )
     if (eventResult.rows.length === 0) {
-      throw new NotFoundError('Événement non trouvé')
+      throw new NotFoundError('Événement non trouvé', ERROR_CODES.EVENT_NOT_FOUND)
     }
 
     const result = await query(
@@ -328,7 +333,7 @@ export const invitationsService = {
       [eventId]
     )
     if (eventResult.rows.length === 0) {
-      throw new NotFoundError('Événement non trouvé')
+      throw new NotFoundError('Événement non trouvé', ERROR_CODES.EVENT_NOT_FOUND)
     }
 
     const result = await query(
@@ -396,7 +401,7 @@ export const invitationsService = {
       [eventId]
     )
     if (eventResult.rows.length === 0) {
-      throw new NotFoundError('Événement non trouvé')
+      throw new NotFoundError('Événement non trouvé', ERROR_CODES.EVENT_NOT_FOUND)
     }
     const eventData = eventResult.rows[0]
 
@@ -409,7 +414,7 @@ export const invitationsService = {
       [eventId, userId]
     )
     if (userResult.rows.length === 0) {
-      throw new NotFoundError('Cet utilisateur n\'est pas sélectionné pour cet événement')
+      throw new NotFoundError('Cet utilisateur n\'est pas sélectionné pour cet événement', ERROR_CODES.USER_NOT_INVITED)
     }
     const userData = userResult.rows[0]
 
@@ -493,7 +498,7 @@ export const invitationsService = {
       [eventId]
     )
     if (eventResult.rows.length === 0) {
-      throw new NotFoundError('Événement non trouvé')
+      throw new NotFoundError('Événement non trouvé', ERROR_CODES.EVENT_NOT_FOUND)
     }
     const eventData = eventResult.rows[0]
 
@@ -542,7 +547,7 @@ export const invitationsService = {
     )
 
     if (result.rows.length === 0) {
-      throw new NotFoundError('Événement non trouvé')
+      throw new NotFoundError('Événement non trouvé', ERROR_CODES.EVENT_NOT_FOUND)
     }
 
     const eventData = result.rows[0]

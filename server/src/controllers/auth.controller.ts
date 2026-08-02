@@ -1,11 +1,13 @@
+import { ERROR_CODES } from '@timepick/shared';
 import { Request, Response } from 'express';
 import { query } from '../db';
-import { generateMagicLink } from '../services/auth.service';
+import { consumeMagicLinkToken, generateMagicLink, persistMagicLinkToken } from '../services/auth.service';
 import { configService } from '../services/config.service';
 import { sendAdminMagicLinkEmail, sendUserMagicLinkEmail } from '../services/email.service';
 import { requestMagicLinkSchema, verifyMagicLinkSchema } from '../validators/auth.validator';
 import { z } from 'zod';
 import jwt from 'jsonwebtoken';
+import { randomUUID } from 'crypto';
 import { invitationsService } from '../services/invitations.service';
 import { NotFoundError } from '../errors/NotFoundError';
 import { EmailDeliveryError } from '../errors/EmailDeliveryError';
@@ -22,12 +24,59 @@ if (!JWT_SECRET) {
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
+ * Nom d'un événement, pour le contexte d'un lien rejeté. Best-effort : une erreur
+ * DB laisse le contexte partiel plutôt que de masquer la cause réelle du rejet.
+ */
+const fetchEventName = async (eventId: string): Promise<string | undefined> => {
+  try {
+    const result = await query('SELECT name FROM events WHERE id = $1', [eventId]);
+    return result.rows[0]?.name;
+  } catch (queryError) {
+    console.error('Error fetching event name for rejected token:', queryError);
+    return undefined;
+  }
+};
+
+/**
+ * Rôle DÉRIVÉ de la base, jamais lu d'un claim du token. Pilote le repli « code de
+ * secours » côté client. false si l'utilisateur est introuvable ou la requête échoue.
+ */
+const isUserAdmin = async (userId: string): Promise<boolean> => {
+  try {
+    const result = await query('SELECT role FROM users WHERE id = $1', [userId]);
+    return result.rows[0]?.role === 'admin';
+  } catch (queryError) {
+    console.error('Error fetching user role for rejected token:', queryError);
+    return false;
+  }
+};
+
+/**
+ * Journalise le motif d'un lien de connexion refusé.
+ *
+ * Le corps de la réponse porte déjà le code exact, mais rien de ce corps n'atteint
+ * les journaux : morgan n'y met que méthode, URL et statut. Un refus y apparaît donc
+ * comme un `401` indifférencié, alors que les motifs appellent des remèdes opposés —
+ * lien déjà utilisé : la session est trop courte face au lien ; expiré : le TTL du
+ * lien est trop court ; invalide : un client mail tronque le lien, ou quelqu'un essaie.
+ *
+ * JAMAIS le jeton, pas même un préfixe : un lien de connexion EST une session, c'est
+ * la raison d'être du masquage posé sur le journal d'accès (app.ts).
+ */
+const logRejectedMagicLink = (code: string, reason?: string): void => {
+  console.warn('[Auth][verify] lien refusé', reason ? { code, reason } : { code });
+};
+
+/**
  * Interface commune pour le payload du magic link JWT
  * Contient tous les champs possibles qui peuvent être inclus lors de la génération
  */
 interface MagicLinkPayload {
   userId: string;
   exp: number;
+  /** Unicité du lien émis — voir MagicLinkPayload dans auth.service.ts. Absent des
+   *  jetons bootstrap, qui ne sont pas enregistrés. */
+  jti?: string;
   role?: 'admin' | 'user';
   redirectAfterLogin?: string;
   eventId?: string;
@@ -63,7 +112,7 @@ export const generateToken = async (req: Request, res: Response): Promise<void> 
     if (userResult.rows.length === 0) {
       res.status(404).json({
         error: {
-          code: 'USER_NOT_FOUND',
+          code: ERROR_CODES.USER_NOT_FOUND,
           message: 'Utilisateur non trouvé',
         },
       });
@@ -91,7 +140,7 @@ export const generateToken = async (req: Request, res: Response): Promise<void> 
     if (error instanceof z.ZodError) {
       res.status(400).json({
         error: {
-          code: 'VALIDATION_ERROR',
+          code: ERROR_CODES.VALIDATION_ERROR,
           message: error.issues[0].message,
         },
       });
@@ -101,7 +150,7 @@ export const generateToken = async (req: Request, res: Response): Promise<void> 
     console.error('Error generating magic link:', error);
     res.status(500).json({
       error: {
-        code: 'INTERNAL_ERROR',
+        code: ERROR_CODES.INTERNAL_ERROR,
         message: 'Erreur lors de la génération du magic link',
       },
     });
@@ -144,19 +193,7 @@ export const verifyMagicLink = async (req: Request, res: Response): Promise<void
 
         if (decoded?.eventId) {
           eventId = decoded.eventId;
-          // Récupérer le nom de l'événement depuis la base de données
-          try {
-            const eventResult = await query(
-              'SELECT name FROM events WHERE id = $1',
-              [eventId]
-            );
-            if (eventResult.rows.length > 0) {
-              eventName = eventResult.rows[0].name;
-            }
-          } catch (queryError) {
-            // Ignorer les erreurs de requête - le contexte sera partiel
-            console.error('Error fetching event name for expired token:', queryError);
-          }
+          eventName = await fetchEventName(eventId);
           canResend = true;
           // Best-effort : enregistrer le clic même sur lien expiré (signature JWT valide).
           // Ne lève jamais — markAsClicked absorbe toute erreur DB.
@@ -170,21 +207,17 @@ export const verifyMagicLink = async (req: Request, res: Response): Promise<void
           // si signature OK + exp dépassée), donc le userId de jwt.decode est fiable ici.
           // isAdmin est DÉRIVÉ du rôle DB (jamais lu du token) ; false si user introuvable.
           canResend = true;
-          try {
-            const roleResult = await query('SELECT role FROM users WHERE id = $1', [decoded.userId]);
-            isAdmin = roleResult.rows[0]?.role === 'admin';
-          } catch (queryError) {
-            console.error('Error fetching user role for expired token:', queryError);
-          }
+          isAdmin = await isUserAdmin(decoded.userId);
         }
 
         if (decoded?.exp) {
           expiredAt = new Date(decoded.exp * 1000).toISOString();
         }
 
+        logRejectedMagicLink(ERROR_CODES.TOKEN_EXPIRED);
         res.status(401).json({
           error: {
-            code: 'TOKEN_EXPIRED',
+            code: ERROR_CODES.TOKEN_EXPIRED,
             message: 'Ce lien a expiré.',
             context: {
               eventName,
@@ -198,27 +231,33 @@ export const verifyMagicLink = async (req: Request, res: Response): Promise<void
         return;
       }
       if (err instanceof jwt.JsonWebTokenError) {
+        // `reason` vient de jsonwebtoken (« jwt malformed », « invalid signature »…) :
+        // un libellé fixe, qui ne contient jamais le jeton. C'est lui qui distingue
+        // un lien tronqué par un client mail d'une signature qui ne colle pas.
+        logRejectedMagicLink(ERROR_CODES.INVALID_TOKEN, err.message);
         res.status(401).json({
           error: {
-            code: 'INVALID_TOKEN',
+            code: ERROR_CODES.INVALID_TOKEN,
             message: 'Lien de connexion invalide.',
           },
         });
         return;
       }
       if (err instanceof jwt.NotBeforeError) {
+        logRejectedMagicLink(ERROR_CODES.TOKEN_NOT_ACTIVE);
         res.status(401).json({
           error: {
-            code: 'TOKEN_NOT_ACTIVE',
+            code: ERROR_CODES.TOKEN_NOT_ACTIVE,
             message: 'Ce lien n\'est pas encore actif.',
           },
         });
         return;
       }
       // Pour toute autre erreur JWT, retourner 401
+      logRejectedMagicLink(ERROR_CODES.INVALID_TOKEN, 'erreur jwt non typée');
       res.status(401).json({
         error: {
-          code: 'INVALID_TOKEN',
+          code: ERROR_CODES.INVALID_TOKEN,
           message: 'Lien de connexion invalide.',
         },
       });
@@ -230,7 +269,8 @@ export const verifyMagicLink = async (req: Request, res: Response): Promise<void
     // normal (chargement user + émission session) continuer avec le nouvel userId.
     if (magicLinkPayload.bootstrap) {
       if (!magicLinkPayload.email) {
-        res.status(401).json({ error: { code: 'INVALID_TOKEN', message: 'Lien de connexion invalide.' } })
+        logRejectedMagicLink(ERROR_CODES.INVALID_TOKEN, 'bootstrap sans email')
+        res.status(401).json({ error: { code: ERROR_CODES.INVALID_TOKEN, message: 'Lien de connexion invalide.' } })
         return
       }
       const created = await createFirstAdminAtomic(
@@ -239,11 +279,13 @@ export const verifyMagicLink = async (req: Request, res: Response): Promise<void
         magicLinkPayload.lastName,
       )
       if (created === 'locked') {
-        res.status(409).json({ error: { code: 'SETUP_IN_PROGRESS', message: 'Configuration en cours, réessayez.' } })
+        logRejectedMagicLink(ERROR_CODES.SETUP_IN_PROGRESS)
+        res.status(409).json({ error: { code: ERROR_CODES.SETUP_IN_PROGRESS, message: 'Configuration en cours, réessayez.' } })
         return
       }
       if (created === 'exists') {
-        res.status(401).json({ error: { code: 'SETUP_ALREADY_DONE', message: 'La configuration est déjà terminée. Connectez-vous via la page de connexion.' } })
+        logRejectedMagicLink(ERROR_CODES.SETUP_ALREADY_DONE)
+        res.status(401).json({ error: { code: ERROR_CODES.SETUP_ALREADY_DONE, message: 'La configuration est déjà terminée. Connectez-vous via la page de connexion.' } })
         return
       }
       magicLinkPayload.userId = created.id
@@ -251,13 +293,50 @@ export const verifyMagicLink = async (req: Request, res: Response): Promise<void
 
     // Valider que le userId est un UUID valide avant la requête BDD
     if (!magicLinkPayload.userId || !uuidRegex.test(magicLinkPayload.userId)) {
+      logRejectedMagicLink(ERROR_CODES.INVALID_TOKEN, 'userId absent ou mal formé');
       res.status(401).json({
         error: {
-          code: 'INVALID_TOKEN',
+          code: ERROR_CODES.INVALID_TOKEN,
           message: 'Lien de connexion invalide.',
         },
       });
       return;
+    }
+
+    // Consommer le lien : il ne vaut que pour UNE connexion. C'est la ligne renvoyée
+    // par la base qui fait foi — un JWT correctement signé mais absent de
+    // magic_link_tokens (jamais émis par cette instance, ou déjà consommé) n'ouvre
+    // plus de session, quelle que soit sa date d'expiration.
+    //
+    // EXEMPTION BOOTSTRAP — ce n'est pas un oubli. Le lien du premier administrateur
+    // est signé par setup.service.ts alors que le compte n'existe pas encore : il ne
+    // peut pas avoir de ligne dans magic_link_tokens, dont user_id référence users.
+    // Son usage unique est garanti autrement, et depuis toujours : au second clic,
+    // createFirstAdminAtomic trouve l'admin déjà créé, renvoie 'exists', et le flux
+    // répond 401 SETUP_ALREADY_DONE une trentaine de lignes plus haut.
+    if (!magicLinkPayload.bootstrap) {
+      const consumedUserId = await consumeMagicLinkToken(token);
+
+      if (!consumedUserId) {
+        const usedEventId = magicLinkPayload.eventId;
+        logRejectedMagicLink(ERROR_CODES.TOKEN_ALREADY_USED);
+        res.status(401).json({
+          error: {
+            code: ERROR_CODES.TOKEN_ALREADY_USED,
+            message: 'Ce lien de connexion a déjà été utilisé.',
+            context: {
+              eventName: usedEventId ? await fetchEventName(usedEventId) : undefined,
+              eventId: usedEventId,
+              canResend: true,
+              isAdmin: await isUserAdmin(magicLinkPayload.userId),
+            },
+          },
+        });
+        return;
+      }
+
+      // L'identité vient désormais de la base, plus du seul porteur du lien.
+      magicLinkPayload.userId = consumedUserId;
     }
 
     // Vérifier que l'utilisateur existe toujours
@@ -267,9 +346,10 @@ export const verifyMagicLink = async (req: Request, res: Response): Promise<void
     );
 
     if (userResult.rows.length === 0) {
+      logRejectedMagicLink(ERROR_CODES.USER_NOT_FOUND);
       res.status(401).json({
         error: {
-          code: 'USER_NOT_FOUND',
+          code: ERROR_CODES.USER_NOT_FOUND,
           message: 'Utilisateur non trouvé.',
         },
       });
@@ -339,7 +419,7 @@ export const verifyMagicLink = async (req: Request, res: Response): Promise<void
     if (error instanceof z.ZodError) {
       res.status(400).json({
         error: {
-          code: 'VALIDATION_ERROR',
+          code: ERROR_CODES.VALIDATION_ERROR,
           message: error.issues[0].message,
         },
       });
@@ -349,7 +429,7 @@ export const verifyMagicLink = async (req: Request, res: Response): Promise<void
     console.error('Error verifying magic link:', error);
     res.status(500).json({
       error: {
-        code: 'INTERNAL_ERROR',
+        code: ERROR_CODES.INTERNAL_ERROR,
         message: 'Une erreur est survenue lors de la connexion.',
       },
     });
@@ -377,7 +457,7 @@ export const refreshSession = async (req: Request, res: Response): Promise<void>
     if (!userId || !role) {
       res.status(401).json({
         error: {
-          code: 'INVALID_TOKEN',
+          code: ERROR_CODES.INVALID_TOKEN,
           message: 'Token invalide.',
         },
       });
@@ -393,7 +473,7 @@ export const refreshSession = async (req: Request, res: Response): Promise<void>
     if (userResult.rows.length === 0) {
       res.status(401).json({
         error: {
-          code: 'USER_NOT_FOUND',
+          code: ERROR_CODES.USER_NOT_FOUND,
           message: 'Utilisateur non trouvé.',
         },
       });
@@ -423,7 +503,7 @@ export const refreshSession = async (req: Request, res: Response): Promise<void>
     console.error('Error refreshing session:', error);
     res.status(500).json({
       error: {
-        code: 'INTERNAL_ERROR',
+        code: ERROR_CODES.INTERNAL_ERROR,
         message: 'Une erreur est survenue lors du rafraîchissement de la session.',
       },
     });
@@ -467,6 +547,7 @@ const issueAndSendMagicLinkForUser = async (user: {
   const payload: MagicLinkPayload = {
     userId: user.id,
     exp,
+    jti: randomUUID(),
     role,
     redirectAfterLogin,
   };
@@ -474,13 +555,8 @@ const issueAndSendMagicLinkForUser = async (user: {
   // Générer le token
   const token = jwt.sign(payload, JWT_SECRET);
 
-  // Stocker en base de données
-  await query(
-    `UPDATE users
-     SET magic_link_token = $1, token_expires_at = to_timestamp($2)
-     WHERE id = $3`,
-    [token, exp, user.id]
-  );
+  // Enregistrer le lien pour qu'il ne serve qu'une fois (cf. auth.service).
+  await persistMagicLinkToken(user.id, token, exp);
 
   // Générer le magic link complet
   // Base URL frontend via APP_URL (source unique — cf. utils/frontendUrl).
@@ -532,7 +608,7 @@ export const requestMagicLink = async (req: Request, res: Response): Promise<voi
       console.error(`[${timestamp}] Failed to send magic link email to ${user.email} - userId: ${user.id}`);
       res.status(503).json({
         error: {
-          code: 'EMAIL_SERVICE_UNAVAILABLE',
+          code: ERROR_CODES.EMAIL_SERVICE_UNAVAILABLE,
           message: "Le service d'envoi d'email est temporairement indisponible. Veuillez réessayer dans quelques minutes."
         }
       });
@@ -550,7 +626,7 @@ export const requestMagicLink = async (req: Request, res: Response): Promise<voi
     if (error instanceof z.ZodError) {
       res.status(400).json({
         error: {
-          code: 'VALIDATION_ERROR',
+          code: ERROR_CODES.VALIDATION_ERROR,
           message: error.issues[0].message,
         },
       });
@@ -560,7 +636,7 @@ export const requestMagicLink = async (req: Request, res: Response): Promise<voi
     console.error('Error requesting magic link:', error);
     res.status(500).json({
       error: {
-        code: 'INTERNAL_ERROR',
+        code: ERROR_CODES.INTERNAL_ERROR,
         message: 'Une erreur est survenue. Veuillez réessayer.',
       },
     });
@@ -602,12 +678,12 @@ const reissueMagicLinkForUserRow = async (
 ): Promise<void> => {
   const wait = resendRateLimitRemaining(`${row.id}:identity`, Date.now());
   if (wait !== null) {
-    res.status(429).json({ error: { code: 'RATE_LIMITED', message: `Un lien a deja ete envoye recemment. Veuillez patienter ${wait} seconde${wait > 1 ? 's' : ''}.` } });
+    res.status(429).json({ error: { code: ERROR_CODES.RATE_LIMITED, message: `Un lien a déjà été envoyé récemment. Veuillez patienter ${wait} seconde${wait > 1 ? 's' : ''}.` } });
     return;
   }
   const sent = await issueAndSendMagicLinkForUser(row);
   if (!sent) {
-    res.status(503).json({ error: { code: 'EMAIL_SERVICE_UNAVAILABLE', message: "Le service d'envoi d'email est temporairement indisponible. Veuillez réessayer plus tard." } });
+    res.status(503).json({ error: { code: ERROR_CODES.EMAIL_SERVICE_UNAVAILABLE, message: "Le service d'envoi d'email est temporairement indisponible. Veuillez réessayer plus tard." } });
     return;
   }
   res.status(200).json({ data: { message: 'Un nouveau lien vous a été envoyé par email.' } });
@@ -699,8 +775,8 @@ export const resendInvitation = async (req: Request, res: Response): Promise<voi
     if (wait !== null) {
       res.status(429).json({
         error: {
-          code: 'RATE_LIMITED',
-          message: `Un lien a deja ete envoye recemment. Veuillez patienter ${wait} seconde${wait > 1 ? 's' : ''}.`,
+          code: ERROR_CODES.RATE_LIMITED,
+          message: `Un lien a déjà été envoyé récemment. Veuillez patienter ${wait} seconde${wait > 1 ? 's' : ''}.`,
         },
       });
       return;
@@ -711,16 +787,16 @@ export const resendInvitation = async (req: Request, res: Response): Promise<voi
       await invitationsService.resendInvitation(eventId, userId);
     } catch (resendError) {
       if (resendError instanceof NotFoundError) {
-        res.status(422).json({ error: { code: 'RESEND_NOT_AVAILABLE', message: "Impossible de renvoyer un lien pour cette invitation. Contactez l'administrateur." } });
+        res.status(422).json({ error: { code: ERROR_CODES.RESEND_NOT_AVAILABLE, message: "Impossible de renvoyer un lien pour cette invitation. Contactez l'administrateur." } });
         return;
       }
       if (resendError instanceof EmailDeliveryError) {
         console.error('Resend invitation: échec envoi email:', resendError);
-        res.status(503).json({ error: { code: 'EMAIL_SERVICE_UNAVAILABLE', message: "Le service d'envoi d'email est temporairement indisponible. Veuillez réessayer plus tard." } });
+        res.status(503).json({ error: { code: ERROR_CODES.EMAIL_SERVICE_UNAVAILABLE, message: "Le service d'envoi d'email est temporairement indisponible. Veuillez réessayer plus tard." } });
         return;
       }
       console.error('Resend invitation: erreur inattendue:', resendError);
-      res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Une erreur est survenue.' } });
+      res.status(500).json({ error: { code: ERROR_CODES.INTERNAL_ERROR, message: 'Une erreur est survenue.' } });
       return;
     }
 
@@ -730,7 +806,7 @@ export const resendInvitation = async (req: Request, res: Response): Promise<voi
     if (error instanceof z.ZodError) {
       res.status(400).json({
         error: {
-          code: 'VALIDATION_ERROR',
+          code: ERROR_CODES.VALIDATION_ERROR,
           message: error.issues[0].message,
         },
       });
@@ -740,7 +816,7 @@ export const resendInvitation = async (req: Request, res: Response): Promise<voi
     console.error('Error resending invitation:', error);
     res.status(500).json({
       error: {
-        code: 'INTERNAL_ERROR',
+        code: ERROR_CODES.INTERNAL_ERROR,
         message: 'Une erreur est survenue.',
       },
     });

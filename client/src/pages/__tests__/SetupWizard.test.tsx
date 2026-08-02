@@ -419,7 +419,7 @@ describe('SetupWizard — source env (flux à 3 étapes : organisation, smtp, ad
   it('handleTest affiche le message serveur quand testSetupSmtp rejette', async () => {
     const user = userEvent.setup();
     const axiosError = {
-      response: { data: { error: { message: 'Saisissez le vrai mot de passe' } } },
+      response: { data: { error: { code: 'RATE_LIMITED', message: 'Trop de requêtes.' } } },
     };
     mockedTestSetupSmtp.mockRejectedValue(axiosError);
     renderWizard();
@@ -433,14 +433,18 @@ describe('SetupWizard — source env (flux à 3 étapes : organisation, smtp, ad
     await user.click(screen.getByTestId('smtp-test-btn'));
 
     await waitFor(() => {
-      expect(screen.getByTestId('smtp-test-result')).toHaveTextContent('Saisissez le vrai mot de passe');
+      expect(screen.getByTestId('smtp-test-result')).toHaveTextContent('Trop de requêtes.');
     });
   });
 
-  it('handleContinue affiche le message serveur quand saveSetupSmtp rejette', async () => {
+  it('handleContinue affiche la phrase de repli quand saveSetupSmtp rejette', async () => {
     const user = userEvent.setup();
     const axiosError = {
-      response: { data: { error: { message: 'Limite de requêtes atteinte' } } },
+      // Forme réelle de PUT /setup/smtp (`saveSmtpSettingsHandler`) : il n'émet que
+      // VALIDATION_ERROR / INTERNAL_ERROR / UNAUTHORIZED / USER_NOT_FOUND. Les deux
+      // premiers sont hors liste blanche, donc c'est la phrase de l'appelant qui
+      // s'affiche — pas le message serveur.
+      response: { data: { error: { code: 'VALIDATION_ERROR', message: 'Fournisseur email non supporté' } } },
     };
     mockedSaveSetupSmtp.mockRejectedValue(axiosError);
     renderWizard();
@@ -449,8 +453,11 @@ describe('SetupWizard — source env (flux à 3 étapes : organisation, smtp, ad
     await passSmtpStep(user);
 
     await waitFor(() => {
-      expect(mockToastError).toHaveBeenCalledWith('Limite de requêtes atteinte');
+      expect(mockToastError).toHaveBeenCalledWith(
+        expect.stringContaining("L'enregistrement de la configuration SMTP a échoué"),
+      );
     });
+    expect(mockToastError).not.toHaveBeenCalledWith('Fournisseur email non supporté');
   });
 
   it('hôte renseigné sans email expéditeur : "Continuer" désactivé, motif visible, aucun appel réseau', async () => {

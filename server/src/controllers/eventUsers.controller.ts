@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { eventUsersService } from '../services/eventUsers.service'
 import { setEventUsersSchema, formatZodError } from '../validators/eventUsers.validator'
 import { NotFoundError } from '../errors/NotFoundError'
+import { ERROR_CODES } from '@timepick/shared'
 
 /**
  * Définir les utilisateurs autorisés pour un événement
@@ -19,11 +20,11 @@ export const setEventUsers = async (req: Request, res: Response): Promise<void> 
     res.json({ data: { success: true, count: uniqueUserIds.length } })
   } catch (error) {
     if (error instanceof z.ZodError) {
-      res.status(400).json({ error: formatZodError(error) })
+      res.status(400).json({ error: formatZodError(error), code: ERROR_CODES.VALIDATION_ERROR })
       return
     }
     if (error instanceof NotFoundError) {
-      res.status(404).json({ error: error.message })
+      res.status(404).json({ error: error.message, code: error.code })
       return
     }
     console.error('Error setting event users:', error)
@@ -55,7 +56,7 @@ export const addEventUser = async (req: Request, res: Response): Promise<void> =
     res.json({ data: { success: true } })
   } catch (error) {
     if (error instanceof NotFoundError) {
-      res.status(404).json({ error: error.message })
+      res.status(404).json({ error: error.message, code: error.code })
       return
     }
     console.error('Error adding event user:', error)
@@ -73,7 +74,7 @@ export const removeEventUser = async (req: Request, res: Response): Promise<void
     res.json({ data: { success: true } })
   } catch (error) {
     if (error instanceof NotFoundError) {
-      res.status(404).json({ error: error.message })
+      res.status(404).json({ error: error.message, code: error.code })
       return
     }
     console.error('Error removing event user:', error)

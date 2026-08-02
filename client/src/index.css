@@ -24,7 +24,26 @@
     --destructive-foreground: 0 0% 98%;
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
-    --ring: 240 4.8% 70%;
+    /* --ring : jeton de l'anneau de focus (WCAG 1.4.11, non-text contrast,
+     * seuil 3:1). Pour un bouton icône-seule (`size="icon"`), cet anneau
+     * EST le seul repère de focus visible.
+     * Ancienne valeur 240 4.8% 70% (#afafb6), consommée à 50% d'opacité par
+     * `focus-visible:ring-ring/50` (button.tsx, select.tsx) : anneau
+     * composité à 1,42:1 sur #fafafa (zinc-50, fond de la toolbar de
+     * l'éditeur d'e-mails) et 1,44:1 sur #ffffff (--background) — sous le
+     * seuil. Éclaircir seul le jeton n'aurait pas suffi non plus : à pleine
+     * opacité l'ancienne valeur ne montait qu'à 2,09:1 / 2,18:1.
+     * zinc-500 (#71717a — même valeur que --muted-foreground) corrige les
+     * deux à la fois : composité à 50% il reste sous le seuil (1,94:1 /
+     * 1,98:1), d'où le retrait du `/50` dans button.tsx et select.tsx
+     * (`focus-visible:ring-ring` / `focus:ring-ring`, pleine opacité) ; à
+     * pleine opacité zinc-500 atteint 4,63:1 sur zinc-50 et 4,83:1 sur
+     * blanc. Calcul WCAG 2.x (luminance relative, (L1+0,05)/(L2+0,05))
+     * verrouillé par components/ui/__tests__/focusRingContrast.test.ts.
+     * Bénéfice induit, non modifié ici : les 4 règles FullCalendar plus bas
+     * (box-shadow ... hsl(var(--ring)), déjà en pleine opacité) passent de
+     * 2,09:1 / 2,18:1 à 4,63:1 / 4,83:1 — cf. leur commentaire local. */
+    --ring: 240 3.8% 46.1%; /* zinc-500 #71717a */
     --radius: 0.5rem;
 
     /* Slot status colors for calendar - uniform with admin */
@@ -134,7 +153,7 @@
     --destructive-foreground: 0 0% 98%;
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
-    --ring: 240 4.9% 83.9%;
+    --ring: 240 4.9% 83.9%; /* déjà ≥3:1 (3,92:1 composité à 50% sur le fond sombre #09090b) — inchangé. Thème sombre non activable actuellement (aucun toggle en app). */
 
     /* Slot status colors for calendar - dark mode (muted backgrounds, white text) */
     --slot-available: 157 28% 30%;
@@ -554,7 +573,10 @@
   box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05) !important;
 }
 
-/* Focus-visible - shadcn ring style (applies to all buttons) */
+/* Focus-visible - shadcn ring style (applies to all buttons). Pleine
+   opacité déjà : bénéficie automatiquement de l'assombrissement de --ring
+   (zinc-500, cf. :root ci-dessus) sans modification ici — 2,09:1 / 2,18:1
+   → 4,63:1 / 4,83:1 sur zinc-50 / blanc (WCAG 1.4.11, seuil 3:1). */
 .fc .fc-button:focus-visible {
   outline: none !important;
   /* Use outline instead of box-shadow to prevent layout shift */

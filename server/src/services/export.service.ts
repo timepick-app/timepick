@@ -2,6 +2,7 @@ import { query } from '../db'
 import { NotFoundError } from '../errors/NotFoundError'
 import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
+import { ERROR_CODES } from '@timepick/shared'
 
 /**
  * Interface pour les données de réservation utilisées dans l'export CSV
@@ -96,7 +97,7 @@ export const exportService = {
     )
 
     if (eventResult.rows.length === 0) {
-      throw new NotFoundError('Événement non trouvé')
+      throw new NotFoundError('Événement non trouvé', ERROR_CODES.EVENT_NOT_FOUND)
     }
 
     const eventName = eventResult.rows[0].name as string

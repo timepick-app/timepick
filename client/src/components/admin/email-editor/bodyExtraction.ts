@@ -22,6 +22,7 @@ const CSS_CLASS_ATTR_RE = /\s+css-class="([^"]*)"/
 const DATA_LOCKED_LABEL_ATTR_RE = /\s*data-locked-label="[^"]*"/
 const DATA_PART_KIND_ATTR_RE = /\s*data-part-kind="[^"]*"/
 const DATA_INHERITED_ATTR_RE = /\s*data-inherited="[^"]*"/
+const DATA_INHERITED_LABEL_ATTR_RE = /\s*data-inherited-label="[^"]*"/
 // Plan `2026-05-17-shell-parts-persistance-save` + Plan carte-éditable —
 // regex d'extraction des sections header/footer et de la carte (mj-wrapper)
 // d'un MJML complet de canvas. `\b` sur `<mj-body` évite un faux match sur
@@ -206,7 +207,7 @@ export function tagSectionWithPartKind(
  * Rule encoded here (mirrors the email-shell customization policy): no edit
  * may be entered on content that will not be saved. Inherited blocks have no
  * persistence target at the current level until an override is created
- * explicitly (Story 26-3).
+ * explicitly.
  */
 export function addInheritedAttr(fragment: string, isInherited: boolean): string {
   if (!warnIfFragmentMissesMjSection(fragment, 'addInheritedAttr')) return fragment
@@ -214,6 +215,57 @@ export function addInheritedAttr(fragment: string, isInherited: boolean): string
     const stripped = attrsBlob.replace(DATA_INHERITED_ATTR_RE, '')
     if (!isInherited) return `<mj-section${stripped}>`
     return `<mj-section${stripped} data-inherited="true">`
+  })
+}
+
+/**
+ * Libellés de provenance affichés dans le canvas sur un bloc non encore
+ * personnalisé au niveau courant — cf. la politique de personnalisation de la
+ * coque email, section « Indicateurs de contenu hérité » (« la mention "Hérité
+ * du modèle" ou "Hérité de la marque" selon l'origine »).
+ *
+ * `hardcoded` ne dit PAS « hérité » : la même policy pose que le filet de
+ * sécurité livré avec l'application n'est pas un niveau de cascade et n'est
+ * « jamais considéré comme hérité au sens utilisateur ». Le libellé nomme donc
+ * ce qu'il est — le contenu d'origine — sans mentir sur une provenance.
+ */
+export const INHERITED_ORIGIN_LABEL: Record<string, string> = {
+  template: 'Hérité du modèle',
+  brand: 'Hérité de la marque',
+  hardcoded: "Contenu d'origine",
+}
+
+/** Repli si la cascade introduit une origine non encore libellée. */
+export const INHERITED_ORIGIN_LABEL_FALLBACK = 'Hérité du niveau supérieur'
+
+/**
+ * Injecte `data-inherited-label="<libellé>"` sur la première `<mj-section>` d'un
+ * fragment, consommé par la pastille ambre du canvas
+ * (`lockedShellSignalCss.ts`). Attribut SÉPARÉ de `data-inherited`, à dessein :
+ * `applyShellLocks` teste `data-inherited === 'true'` pour router le deep-lock,
+ * donc y placer une valeur d'origine casserait silencieusement le verrou.
+ * `label === null` strippe l'attribut (re-wrap idempotent après création d'une
+ * surcharge). Strippé par `normalizeShellFragment` — sinon le dirty tracker
+ * verrait une diff structurelle là où il n'y a qu'une décoration d'éditeur.
+ *
+ * Arbitrage tranché le 2026-07-31 — fusionner les deux attributs (une valeur
+ * dans `data-inherited`, prédicat de verrou passé en test de PRÉSENCE) économise
+ * ~40 lignes chiffrées, production et tests confondus : ce helper disparaît, et
+ * ni `normalizeShellFragment` ni le normaliseur du test de parité n'ont de strip
+ * à ajouter (leur regex existante matche déjà n'importe quelle valeur).
+ * **Refusé.** Ce prédicat est le seul garde-fou contre la saisie d'une
+ * modification sur un bloc qui ne sera pas sauvegardé — l'invariant fondateur de
+ * la policy de coque, et le mécanisme dont la défaillance a produit le rejet
+ * silencieux de modifications d'en-tête. 40 lignes est un prix bas pour ne pas y
+ * toucher. Ne pas rouvrir sans ce contexte.
+ */
+export function addInheritedLabel(fragment: string, label: string | null): string {
+  if (!warnIfFragmentMissesMjSection(fragment, 'addInheritedLabel')) return fragment
+  const safeLabel = label?.replace(/"/g, '&quot;')
+  return fragment.replace(MJ_SECTION_OPEN_TAG_RE, (_match, attrsBlob: string) => {
+    const stripped = attrsBlob.replace(DATA_INHERITED_LABEL_ATTR_RE, '')
+    if (!safeLabel) return `<mj-section${stripped}>`
+    return `<mj-section${stripped} data-inherited-label="${safeLabel}">`
   })
 }
 
@@ -233,12 +285,16 @@ export function isBodyMarkerIntact(fullMjml: string): boolean {
  * Bug #3 post-e26 (smoke 2026-05-18) — strippe les marqueurs `<!-- BODY:START -->`
  * et `<!-- BODY:END -->` d'un body fragment. Idempotent : no-op si absents.
  *
- * Nécessaire car le body chargé par l'éditeur peut déjà contenir les marqueurs.
- * Deux sources : la forme factory/seed (`email_templates.body_mjml` /
- * `default_body_mjml`) les embarque ; et le flux par-événement les EXIGE dans le
- * payload PATCH (validator D-ext6, `event-email-template.validator.ts`), donc
- * `events.invitation_mjml` est toujours stocké AVEC. Le PATCH global invitation
- * (`invitationPatchSchema`) ne les impose PAS et stocke le payload tel quel.
+ * Nécessaire car le body chargé par l'éditeur peut déjà contenir les marqueurs :
+ * la forme d'usine (`email_templates.body_mjml` / `default_body_mjml`, posée par
+ * les migrations) les embarque. Le strip est donc DÉFENSIF, sans hypothèse sur
+ * la forme stockée : les deux coexistent en base et aucun endpoint d'écriture
+ * n'exige les marqueurs. Ne pas déduire d'un validateur ce que contient la base
+ * — la version précédente de ce commentaire affirmait que
+ * `events.invitation_mjml` était « toujours stocké AVEC » parce que le PATCH
+ * par événement les exigeait. C'était faux dans les deux sens : le client ne les
+ * envoie jamais, donc cette colonne n'a jamais pu être écrite par l'éditeur du
+ * tout — le PATCH répondait 400. Exigence retirée le 2026-07-31.
  * Sans ce strip à l'init du canvas et des ancres, `wrapBodyForEditing`
  * double-injecterait les markers (2 paires) → dirty tracker incohérent → bouton
  * Enregistrer bloqué. Consommé aussi par les panneaux hôtes pour `isCustom`.
@@ -260,12 +316,12 @@ export function stripBodyMarkers(fragment: string): string {
 // GrapesJS lock pass keeps matching the 2 root sections, while the server
 // fragments stay byte-identical to the 26-0 baselines.
 //
-// STORY 26-2 transitoire — tant que PATCH /api/admin/shell-parts n'est pas
-// livré, header et footer sont marqués `data-inherited="true"` inconditionnellement
-// (deep-lock filet) pour bannir le silent-failure bug : le pipeline de save ne
-// capte que le body entre les marqueurs BODY:START/END. La condition
-// architecturale correcte (`origin !== ownerKind`) sera restaurée avec la
-// future story PATCH — cf. git `5eebca2e^` pour la reconstruction.
+// Marquage `data-inherited` — la condition architecturale correcte
+// (`isShellBlockInherited`, plus bas) est EN PLACE : seul un bloc sans cible de
+// sauvegarde au niveau courant est marqué, donc deep-locké. Un commentaire
+// « transitoire » affirmait ici l'inverse (marquage inconditionnel en attente
+// d'une story PATCH) jusqu'au 2026-07-30 ; il était périmé et induisait en
+// erreur sur l'invariant réellement appliqué.
 
 /**
  * Plan carte-éditable (2026-06-08) — extrait le blob d'attributs du `<mj-section>`
@@ -366,9 +422,10 @@ export function wrapBodyForEditing(
   // Stripped on extract → saved body remains brand-agnostic (D-ext5).
   //
   // Bug #3 post-e26 — strip les marqueurs BODY:START/END en amont : le body
-  // chargé peut déjà les porter (forme factory/seed ; et flux par-événement où
-  // le validator D-ext6 les impose). Sans ce strip défensif, le wrap re-injecte
-  // une seconde paire → dirty tracker incohérent → bouton Enregistrer bloqué.
+  // chargé peut déjà les porter (forme d'usine ; ou corps enregistré avant que
+  // l'éditeur ne les retire). Aucun endpoint d'écriture ne les exige — voir
+  // `stripBodyMarkers`. Sans ce strip défensif, le wrap re-injecte une seconde
+  // paire → dirty tracker incohérent → bouton Enregistrer bloqué.
   const styledBody = applyBrandButtonAttrs(stripBodyMarkers(bodyFragment), brand)
 
   // Lot 2 T4 — la coque (header/pied/Frame) n'est éditable QUE dans l'éditeur
@@ -379,22 +436,33 @@ export function wrapBodyForEditing(
   const headerInherited = isShellBlockInherited(resolvedShell?.header.origin, shellLock)
   const footerInherited = isShellBlockInherited(resolvedShell?.footer.origin, shellLock)
   const fallbackInherited = isShellBlockInherited(undefined, shellLock)
+  // Libellé de provenance affiché par la pastille ambre du canvas. `null` quand
+  // le bloc a une cible de sauvegarde ici : pas d'héritage à signaler.
+  const headerInheritedLabel = headerInherited
+    ? INHERITED_ORIGIN_LABEL[resolvedShell?.header.origin ?? ''] ?? INHERITED_ORIGIN_LABEL_FALLBACK
+    : null
+  const footerInheritedLabel = footerInherited
+    ? INHERITED_ORIGIN_LABEL[resolvedShell?.footer.origin ?? ''] ?? INHERITED_ORIGIN_LABEL_FALLBACK
+    : null
 
   // Fallback header — MIROIR byte-identique du serveur `hardcodedHeader`
   // (shell-hardcoded-fallback.ts) = la coque commune « carte »
   // (INVITATION_FACTORY_HEADER_MJML) : fond blanc, coins hauts arrondis, fines
   // bordures gris clair #e5e7eb, titre noir #000000. Les attrs canvas
-  // (css-class/data-locked-label/data-part-kind/data-inherited) sont stripés par
+  // (css-class/data-locked-label/data-part-kind/data-inherited*) sont stripés par
   // normalize() du parity test → n'affectent pas la parité.
   const headerSection = resolvedShell
-    ? addInheritedAttr(
-        addPartKindAttr(
-          addLockedLabel(addLockedShellClass(resolvedShell.header.contentMjml), 'En-tête'),
-          'header',
+    ? addInheritedLabel(
+        addInheritedAttr(
+          addPartKindAttr(
+            addLockedLabel(addLockedShellClass(resolvedShell.header.contentMjml), 'En-tête'),
+            'header',
+          ),
+          headerInherited,
         ),
-        headerInherited,
+        headerInheritedLabel,
       )
-    : `<mj-section css-class="locked-shell" data-locked-label="En-tête" data-part-kind="header"${fallbackInherited ? ' data-inherited="true"' : ''} background-color="#ffffff" padding="20px" border-radius="10px 10px 0px 0px" border-right="1px solid #e5e7eb" border-left="1px solid #e5e7eb" border-top="1px solid #e5e7eb" border-bottom="1px solid #e5e7eb" padding-top="10px" padding-bottom="10px">
+    : `<mj-section css-class="locked-shell" data-locked-label="En-tête" data-part-kind="header"${fallbackInherited ? ` data-inherited="true" data-inherited-label="${INHERITED_ORIGIN_LABEL_FALLBACK}"` : ''} background-color="#ffffff" padding="20px" border-radius="10px 10px 0px 0px" border-right="1px solid #e5e7eb" border-left="1px solid #e5e7eb" border-top="1px solid #e5e7eb" border-bottom="1px solid #e5e7eb" padding-top="10px" padding-bottom="10px">
       <mj-column>
         <mj-text color="#000000" font-size="22px" font-weight="bold" align="center">${headerInner}</mj-text>
       </mj-column>
@@ -403,17 +471,20 @@ export function wrapBodyForEditing(
   // Fallback footer — MIROIR byte-identique du serveur `HARDCODED_FOOTER`
   // (shell-hardcoded-fallback.ts) : PAS de <mj-divider>, padding-top="0".
   // Le divider a été retiré côté serveur par `f528dcc7`. Les attrs canvas
-  // (css-class/data-locked-label/data-part-kind/data-inherited) sont stripés
+  // (css-class/data-locked-label/data-part-kind/data-inherited*) sont stripés
   // par normalize() du parity test → n'affectent pas la parité.
   const footerSection = resolvedShell
-    ? addInheritedAttr(
-        addPartKindAttr(
-          addLockedLabel(addLockedShellClass(resolvedShell.footer.contentMjml), 'Pied'),
-          'footer',
+    ? addInheritedLabel(
+        addInheritedAttr(
+          addPartKindAttr(
+            addLockedLabel(addLockedShellClass(resolvedShell.footer.contentMjml), 'Pied'),
+            'footer',
+          ),
+          footerInherited,
         ),
-        footerInherited,
+        footerInheritedLabel,
       )
-    : `<mj-section css-class="locked-shell" data-locked-label="Pied" data-part-kind="footer"${fallbackInherited ? ' data-inherited="true"' : ''} padding="20px 20px 0 20px">
+    : `<mj-section css-class="locked-shell" data-locked-label="Pied" data-part-kind="footer"${fallbackInherited ? ` data-inherited="true" data-inherited-label="${INHERITED_ORIGIN_LABEL_FALLBACK}"` : ''} padding="20px 20px 0 20px">
       <mj-column>
         <mj-text color="#999999" font-size="12px" padding-top="0">Ce lien est personnel et ne doit pas être partagé.</mj-text>
       </mj-column>
@@ -445,8 +516,12 @@ export function wrapBodyForEditing(
   const marked = `<!-- BODY:START -->
 ${styledBody}
     <!-- BODY:END -->`
+  // `data-locked-label="Corps"` — la policy exige une étiquette permanente sur
+  // les TROIS blocs (« En-tête », « Corps », « Pied ») ; le corps n'en avait
+  // jamais eu. Strippé à l'extraction (whitelist d'attrs de la carte), donc
+  // sans effet sur le dirty tracker ni sur le payload de sauvegarde.
   const bodyBlock = cardAttrsBlob
-    ? `<mj-wrapper ${cardAttrsBlob} css-class="locked-card" data-part-kind="content-wrapper">
+    ? `<mj-wrapper ${cardAttrsBlob} css-class="locked-card" data-locked-label="Corps" data-part-kind="content-wrapper">
     ${marked}
     </mj-wrapper>`
     : marked
@@ -596,7 +671,7 @@ export function extractContentWrapperFromCanvas(fullMjml: string): string {
 /**
  * Plan `2026-05-17-shell-parts-persistance-save` — strip les marqueurs éditeur
  * (`css-class="locked-shell"`, `data-locked-label`, `data-part-kind`,
- * `data-inherited`) absents du résolu serveur, trim, collapse whitespace
+ * `data-inherited`, `data-inherited-label`) absents du résolu serveur, trim, collapse whitespace
  * inter-balises. Idempotente : `normalize(normalize(x)) === normalize(x)`.
  * Utilisée à la fois pour hydrater les ancres locales depuis le canvas et pour
  * comparer le canvas vs les ancres / vs le résolu cascade.
@@ -614,6 +689,7 @@ export function normalizeShellFragment(fragment: string): string {
     .replace(MJ_SECTION_OPEN_TAG_RE_G, (_match, attrsBlob: string) => {
       let next = attrsBlob.replace(DATA_LOCKED_LABEL_ATTR_RE, '')
       next = next.replace(DATA_PART_KIND_ATTR_RE, '')
+      next = next.replace(DATA_INHERITED_LABEL_ATTR_RE, '')
       next = next.replace(DATA_INHERITED_ATTR_RE, '')
       const cssClassMatch = CSS_CLASS_ATTR_RE.exec(next)
       if (cssClassMatch) {

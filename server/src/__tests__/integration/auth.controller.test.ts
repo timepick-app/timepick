@@ -126,16 +126,16 @@ describe('Auth Controller - POST /api/auth/generate-token', () => {
       expect(res.status).toBe(200);
       expect(res.body.data.magicLink).toContain('/login?token=');
 
-      // Vérifier que le token a été stocké en DB
+      // Vérifier que l'empreinte du token a été stockée en DB
       const dbResult = await pool.query(
-        'SELECT magic_link_token, token_expires_at FROM users WHERE id = $1',
+        'SELECT token_hash, expires_at FROM magic_link_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
         [user.id]
       );
-      expect(dbResult.rows[0].magic_link_token).toBeTruthy();
-      expect(dbResult.rows[0].token_expires_at).toBeTruthy();
+      expect(dbResult.rows[0].token_hash).toBeTruthy();
+      expect(dbResult.rows[0].expires_at).toBeTruthy();
 
       // Vérifier que l'expiration est approximativement 24 heures (DEFAULT_ADMIN_TTL)
-      const expirationTime = new Date(dbResult.rows[0].token_expires_at).getTime();
+      const expirationTime = new Date(dbResult.rows[0].expires_at).getTime();
       const now = Date.now();
       const twentyFourHoursMs = 24 * 60 * 60 * 1000;
       expect(expirationTime).toBeGreaterThanOrEqual(now + twentyFourHoursMs - 2000); // -2s de marge (pour tenir compte du temps d'exécution)
@@ -194,10 +194,10 @@ describe('Auth Controller - POST /api/auth/generate-token', () => {
 
       // L'expiration devrait être 24 heures par défaut (DEFAULT_ADMIN_TTL)
       const dbResult = await pool.query(
-        'SELECT token_expires_at FROM users WHERE id = $1',
+        'SELECT expires_at FROM magic_link_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
         [user.id]
       );
-      const expirationTime = new Date(dbResult.rows[0].token_expires_at).getTime();
+      const expirationTime = new Date(dbResult.rows[0].expires_at).getTime();
       const now = Date.now();
       const twentyFourHoursMs = 24 * 60 * 60 * 1000;
       expect(expirationTime).toBeGreaterThanOrEqual(now + twentyFourHoursMs - 2000);

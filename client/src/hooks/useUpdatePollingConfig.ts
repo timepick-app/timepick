@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import api, { type ApiResponse } from '../services/api'
 import { toast } from 'sonner'
 import type { PollingConfig } from './usePollingConfig'
-import { extractErrorMessage } from '@/lib/extractErrorMessage'
+import { userFacingErrorMessage } from '@/lib/userFacingErrorMessage'
 
 /**
  * Limites de l'intervalle de polling (en secondes pour l'affichage)
@@ -58,8 +58,12 @@ export const useUpdatePollingConfig = () => {
       toast.success(`Fréquence de polling mise à jour : ${updatedInterval} secondes`)
     },
     onError: (err) => {
-      const errorMsg = extractErrorMessage(err, 'Erreur lors de la mise à jour')
-      toast.error(`Erreur: ${errorMsg}`)
+      toast.error(
+        userFacingErrorMessage(
+          err,
+          "L'enregistrement de l'intervalle de rafraîchissement a échoué. Vos modifications sont toujours à l'écran, réessayez."
+        )
+      )
     }
   })
 }

@@ -253,7 +253,12 @@ describe('UserDetailsModal', () => {
   })
 
   describe('Gestion des erreurs', () => {
-    it('affiche une erreur quand l\'API échoue', async () => {
+    // Forme réelle de GET /admin/users/:id : 404 plat, SANS code
+    // (`admin.controller.ts`, `getUserDetails`). Aucun code ⇒ le message serveur
+    // n'atteint pas l'écran, c'est la phrase de l'appelant qui s'affiche. Un mock
+    // portant un code de la liste blanche rendrait ce test vert sous l'ANCIENNE
+    // règle comme sous la nouvelle : il ne discriminerait rien.
+    it('un 404 sans code affiche la phrase de l\'appelant, pas le message serveur', async () => {
       ;(api.get as unknown as ReturnType<typeof vi.fn>).mockRejectedValue({
         response: { data: { error: 'Utilisateur non trouvé' } }
       })
@@ -261,18 +266,27 @@ describe('UserDetailsModal', () => {
       render(<UserDetailsModal userId="999" onClose={mockOnClose} />)
 
       await waitFor(() => {
-        expect(screen.getByText('Utilisateur non trouvé')).toBeInTheDocument()
+        expect(
+          screen.getByText('Le chargement des informations du membre a échoué. Réessayez.')
+        ).toBeInTheDocument()
       })
+      expect(screen.queryByText('Utilisateur non trouvé')).not.toBeInTheDocument()
     })
 
+    // L'erreur ne porte pas de réponse HTTP identifiable (ni code réseau, ni
+    // code de délai) : la règle 1 de userFacingErrorMessage retombe sur le
+    // repli de l'appelant, jamais sur le texte technique d'axios.
     it('affiche un message d\'erreur générique quand l\'erreur n\'a pas de détails', async () => {
       ;(api.get as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Network error'))
 
       render(<UserDetailsModal userId="123" onClose={mockOnClose} />)
 
       await waitFor(() => {
-        expect(screen.getByText('Erreur lors du chargement')).toBeInTheDocument()
+        expect(
+          screen.getByText('Le chargement des informations du membre a échoué. Réessayez.')
+        ).toBeInTheDocument()
       })
+      expect(screen.queryByText('Network error')).not.toBeInTheDocument()
     })
   })
 

@@ -13,6 +13,7 @@
  * de `mjBody` ignorent simplement la clé.
  */
 
+import { ERROR_CODES } from '@timepick/shared'
 import type { Request, Response } from 'express'
 import { editorContextQuerySchema } from '../validators/editor-context.validator'
 import { formatApiError } from '../validators/config.validator'
@@ -50,7 +51,7 @@ export const getEditorContextHandler = async (
   } catch (error) {
     if (error instanceof NotFoundError) {
       res.status(404).json({
-        error: { code: 'NOT_FOUND', message: error.message },
+        error: { code: error.code, message: error.message },
       })
       return
     }
@@ -59,25 +60,25 @@ export const getEditorContextHandler = async (
       // post-migration 006; its absence is a DB-corruption incident, not a
       // client-side "resource not found". Cohérent avec EmailBrandSettingsNotFoundError.
       res.status(500).json({
-        error: { code: 'INTERNAL_ERROR', message: error.message },
+        error: { code: ERROR_CODES.INTERNAL_ERROR, message: error.message },
       })
       return
     }
     if (error instanceof EmailBrandSettingsNotFoundError) {
       res.status(500).json({
-        error: { code: 'INTERNAL_ERROR', message: 'email_brand_settings singleton is missing — re-run migration 006' },
+        error: { code: ERROR_CODES.INTERNAL_ERROR, message: 'email_brand_settings singleton is missing — re-run migration 006' },
       })
       return
     }
     if (error instanceof ShellResolverError) {
       res.status(500).json({
-        error: { code: 'INTERNAL_ERROR', message: error.message },
+        error: { code: ERROR_CODES.INTERNAL_ERROR, message: error.message },
       })
       return
     }
 
     console.error('[EditorContext] Error resolving context:', error)
     const apiError = formatApiError(error, 'Erreur lors de la résolution du contexte éditeur')
-    res.status(apiError.code === 'VALIDATION_ERROR' ? 400 : 500).json({ error: apiError })
+    res.status(apiError.code === ERROR_CODES.VALIDATION_ERROR ? 400 : 500).json({ error: apiError })
   }
 }

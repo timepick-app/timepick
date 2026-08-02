@@ -13,7 +13,7 @@ import {
 } from '../services/settings.service'
 import type { OrganizationSettings } from '../services/organization.service'
 import { toast } from 'sonner'
-import { extractErrorMessage } from '@/lib/extractErrorMessage'
+import { userFacingErrorMessage } from '@/lib/userFacingErrorMessage'
 import { PUBLIC_ORGANIZATION_QUERY_KEY } from './usePublicOrganization'
 
 /** Clé de cache admin — panel de configuration (Chantier A1). */
@@ -56,7 +56,7 @@ export const useUpdateOrganizationSettings = () => {
       toast.success("Paramètres de l'organisation enregistrés")
     },
     onError: (err: unknown) => {
-      toast.error(extractErrorMessage(err, 'Erreur lors de la sauvegarde'))
+      toast.error(userFacingErrorMessage(err, "L'enregistrement de l'identité de l'organisation a échoué. Vos modifications sont toujours à l'écran, réessayez."))
     },
   })
 }
@@ -75,7 +75,7 @@ export const useUploadOrganizationLogo = () => {
       toast.success('Logo mis à jour')
     },
     onError: (err: unknown) => {
-      toast.error(extractErrorMessage(err, 'Erreur lors du téléversement du logo'))
+      toast.error(userFacingErrorMessage(err, "Le téléversement du logo a échoué. Le logo actuel n'a pas été modifié, réessayez."))
     },
   })
 }
@@ -93,7 +93,7 @@ export const useDeleteOrganizationLogo = () => {
       toast.success('Logo supprimé')
     },
     onError: (err: unknown) => {
-      toast.error(extractErrorMessage(err, 'Erreur lors de la suppression du logo'))
+      toast.error(userFacingErrorMessage(err, "La suppression a échoué. Le logo n'a pas été supprimé, réessayez."))
     },
   })
 }

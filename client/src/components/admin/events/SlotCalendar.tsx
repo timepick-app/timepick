@@ -23,6 +23,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Typography } from '@/components/ui/typography'
 import { useCompactMode } from '@/hooks/useCompactMode'
+import { userFacingErrorMessage } from '@/lib/userFacingErrorMessage'
 import { popoverStatusLabel, splitVolunteers } from '@/lib/slotPopover'
 import type { Slot } from '@/types/slot'
 import { getInitialCalendarDate } from '@/lib/calendarInitialDate'
@@ -73,17 +74,6 @@ class CalendarErrorBoundary extends Component<
     }
     return this.props.children
   }
-}
-
-/**
- * Normalise le message d'erreur pour l'affichage
- * Gère: string | Error | null | undefined
- */
-function getErrorMessage(error: string | Error | null | undefined): string {
-  if (!error) return 'Une erreur est survenue'
-  if (typeof error === 'string') return error
-  if (error instanceof Error) return error.message
-  return String(error)
 }
 
 /**
@@ -922,7 +912,10 @@ export function SlotCalendar({ eventId }: SlotCalendarProps) {
 
   // Error state - with normalized message
   if (error) {
-    const errorMessage = getErrorMessage(error)
+    const errorMessage = userFacingErrorMessage(
+      error,
+      "Les créneaux n'ont pas pu être chargés. Rafraîchissez la page pour réessayer."
+    )
     return (
       <div className="flex flex-col items-center justify-center py-12 px-4 bg-destructive/10 rounded-lg border border-destructive/20">
         <AlertCircle className="h-12 w-12 text-destructive mb-3" />

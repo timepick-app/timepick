@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../services/api'
 import { toast } from 'sonner'
-import { extractErrorMessage } from '@/lib/extractErrorMessage'
+import { userFacingErrorMessage } from '@/lib/userFacingErrorMessage'
 
 /**
  * useCancellationNotifications
@@ -97,9 +97,7 @@ export const useResendCancellationNotifications = () => {
       }
     },
     onError: (err) => {
-      const error = err as { response?: { data?: { error?: string } }; message?: string }
-      const errorMsg = extractErrorMessage(error, 'Erreur lors du renvoi des notifications')
-      toast.error(`Erreur: ${errorMsg}`)
+      toast.error(userFacingErrorMessage(err, "Le renvoi des notifications a échoué. Aucune notification n'est partie, réessayez."))
     },
   })
 }

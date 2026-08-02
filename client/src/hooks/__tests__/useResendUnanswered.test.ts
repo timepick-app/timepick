@@ -77,7 +77,7 @@ describe('useResendUnanswered — toasts selon { targeted, resent, failed }', ()
     })
   }
 
-  it('rejet réseau → toast.error via extractErrorMessage', async () => {
+  it('rejet sans code de transport → la phrase de l\'appelant, jamais le texte d\'axios', async () => {
     mockPost.mockRejectedValueOnce(new Error('Network Error'))
 
     const { result } = renderHook(() => useResendUnanswered('evt-1'), { wrapper })
@@ -85,6 +85,9 @@ describe('useResendUnanswered — toasts selon { targeted, resent, failed }', ()
 
     await waitFor(() => expect(result.current.isResending).toBe(false))
     expect(toastMock.error).toHaveBeenCalledTimes(1)
+    const shown = toastMock.error.mock.calls[0][0] as string
+    expect(shown).toContain('La relance a échoué')
+    expect(shown).not.toContain('Network Error')
     // Aucun toast de succès en cas d'échec réseau.
     expect(toastMock.success).not.toHaveBeenCalled()
   })

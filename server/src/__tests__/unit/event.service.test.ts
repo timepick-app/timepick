@@ -313,9 +313,9 @@ describe('eventService', () => {
         .rejects.toThrow(NotFoundError)
     })
 
-    it('[P1] lance Error si aucun champ à mettre à jour', async () => {
+    it('[P1] lance ValidationError si aucun champ à mettre à jour', async () => {
       await expect(eventService.updateEvent('uuid-123', {}))
-        .rejects.toThrow('Aucun champ à mettre à jour')
+        .rejects.toThrow("Aucune donnée à mettre à jour. Modifiez au moins une information avant d'enregistrer.")
     })
   })
 

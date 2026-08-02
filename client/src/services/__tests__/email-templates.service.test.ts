@@ -31,6 +31,9 @@ describe('email-templates.service', () => {
         bodyMjml: '<mj-section>body</mj-section>',
         defaultBodyMjml: '<mj-section>default</mj-section>',
         updatedAt: '2026-05-01T10:00:00Z',
+        subject: null,
+        defaultSubject: 'Inscription participation - {{event_name}}',
+        subjectVariables: [],
       }
       mockGet.mockResolvedValue({ data: { data: dto } })
 
@@ -48,6 +51,9 @@ describe('email-templates.service', () => {
         defaultIntroText: 'Bonjour par défaut',
         defaultSignatureText: 'Cordialement par défaut',
         updatedAt: '2026-05-01T10:00:00Z',
+        subject: null,
+        defaultSubject: 'Connexion à TimePick',
+        subjectVariables: [],
       }
       mockGet.mockResolvedValue({ data: { data: dto } })
 
@@ -74,6 +80,9 @@ describe('email-templates.service', () => {
         bodyMjml: '<mj-section>edited</mj-section>',
         defaultBodyMjml: '<mj-section>default</mj-section>',
         updatedAt: '2026-05-01T11:00:00Z',
+        subject: null,
+        defaultSubject: 'Inscription participation - {{event_name}}',
+        subjectVariables: [],
       }
       mockPatch.mockResolvedValue({ data: { data: updated } })
 
@@ -96,6 +105,9 @@ describe('email-templates.service', () => {
         defaultIntroText: 'Salut',
         defaultSignatureText: 'Bye',
         updatedAt: '2026-05-01T11:00:00Z',
+        subject: null,
+        defaultSubject: 'Connexion à TimePick',
+        subjectVariables: [],
       }
       mockPatch.mockResolvedValue({ data: { data: dto } })
 

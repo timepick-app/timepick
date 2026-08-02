@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../services/api'
 import { usePollingConfig } from './usePollingConfig'
 import { toast } from 'sonner'
-import { extractErrorMessage } from '@/lib/extractErrorMessage'
+import { userFacingErrorMessage } from '@/lib/userFacingErrorMessage'
 import type { Slot } from '@/types/slot'
 
 // Ré-exporter le type Slot pour compatibilité avec les composants existants
@@ -86,9 +86,7 @@ export const useAdminSlots = (eventId: string) => {
       toast.success('Créneau créé avec succès')
     },
     onError: (err) => {
-      const error = err as { response?: { data?: { error?: string } }; message?: string }
-      const errorMsg = extractErrorMessage(error, 'Erreur lors de la création')
-      toast.error(`Erreur: ${errorMsg}`)
+      toast.error(userFacingErrorMessage(err, 'La création du créneau a échoué. Vos informations sont toujours à l\'écran, réessayez.'))
     }
   })
 
@@ -127,9 +125,7 @@ export const useAdminSlots = (eventId: string) => {
       }
     },
     onError: (err) => {
-      const error = err as { response?: { data?: { error?: string } }; message?: string }
-      const errorMsg = extractErrorMessage(error, 'Erreur lors de la mise à jour')
-      toast.error(`Erreur: ${errorMsg}`)
+      toast.error(userFacingErrorMessage(err, 'La modification du créneau a échoué. Vos modifications sont toujours à l\'écran, réessayez.'))
     }
   })
 
@@ -173,9 +169,7 @@ export const useAdminSlots = (eventId: string) => {
       }
     },
     onError: (err) => {
-      const error = err as { response?: { data?: { error?: string } }; message?: string }
-      const errorMsg = extractErrorMessage(error, "Erreur lors de la suppression")
-      toast.error(`Erreur: ${errorMsg}`)
+      toast.error(userFacingErrorMessage(err, "La suppression du créneau a échoué. Rien n'a été supprimé, réessayez."))
     }
   })
 
