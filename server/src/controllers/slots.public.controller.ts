@@ -4,6 +4,8 @@ import { NotFoundError } from '../errors/NotFoundError'
 import { eventUsersService } from '../services/eventUsers.service'
 import { query, getClient } from '../db'
 import { VOLUNTEERS_AGG_FRAGMENT } from '../utils/slotSql'
+import { isEventOpen } from '../utils/eventAccess'
+import { UUID_RE } from '../lib/constants'
 import { ERROR_CODES } from '@timepick/shared'
 
 /**
@@ -93,25 +95,54 @@ export const getSlots = async (req: Request, res: Response) => {
   const { eventId } = req.query
   // requireAuth garantit la présence de req.user sur cette route.
   const userId = req.user?.userId
+  const userRole = req.user?.role
 
   // Validation: eventId est requis pour éviter d'exposer tous les slots de tous les événements
   if (!eventId || typeof eventId !== 'string') {
     res.status(400).json({ error: 'eventId parameter is required' })
     return
   }
+  // Format UUID validé AVANT la requête (comme events.controller/admin.controller) —
+  // sinon un eventId non-UUID fait échouer le cast Postgres et remonte en 500.
+  if (!UUID_RE.test(eventId)) {
+    res.status(404).json({ error: 'Event not found', code: ERROR_CODES.EVENT_NOT_FOUND })
+    return
+  }
 
   try {
-    // Filtrage soft-delete 'forCurrentUser' (F2/F7) : l'inscrit voit ses propres
-    // créneaux annulés (réservés), sans borne temporelle ; les annulés d'autrui
-    // sont masqués.
+    // F-002 : cette route catch-all doit refuser exactement ce que refuse la route
+    // officielle GET /api/public/events/:uuid/slots (getPublicEventSlots ci-dessus) —
+    // événement inexistant → 404, sinon admin (bypass) ou membre event_users requis.
+    const eventResult = await query('SELECT id FROM events WHERE id = $1', [eventId])
+    if (eventResult.rows.length === 0) {
+      res.status(404).json({ error: 'Event not found', code: ERROR_CODES.EVENT_NOT_FOUND })
+      return
+    }
+
+    if (userRole !== 'admin') {
+      const isAuthorized = await eventUsersService.isUserAuthorizedForEvent(eventId, userId as string)
+      if (!isAuthorized) {
+        res.status(403).json({ error: 'Access denied', code: ERROR_CODES.EVENT_ACCESS_DENIED })
+        return
+      }
+    }
+
+    // Filtrage soft-delete 'forCurrentUser' (F2/F7) + exception is_published (F-002 :
+    // même règle de visibilité que slotService.getPublicSlotsByEventUuid) : l'inscrit
+    // voit ses propres créneaux annulés même si l'événement est redevenu brouillon ;
+    // les créneaux actifs d'un brouillon ne fuitent jamais, y compris à un membre.
     const result = await query(`
       SELECT s.*,
       (SELECT COUNT(*) FROM bookings b WHERE b.slot_id = s.id)::int as current_bookings,
       ${VOLUNTEERS_AGG_FRAGMENT}
       FROM slots s
+      JOIN events e ON e.id = s.event_id
       WHERE s.event_id = $1
-        AND (s.cancelled_at IS NULL
-             OR EXISTS (SELECT 1 FROM bookings b4 WHERE b4.slot_id = s.id AND b4.user_id = $2))
+        AND (
+          (e.is_published = true AND s.cancelled_at IS NULL)
+          OR (s.cancelled_at IS NOT NULL
+              AND EXISTS (SELECT 1 FROM bookings b4 WHERE b4.slot_id = s.id AND b4.user_id = $2))
+        )
       ORDER BY s.start_time ASC
     `, [eventId, userId ?? null])
     res.json(result.rows)
@@ -125,6 +156,7 @@ export const bookSlot = async (req: Request, res: Response): Promise<void> => {
   const { slotId } = req.body
   // @ts-ignore - req.user.userId is added by requireAuth middleware but not defined in Express Request type
   const userId = req.user?.userId
+  const userRole = req.user?.role
 
   if (!slotId || !userId) {
     res.status(400).json({ error: 'Missing slotId or User not authenticated' })
@@ -136,8 +168,19 @@ export const bookSlot = async (req: Request, res: Response): Promise<void> => {
   try {
     await client.query('BEGIN')
 
-    // Lock the slot row to prevent race conditions
-    const slotResult = await client.query('SELECT * FROM slots WHERE id = $1 FOR UPDATE', [slotId])
+    // Lock the slot row to prevent race conditions. La jointure sur `events` lit
+    // l'état de publication/ouverture dans la MÊME requête (F-020/F-021) sans
+    // ajouter d'aller-retour ni verrouiller la ligne `events` : `FOR UPDATE OF s`
+    // restreint le verrou à `slots`, sinon les réservations concurrentes sur des
+    // slots différents du même événement se sérialiseraient inutilement.
+    const slotResult = await client.query(
+      `SELECT s.*, e.is_published AS event_is_published, e.opens_at AS event_opens_at
+       FROM slots s
+       JOIN events e ON e.id = s.event_id
+       WHERE s.id = $1
+       FOR UPDATE OF s`,
+      [slotId]
+    )
 
     if (slotResult.rows.length === 0) {
       await client.query('ROLLBACK')
@@ -146,6 +189,37 @@ export const bookSlot = async (req: Request, res: Response): Promise<void> => {
     }
 
     const slot = slotResult.rows[0]
+
+    // F-020/F-021 : un slotId mis en cache avant dépublication ou avant l'heure
+    // d'ouverture ne doit pas rester réservable. Reproduit exactement le modèle
+    // d'autorisation de la route de lecture officielle (getPublicEventSlots ci-dessus) :
+    // admin bypass, sinon appartenance event_users requise.
+    if (!slot.event_is_published) {
+      await client.query('ROLLBACK')
+      res.status(403).json({ error: "Cet événement n'est pas encore accessible", code: ERROR_CODES.EVENT_NOT_PUBLISHED })
+      return
+    }
+
+    if (!isEventOpen(slot.event_opens_at)) {
+      await client.query('ROLLBACK')
+      res.status(403).json({ error: 'Les inscriptions ne sont pas encore ouvertes pour cet événement.', code: ERROR_CODES.BOOKING_NOT_OPEN })
+      return
+    }
+
+    if (userRole !== 'admin') {
+      // client.query (pas eventUsersService, qui prendrait une 2e connexion du pool
+      // pendant que celle-ci est retenue par la transaction — sous forte concurrence
+      // ça épuise le pool). Même requête que eventUsersService.isUserAuthorizedForEvent.
+      const membership = await client.query(
+        'SELECT 1 FROM event_users WHERE event_id = $1 AND user_id = $2',
+        [slot.event_id, userId]
+      )
+      if (membership.rows.length === 0) {
+        await client.query('ROLLBACK')
+        res.status(403).json({ error: "Vous n'êtes pas autorisé à accéder à cet événement", code: ERROR_CODES.EVENT_ACCESS_DENIED })
+        return
+      }
+    }
 
     // Garde-fou soft-delete (F6) : refuser la réservation d'un créneau annulé.
     // La vérification est dans la même transaction que le verrou `FOR UPDATE`,

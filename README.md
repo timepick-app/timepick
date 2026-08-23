@@ -84,7 +84,7 @@ timepick/
 │   │   ├── middleware/     # Auth, rate limiting…
 │   │   ├── validators/     # Schémas Zod
 │   │   ├── db/             # Accès DB, advisory locks
-│   │   ├── migrations/     # Migrations SQL (001→038)
+│   │   ├── migrations/     # Migrations SQL (001→045)
 │   │   ├── config/         # Constantes (identité email…)
 │   │   ├── migrate.ts      # Runner de migrations
 │   │   └── index.ts
@@ -125,11 +125,11 @@ cp server/.env.example server/.env
 # Éditer server/.env : DATABASE_URL (obligatoire) ; JWT_SECRET, ENCRYPTION_KEY (optionnels — voir ci-dessous)…
 ```
 
-> ℹ️ `JWT_SECRET` et `ENCRYPTION_KEY` sont **optionnels** : absents, ils sont générés automatiquement au premier démarrage du serveur et stockés dans `server/data/` ; **recommandés en variables d'environnement en production** (une variable d'environnement valide a toujours priorité sur le fichier généré). Pour les gérer soi-même dès le départ (optionnel), générer des secrets forts (chaînes hexadécimales de 64 caractères) :
+> ℹ️ `JWT_SECRET` et `ENCRYPTION_KEY` sont **optionnels** : absents, ils sont générés automatiquement au premier démarrage du serveur et stockés dans `server/data/` ; **recommandés en variables d'environnement en production** (une variable d'environnement valide a toujours priorité sur le fichier généré). Si `JWT_SECRET` est fourni, il est validé au démarrage — minimum 32 caractères, aucun motif de dictionnaire (`changeme`, `secret`, `password`…) — le serveur refuse sinon de démarrer (fail-fast). Pour les gérer soi-même dès le départ (optionnel) :
 
 ```bash
-openssl rand -hex 32   # → JWT_SECRET
-openssl rand -hex 32   # → ENCRYPTION_KEY
+openssl rand -base64 48   # → JWT_SECRET (min. 32 caractères requis)
+openssl rand -hex 32      # → ENCRYPTION_KEY (64 caractères hex exigés)
 ```
 
 Initialiser la base et appliquer les migrations :
@@ -241,6 +241,7 @@ Pour les détails, voir [`https://docs.timepick.app/installation/installation-lo
 | `POST /auth/login` | public | Demande un magic link par email (réponse générique volontaire : anti-énumération) |
 | `POST /auth/verify` | public | Vérifie le magic link et ouvre une session |
 | `POST /auth/refresh` | `user` / `admin` | Prolonge la session active |
+| `POST /auth/logout` | `user` / `admin` | Révoque toutes les sessions actives de l'utilisateur (invalide tous les JWT émis) |
 | `POST /auth/emergency-login` | public | Connexion de secours par code (rate-limité) |
 | `POST /auth/resend-invitation` | public | Renvoie une invitation |
 
@@ -316,7 +317,7 @@ Toutes les réponses de succès utilisent l'enveloppe `{ "data": … }`. Exemple
 
 ### Système de migrations
 
-Les migrations SQL sont numérotées de `001` à `038` et stockées dans `server/src/migrations/`. Le runner `server/src/migrate.ts`, invoqué via `npm run migrate`, les applique dans l'ordre séquentiel. Le suivi est assuré par la table `schema_migrations` (une ligne par migration appliquée). Un advisory lock PostgreSQL est posé au démarrage pour empêcher toute exécution concurrente.
+Les migrations SQL sont numérotées de `001` à `045` et stockées dans `server/src/migrations/`. Le runner `server/src/migrate.ts`, invoqué via `npm run migrate`, les applique dans l'ordre séquentiel. Le suivi est assuré par la table `schema_migrations` (une ligne par migration appliquée). Un advisory lock PostgreSQL est posé au démarrage pour empêcher toute exécution concurrente.
 
 ```bash
 cd server
@@ -352,7 +353,7 @@ Pour le détail des migrations (DDL, ordre, historique), voir [`https://docs.tim
 | Variable | Description | Requis | Défaut |
 |---|---|---|---|
 | `DATABASE_URL` | Chaîne de connexion PostgreSQL | **Oui** | — |
-| `JWT_SECRET` | Secret de signature JWT | Non \* | *(auto-généré)* |
+| `JWT_SECRET` | Secret de signature JWT — si fourni, validé au démarrage (voir note ci-dessous) | Non \* | *(auto-généré)* |
 | `ENCRYPTION_KEY` | Clé de chiffrement AES (32 octets = 64 caractères hex) pour le mot de passe SMTP stocké en base | Non \* | *(auto-généré)* |
 | `PORT` | Port d'écoute du serveur Express | Non | `3000` |
 | `APP_URL` | URL de base du frontend — utilisée pour construire les magic links et les CTA dans les emails ⚠️ variable **serveur** | Non | `http://localhost:5173` |
@@ -367,7 +368,7 @@ Pour le détail des migrations (DDL, ordre, historique), voir [`https://docs.tim
 | `PUBLIC_BASE_URL` | URL publique de base pour les liens absolus des images d'email (derrière un reverse proxy / CDN) | Non | *(déduit de la requête)* |
 | `ALLOW_TEST_ROUTES` | Active les routes de test E2E (`/api/test/*`) — **hors production uniquement** | Non | `false` |
 
-> \* `JWT_SECRET` et `ENCRYPTION_KEY` sont **optionnels** : absents au premier démarrage, ils sont générés automatiquement (32 octets aléatoires, 64 caractères hex) et stockés dans `server/data/` (`jwt.secret`, `encryption.key`, permissions `0600`). **Recommandé de les définir en variables d'environnement en production** — une variable d'environnement valide a toujours priorité sur le fichier généré (avertissement loggé si les deux existent). `server/data/` doit alors être un **volume persistant** en production (comme `server/uploads`) : sans cela, les clés sont régénérées à chaque recréation du conteneur, ce qui invalide les sessions actives et rend le mot de passe SMTP stocké en base indéchiffrable. La variable `DATA_DIR` permet de changer ce répertoire (défaut `<server>/data`, soit `/app/server/data` sous Docker).
+> \* `JWT_SECRET` et `ENCRYPTION_KEY` sont **optionnels** : absents au premier démarrage, ils sont générés automatiquement (32 octets aléatoires, 64 caractères hex) et stockés dans `server/data/` (`jwt.secret`, `encryption.key`, permissions `0600`). **Recommandé de les définir en variables d'environnement en production** — une variable d'environnement valide a toujours priorité sur le fichier généré (avertissement loggé si les deux existent). Si elle est fournie, `JWT_SECRET` doit faire au moins 32 caractères et ne pas correspondre à un motif de dictionnaire connu (`changeme`, `secret`, `password`…) ; sinon le serveur **refuse de démarrer** (fail-fast, message explicite) — même logique pour `ENCRYPTION_KEY` si elle est mal formée (pas exactement 64 caractères hex). `server/data/` doit alors être un **volume persistant** en production (comme `server/uploads`) : sans cela, les clés sont régénérées à chaque recréation du conteneur, ce qui invalide les sessions actives et rend le mot de passe SMTP stocké en base indéchiffrable. La variable `DATA_DIR` permet de changer ce répertoire (défaut : `server/data`).
 
 > **Note SMTP — provisionnement initial :** les variables `SMTP_*` ne servent qu'au **démarrage initial**. Au premier lancement, `prepare-db` les copie en base de données ; ensuite, la configuration SMTP se gère **dans l'application** (Paramètres → Serveur d'email) et le runtime lit directement la base. En développement, si aucun SMTP n'est configuré, le système bascule automatiquement sur **un intercepteur SMTP local** (`127.0.0.1:1025`, ex. Mailpit).
 

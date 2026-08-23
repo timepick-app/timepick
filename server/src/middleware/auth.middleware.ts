@@ -12,6 +12,7 @@ interface JwtPayload {
   userId: string
   role: string
   hasMemberAccess?: boolean   // présent dans le session JWT (émis par verify/refresh, D2) — non trusté, recalculé depuis la DB ci-dessous
+  tv?: number   // token_version au moment de l'émission (F-085) — comparé à users.token_version ci-dessous ; absent = 0 (tokens émis avant ce correctif)
 }
 
 
@@ -26,7 +27,7 @@ export const requireAuth = async (
 ): Promise<void> => {
   const authHeader = req.headers.authorization
 
-  // Les cinq réponses de ce middleware portent `SESSION_INVALID`, volontairement
+  // Les six réponses de ce middleware portent `SESSION_INVALID`, volontairement
   // hors liste blanche : leurs messages sont des phrases de journal, et
   // l'utilisateur doit lire la phrase de l'appelant, qui lui dit ce qu'il
   // advient de son travail. Voir le commentaire du code dans le contrat partagé.
@@ -42,12 +43,19 @@ export const requireAuth = async (
 
     // Verify the user still exists in database
     const result = await query(
-      'SELECT id, role, EXISTS(SELECT 1 FROM event_users WHERE user_id = $1) AS has_member_access FROM users WHERE id = $1',
+      'SELECT id, role, token_version, EXISTS(SELECT 1 FROM event_users WHERE user_id = $1) AS has_member_access FROM users WHERE id = $1',
       [decoded.userId]
     )
 
     if (result.rows.length === 0) {
       res.status(401).json({ error: 'Utilisateur non trouvé', code: ERROR_CODES.SESSION_INVALID })
+      return
+    }
+
+    // F-085 : un token dont la version ne correspond plus à users.token_version a été
+    // révoqué (logout, cf. POST /api/auth/logout) — rejeté même si signature/exp valides.
+    if ((decoded.tv ?? 0) !== result.rows[0].token_version) {
+      res.status(401).json({ error: 'Session révoquée', code: ERROR_CODES.SESSION_INVALID })
       return
     }
 
@@ -92,15 +100,16 @@ export const optionalAuth = async (
 
     // Verify the user still exists in database
     const result = await query(
-      'SELECT id, role, EXISTS(SELECT 1 FROM event_users WHERE user_id = $1) AS has_member_access FROM users WHERE id = $1',
+      'SELECT id, role, token_version, EXISTS(SELECT 1 FROM event_users WHERE user_id = $1) AS has_member_access FROM users WHERE id = $1',
       [decoded.userId]
     )
 
-    if (result.rows.length > 0) {
+    // F-085 : version révoquée (logout) → traité comme anonyme, comme un token invalide.
+    if (result.rows.length > 0 && (decoded.tv ?? 0) === result.rows[0].token_version) {
       // Add user info to request for downstream handlers
       req.user = { userId: decoded.userId, role: result.rows[0].role, hasMemberAccess: Boolean(result.rows[0].has_member_access) }
     }
-    // Si utilisateur non trouvé, on continue sans req.user (token invalide = mode anonyme)
+    // Si utilisateur non trouvé ou session révoquée, on continue sans req.user (mode anonyme)
   } catch (err) {
     // Token invalide ou expiré = mode anonyme, on continue sans erreur
     // Le client recevra un 200 avec canReserve: false

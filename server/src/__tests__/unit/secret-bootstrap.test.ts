@@ -63,14 +63,35 @@ describe('secret-bootstrap', () => {
       expect(() => ensureSecret(ENCRYPTION_KEY_SPEC)).toThrow(/64 hex characters/)
     })
 
-    it('JWT_SECRET env with an arbitrary non-empty string is accepted → source=env', async () => {
+    it('JWT_SECRET env with a sufficiently long, non-dictionary string is accepted → source=env', async () => {
       const { ensureSecret, JWT_SECRET_SPEC } = await load()
-      process.env.JWT_SECRET = 'dev_secret'
+      process.env.JWT_SECRET = 'kx7Qz2mP9vRt4Ln8Wc1Fj6Yd3Hb5Sg0A'
 
       const source = ensureSecret(JWT_SECRET_SPEC)
 
       expect(source).toBe('env')
-      expect(process.env.JWT_SECRET).toBe('dev_secret')
+      expect(process.env.JWT_SECRET).toBe('kx7Qz2mP9vRt4Ln8Wc1Fj6Yd3Hb5Sg0A')
+    })
+
+    // F-080 (pentest 2026-08-19) : un secret court était accepté tel quel, permettant
+    // une forge de session hors-ligne. `ensureSecret` refuse désormais tout JWT_SECRET
+    // fourni de moins de 32 caractères — fail-fast, jamais de valeur dans le message.
+    it('JWT_SECRET env shorter than 32 chars → throws (fail-fast, F-080)', async () => {
+      const { ensureSecret, JWT_SECRET_SPEC } = await load()
+      process.env.JWT_SECRET = 'dev_secret'
+
+      expect(() => ensureSecret(JWT_SECRET_SPEC)).toThrow(/at least 32 characters/)
+      expect(() => ensureSecret(JWT_SECRET_SPEC)).not.toThrow(/dev_secret/)
+    })
+
+    // F-080 : filet de sécurité pour un secret qui dépasserait 32 caractères tout en
+    // restant un motif dictionnaire ("changeme"-style, famille de .env.example).
+    it('JWT_SECRET env matching a known weak/placeholder pattern → throws (fail-fast, F-080)', async () => {
+      const { ensureSecret, JWT_SECRET_SPEC } = await load()
+      process.env.JWT_SECRET = 'this_is_a_changeme_placeholder_value_padding'
+
+      expect(process.env.JWT_SECRET.length).toBeGreaterThanOrEqual(32)
+      expect(() => ensureSecret(JWT_SECRET_SPEC)).toThrow(/weak\/placeholder pattern/)
     })
 
     it("ENCRYPTION_KEY='' (empty) is treated as absent → falls through to file generation", async () => {
@@ -84,14 +105,25 @@ describe('secret-bootstrap', () => {
       expect(fs.existsSync(path.join(resolveDataDir(), ENCRYPTION_KEY_SPEC.fileName))).toBe(true)
     })
 
-    it('JWT_SECRET with a whitespace-only value is accepted un-trimmed (permissive validator)', async () => {
+    // F-080 : la permissivité historique (longueur non contrôlée) est révoquée — un
+    // secret de 3 caractères échoue désormais la garde de longueur minimale.
+    it('JWT_SECRET with a whitespace-only value now fails the minimum-length guard (F-080)', async () => {
       const { ensureSecret, JWT_SECRET_SPEC } = await load()
       process.env.JWT_SECRET = '   '
 
-      const source = ensureSecret(JWT_SECRET_SPEC)
+      expect(() => ensureSecret(JWT_SECRET_SPEC)).toThrow(/at least 32 characters/)
+    })
 
-      expect(source).toBe('env')
-      expect(process.env.JWT_SECRET).toBe('   ')
+    // F-080 (bis, pentest 2026-08-19) : la garde de longueur portait sur la valeur BRUTE —
+    // 'x' + 31 espaces fait pile 32 caractères mais un seul caractère significatif une fois
+    // trimé (padding trivial pour contourner la garde). La garde porte désormais sur la
+    // valeur trimée.
+    it('JWT_SECRET padded with whitespace to 32 raw chars → throws (trimmed-length guard, F-080 bis)', async () => {
+      const { ensureSecret, JWT_SECRET_SPEC } = await load()
+      process.env.JWT_SECRET = 'x' + ' '.repeat(31)
+
+      expect(process.env.JWT_SECRET.length).toBe(32)
+      expect(() => ensureSecret(JWT_SECRET_SPEC)).toThrow(/at least 32 characters/)
     })
   })
 

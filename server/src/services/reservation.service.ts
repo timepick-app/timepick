@@ -1,6 +1,9 @@
 import { getClient, query } from '../db'
 import { NotFoundError } from '../errors/NotFoundError'
 import { ConflictError } from '../errors/ConflictError'
+import { NotPublishedError } from '../errors/NotPublishedError'
+import { ForbiddenError } from '../errors/ForbiddenError'
+import { isEventOpen } from '../utils/eventAccess'
 import { sendReservationEmail, sendUnregistrationEmail } from './email.service'
 import { formatSlotEmailDate, formatSlotEmailTime } from '../utils/slotEmailFormat'
 import { ERROR_CODES } from '@timepick/shared'
@@ -80,20 +83,33 @@ export const reservationService = {
    *
    * @param slotId - UUID du créneau
    * @param userId - UUID de l'utilisateur
+   * @param userRole - Rôle de l'utilisateur ; 'admin' bypasse l'appartenance event_users (F-021)
    * @returns La réservation créée
    * @throws NotFoundError si le créneau n'existe pas
+   * @throws NotPublishedError si l'événement parent n'est pas publié (F-021)
+   * @throws ForbiddenError si les inscriptions ne sont pas encore ouvertes (F-020) ou si
+   *   l'utilisateur n'est pas dans event_users pour cet événement (F-021)
    * @throws ConflictError si le créneau est complet (SLOT_FULL)
    * @throws ConflictError si l'utilisateur a déjà réservé (ALREADY_BOOKED)
    */
-  async createReservation(slotId: string, userId: string): Promise<BookingCreated> {
+  async createReservation(slotId: string, userId: string, userRole?: string): Promise<BookingCreated> {
     const client = await getClient()
 
     try {
       await client.query('BEGIN')
 
-      // Verrouiller le créneau pour éviter les race conditions (CRITICAL)
+      // Verrouiller le créneau pour éviter les race conditions (CRITICAL). La jointure
+      // sur `events` lit l'état de publication/ouverture dans la MÊME requête
+      // (F-020/F-021) sans aller-retour supplémentaire ni verrouiller la ligne
+      // `events` : `FOR UPDATE OF s` restreint le verrou à `slots`, sinon les
+      // réservations concurrentes sur des slots différents du même événement se
+      // sérialiseraient inutilement.
       const slotResult = await client.query(
-        'SELECT * FROM slots WHERE id = $1 FOR UPDATE',
+        `SELECT s.*, e.is_published AS event_is_published, e.opens_at AS event_opens_at
+         FROM slots s
+         JOIN events e ON e.id = s.event_id
+         WHERE s.id = $1
+         FOR UPDATE OF s`,
         [slotId]
       )
 
@@ -103,6 +119,40 @@ export const reservationService = {
       }
 
       const slot = slotResult.rows[0]
+
+      // F-020/F-021 : un slotId mis en cache avant dépublication ou avant l'heure
+      // d'ouverture ne doit pas rester réservable. Reproduit exactement le modèle
+      // d'autorisation de la route de lecture officielle (getPublicEventSlots) :
+      // admin bypass, sinon appartenance event_users requise.
+      if (!slot.event_is_published) {
+        await client.query('ROLLBACK')
+        throw new NotPublishedError("Cet événement n'est pas encore accessible")
+      }
+
+      if (!isEventOpen(slot.event_opens_at)) {
+        await client.query('ROLLBACK')
+        throw new ForbiddenError(
+          'Les inscriptions ne sont pas encore ouvertes pour cet événement.',
+          ERROR_CODES.BOOKING_NOT_OPEN
+        )
+      }
+
+      if (userRole !== 'admin') {
+        // client.query (pas eventUsersService, qui prendrait une 2e connexion du pool
+        // pendant que celle-ci est retenue par la transaction — sous forte concurrence
+        // ça épuise le pool). Même requête que eventUsersService.isUserAuthorizedForEvent.
+        const membership = await client.query(
+          'SELECT 1 FROM event_users WHERE event_id = $1 AND user_id = $2',
+          [slot.event_id, userId]
+        )
+        if (membership.rows.length === 0) {
+          await client.query('ROLLBACK')
+          throw new ForbiddenError(
+            "Vous n'êtes pas autorisé à accéder à cet événement",
+            ERROR_CODES.EVENT_ACCESS_DENIED
+          )
+        }
+      }
 
       // Vérifier si le créneau est passé
       if (new Date(slot.end_time) < new Date()) {
@@ -150,7 +200,8 @@ export const reservationService = {
     } catch (error) {
       await client.query('ROLLBACK')
       // Si c'est déjà une erreur personnalisée, la renvoyer telle quelle
-      if (error instanceof NotFoundError || error instanceof ConflictError) {
+      if (error instanceof NotFoundError || error instanceof ConflictError
+        || error instanceof NotPublishedError || error instanceof ForbiddenError) {
         throw error
       }
 

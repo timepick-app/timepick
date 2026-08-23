@@ -239,8 +239,8 @@ export const emergencyLogin = async (req: Request, res: Response): Promise<void>
 
     // 1. Lookup admin (case-insensitive). Anti-enumeration: always burn 8
     //    bcrypt.compare calls against DUMMY_HASH if no admin matches.
-    const userRes = await query<{ id: string; email: string; first_name: string | null; last_name: string | null; role: string }>(
-      `SELECT id, email, first_name, last_name, role FROM users
+    const userRes = await query<{ id: string; email: string; first_name: string | null; last_name: string | null; role: string; token_version: number }>(
+      `SELECT id, email, first_name, last_name, role, token_version FROM users
        WHERE LOWER(email) = LOWER($1) AND role = 'admin'
        LIMIT 1`,
       [email]
@@ -334,9 +334,11 @@ export const emergencyLogin = async (req: Request, res: Response): Promise<void>
     )
     const remainingCodes = remainingRes.rows[0]?.remaining ?? 0
 
-    // 8. Issue emergency session JWT
+    // 8. Issue emergency session JWT — `tv` (F-085) par parité avec les autres émetteurs
+    // de token de session (auth.controller.ts) : sans lui, requireAuth le rejetterait
+    // dès qu'un logout aurait fait tourner token_version.
     const token = jwt.sign(
-      { userId: admin.id, role: 'admin', sessionType: 'emergency' },
+      { userId: admin.id, role: 'admin', sessionType: 'emergency', tv: admin.token_version },
       JWT_SECRET,
       { expiresIn: sessionTtl }
     )

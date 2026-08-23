@@ -137,16 +137,46 @@ describe('Public Event Access API with Authorization', () => {
       expect(res.body.error).toMatch(/autorisé/i)
     })
 
-    it('retourne 403 pour événement non publié (brouillon)', async () => {
+    it('retourne 200 (preview) pour un admin sur un événement non publié (brouillon) — F-001', async () => {
+      // Story 11.5 : le bypass admin est désormais évalué AVANT toute levée
+      // d'exception liée à la publication (cf. events.controller.ts) — l'admin
+      // peut prévisualiser un brouillon au lieu de recevoir l'ancien 403 leak.
       const res = await request(testServer())
         .get(`/api/public/events/${draftEventUuid}`)
         .set('Authorization', `Bearer ${adminToken}`)
 
-      expect(res.status).toBe(403)
-      expect(res.body.error).toContain('pas encore accessible')
+      expect(res.status).toBe(200)
+      expect(res.body.data).toHaveProperty('name', 'Draft Event')
+      expect(res.body.data).toHaveProperty('isPublished', false)
     })
 
-    it('retourne 404 pour UUID inexistant', async () => {
+    it('retourne 404 EVENT_NOT_FOUND identique pour un brouillon et un UUID inexistant, non-admin authentifié — F-001', async () => {
+      const fakeUuid = '00000000-0000-0000-0000-000000000000'
+
+      const draftRes = await request(testServer())
+        .get(`/api/public/events/${draftEventUuid}`)
+        .set('Authorization', `Bearer ${otherUserToken}`)
+      const fakeRes = await request(testServer())
+        .get(`/api/public/events/${fakeUuid}`)
+        .set('Authorization', `Bearer ${otherUserToken}`)
+
+      expect(draftRes.status).toBe(404)
+      expect(fakeRes.status).toBe(404)
+      expect(draftRes.body.code).toBe('EVENT_NOT_FOUND')
+      expect(fakeRes.body.code).toBe('EVENT_NOT_FOUND')
+      expect(draftRes.body.error).toBe(fakeRes.body.error)
+    })
+
+    it('retourne 404 pour un brouillon consulté anonymement — F-001', async () => {
+      const res = await request(testServer())
+        .get(`/api/public/events/${draftEventUuid}`)
+        // Pas de header Authorization
+
+      expect(res.status).toBe(404)
+      expect(res.body.code).toBe('EVENT_NOT_FOUND')
+    })
+
+    it('retourne 404 pour un UUID inexistant', async () => {
       const fakeUuid = '00000000-0000-0000-0000-000000000000'
       const res = await request(testServer())
         .get(`/api/public/events/${fakeUuid}`)

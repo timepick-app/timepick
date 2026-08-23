@@ -341,7 +341,7 @@ export const verifyMagicLink = async (req: Request, res: Response): Promise<void
 
     // Vérifier que l'utilisateur existe toujours
     const userResult = await query(
-      'SELECT id, email, first_name, last_name, role, EXISTS(SELECT 1 FROM event_users WHERE user_id = $1) AS has_member_access FROM users WHERE id = $1',
+      'SELECT id, email, first_name, last_name, role, token_version, EXISTS(SELECT 1 FROM event_users WHERE user_id = $1) AS has_member_access FROM users WHERE id = $1',
       [magicLinkPayload.userId]
     );
 
@@ -366,10 +366,11 @@ export const verifyMagicLink = async (req: Request, res: Response): Promise<void
     const sessionTTL = await configService.getSessionTTL();
 
     // Créer un nouveau token de session avec expiration dynamique
-    const sessionPayload: { userId: string; role: string; hasMemberAccess: boolean } = {
+    const sessionPayload: { userId: string; role: string; hasMemberAccess: boolean; tv: number } = {
       userId: user.id,
       role: user.role,
       hasMemberAccess: Boolean(user.has_member_access),
+      tv: user.token_version,
     };
     const sessionToken = jwt.sign(sessionPayload, JWT_SECRET, { expiresIn: sessionTTL });
 
@@ -466,7 +467,7 @@ export const refreshSession = async (req: Request, res: Response): Promise<void>
 
     // Vérifier que l'utilisateur existe toujours
     const userResult = await query(
-      'SELECT id, role, EXISTS(SELECT 1 FROM event_users WHERE user_id = $1) AS has_member_access FROM users WHERE id = $1',
+      'SELECT id, role, token_version, EXISTS(SELECT 1 FROM event_users WHERE user_id = $1) AS has_member_access FROM users WHERE id = $1',
       [userId]
     );
 
@@ -484,11 +485,15 @@ export const refreshSession = async (req: Request, res: Response): Promise<void>
     const sessionTTL = await configService.getSessionTTL();
     const now = Math.floor(Date.now() / 1000);
 
-    // Générer un nouveau token de session avec un iat pour garantir l'unicité
+    // Générer un nouveau token de session avec un iat pour garantir l'unicité. `tv` reprend
+    // la version courante (F-085) : le refresh ne fait PAS tourner la version — seul un
+    // logout explicite le fait — donc l'ancien ET le nouveau token restent valides jusqu'à
+    // leur expiration naturelle tant qu'aucun logout n'a eu lieu entre-temps.
     const sessionPayload = {
       userId,
       role,
       hasMemberAccess: Boolean(userResult.rows[0].has_member_access),
+      tv: userResult.rows[0].token_version,
       iat: now, // Ajouter iat pour garantir un token différent à chaque appel
     };
 
@@ -505,6 +510,48 @@ export const refreshSession = async (req: Request, res: Response): Promise<void>
       error: {
         code: ERROR_CODES.INTERNAL_ERROR,
         message: 'Une erreur est survenue lors du rafraîchissement de la session.',
+      },
+    });
+  }
+};
+
+/**
+ * POST /api/auth/logout
+ * Révoque la session courante — et toutes les autres sessions actives du même
+ * utilisateur (F-085 : révocation minimale, pas de ciblage par token/appareil).
+ *
+ * @security Nécessite un token JWT valide (requireAuth)
+ *
+ * Incrémente `users.token_version` : tout token (courant compris) porte désormais
+ * un claim `tv` obsolète et sera rejeté par `requireAuth` dès la prochaine requête,
+ * jusqu'à sa réémission via un nouveau login/verify.
+ */
+export const logout = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({
+        error: {
+          code: ERROR_CODES.INVALID_TOKEN,
+          message: 'Token invalide.',
+        },
+      });
+      return;
+    }
+
+    await query('UPDATE users SET token_version = token_version + 1 WHERE id = $1', [userId]);
+
+    res.status(200).json({
+      data: {
+        message: 'Déconnecté.',
+      },
+    });
+  } catch (error) {
+    console.error('Error logging out:', error);
+    res.status(500).json({
+      error: {
+        code: ERROR_CODES.INTERNAL_ERROR,
+        message: 'Une erreur est survenue lors de la déconnexion.',
       },
     });
   }
@@ -572,6 +619,37 @@ const issueAndSendMagicLinkForUser = async (user: {
 };
 
 /**
+ * F-082 (pentest 2026-08-19) : le chemin « email inconnu » de `requestMagicLink`
+ * répondait dès la fin du `SELECT` (quelques ms), tandis que le chemin « email connu »
+ * attendait en plus la signature JWT, l'écriture `magic_link_tokens` et l'envoi SMTP
+ * synchrone (~30 ms en local, bien davantage en prod sous charge/panne partielle) — un
+ * canal de timing fiable pour énumérer les comptes. Correctif en deux temps :
+ *   1. Structurel : `issueAndSendMagicLinkForUser` est désormais appelée en
+ *      fire-and-forget sur le chemin login (cf. `requestMagicLink`) — la réponse ne
+ *      dépend plus de sa complétion, donc plus de la latence SMTP. Seule la portion
+ *      synchrone avant son premier `await` (construction du payload + signature JWT)
+ *      s'exécute avant la réponse, un coût comparable au travail factice du chemin
+ *      « email inconnu ».
+ *   2. `LOGIN_TIMING_FLOOR_MS` absorbe le résidu entre les deux chemins (borne commune) :
+ *      celui qui termine en premier attend le reste jusqu'au plancher.
+ * Ne couvre que les réponses 200 (le différentiel de statut 400/503 est déjà, par nature,
+ * un canal distinct et hors périmètre de ce correctif — et disparaît d'ailleurs du chemin
+ * login avec le point 1 : plus aucun 503 n'y est observable, cf. `resendInvitation` /
+ * `reissueMagicLinkForUserRow` pour les flows où l'envoi reste synchrone).
+ */
+const LOGIN_TIMING_FLOOR_MS = 50;
+
+// NB `new Promise(resolve => setTimeout(...))` : `Promise.withResolvers` n'est pas dans la
+// lib TS configurée ici (target es2016), d'où la forme executor classique — même convention
+// que services/email-transport/http-transport.ts.
+const enforceLoginTimingFloor = async (startedAt: number): Promise<void> => {
+  const remaining = LOGIN_TIMING_FLOOR_MS - (Date.now() - startedAt);
+  if (remaining > 0) {
+    await new Promise((resolve) => setTimeout(resolve, remaining));
+  }
+};
+
+/**
  * POST /api/auth/login
  * Demande de magic link (public)
  *
@@ -579,6 +657,7 @@ const issueAndSendMagicLinkForUser = async (user: {
  * @security Pas de disclosure d'email (même réponse si trouvé ou non)
  */
 export const requestMagicLink = async (req: Request, res: Response): Promise<void> => {
+  const startedAt = Date.now();
   try {
     // Validation
     const { email, next } = requestMagicLinkSchema.parse(req.body);
@@ -591,7 +670,14 @@ export const requestMagicLink = async (req: Request, res: Response): Promise<voi
 
     // IMPORTANT: Même réponse si utilisateur trouvé ou non (sécurité - pas de disclosure)
     if (userResult.rows.length === 0) {
-      // Email non trouvé - on retourne 200 quand même pour éviter l'énumération
+      // Email non trouvé — travail factice de coût comparable (signature JWT, cf. F-082)
+      // puis délai plancher commun avant de répondre 200, pour ne pas laisser ce chemin
+      // répondre systématiquement plus vite que le chemin « email connu ».
+      jwt.sign(
+        { userId: randomUUID(), role: 'user', exp: Math.floor(Date.now() / 1000) + 1800 },
+        JWT_SECRET
+      );
+      await enforceLoginTimingFloor(startedAt);
       res.status(200).json({
         data: {
           message: 'Si cet email est enregistré, vous recevrez un lien de connexion.'
@@ -601,27 +687,33 @@ export const requestMagicLink = async (req: Request, res: Response): Promise<voi
     }
 
     const user = userResult.rows[0];
-    const emailSent = await issueAndSendMagicLinkForUser(user, next);
 
-    if (!emailSent) {
-      const timestamp = new Date().toISOString();
-      console.error(`[${timestamp}] Failed to send magic link email to ${user.email} - userId: ${user.id}`);
-      res.status(503).json({
-        error: {
-          code: ERROR_CODES.EMAIL_SERVICE_UNAVAILABLE,
-          message: "Le service d'envoi d'email est temporairement indisponible. Veuillez réessayer dans quelques minutes."
+    // F-082 : envoi fire-and-forget — voir le commentaire de LOGIN_TIMING_FLOOR_MS
+    // ci-dessus. Même pattern que reservation.service.ts (sendConfirmationEmailAsync) :
+    // on ne bloque jamais la réponse sur un envoi d'email qui n'est pas le but de cette
+    // requête, et on journalise l'échec (rejet ou `sent === false`) sans jamais le
+    // remonter au client.
+    issueAndSendMagicLinkForUser(user, next)
+      .then((sent) => {
+        if (!sent) {
+          console.error(`[Auth] Magic link email not sent (login) - userId: ${user.id}, email: ${user.email}`);
         }
+      })
+      .catch((error) => {
+        console.error('[Auth] Failed to send magic link email (login):', {
+          userId: user.id,
+          email: user.email,
+          error: error instanceof Error ? error.message : error,
+        });
       });
-      return;
-    }
 
-    // Réponse succès (même message que si email non trouvé)
+    // Réponse succès (même message que si email non trouvé) — n'attend plus l'envoi.
+    await enforceLoginTimingFloor(startedAt);
     res.status(200).json({
       data: {
         message: 'Si cet email est enregistré, vous recevrez un lien de connexion.'
       }
     });
-
   } catch (error) {
     if (error instanceof z.ZodError) {
       res.status(400).json({
@@ -643,8 +735,17 @@ export const requestMagicLink = async (req: Request, res: Response): Promise<voi
   }
 };
 
-// Rate limiting in-memory pour resendInvitation
-// Clé: `${userId}:${eventId}`, Valeur: timestamp de la dernière requête
+// Rate limiting in-memory pour resendInvitation (F-081/F-084, pentest 2026-08-19).
+//
+// Invariant : 1 envoi/60 s PAR COMPTE, quel que soit le chemin — une seule clé consommée
+// par appel, sinon le débit double au lieu de s'unifier. Clés :
+//   - `identity:${userId}`      — chemins identité, événement, ET bootstrap dès que la ligne
+//                                 `users` est résolue. Jamais d'`eventId` dedans (F-084 : un
+//                                 eventId aléatoire ouvrirait un bucket par appel).
+//   - `identity:email:${email}` — repli du SEUL chemin bootstrap quand l'email signé ne
+//                                 répond plus (compte supprimé). Consommé quand même :
+//                                 c'est lui qui préserve F-081, cf. (bootstrap-h/i).
+// Un jeton sans cible exploitable → 200 générique, aucun envoi, donc aucun débit à limiter.
 const resendRateLimitMap = new Map<string, number>();
 const RESEND_RATE_LIMIT_MS = 60 * 1000; // 60 secondes
 const RESEND_CLEANUP_MS = 120 * 1000; // 120 secondes
@@ -667,20 +768,16 @@ const resendRateLimitRemaining = (key: string, now: number): number | null => {
 };
 
 /**
- * Réémet un lien de connexion « par identité » pour une ligne users déjà résolue :
- * rate-limit (clé `${id}:identity`), puis issueAndSendMagicLinkForUser, puis réponse
- * générique. Partagé par le renvoi par identité (token /auth/login) et le renvoi
- * post-setup (token bootstrap résolu par email). Rôle/TTL/redirect/email re-dérivés DB.
+ * Réémet un lien de connexion « par identité » pour une ligne users déjà résolue, puis
+ * répond. Partagé par le renvoi par identité (token /auth/login) et le renvoi post-setup
+ * (token bootstrap résolu par email). Rôle/TTL/redirect/email re-dérivés DB. Le throttle
+ * est géré par l'APPELANT — sur une clé qui ne dépend jamais de l'existence observable de
+ * la cible (F-081) — cette fonction ne fait plus qu'émettre + répondre.
  */
 const reissueMagicLinkForUserRow = async (
   row: { id: string; email: string; role: 'admin' | 'user'; first_name: string | null; last_name: string | null },
   res: Response,
 ): Promise<void> => {
-  const wait = resendRateLimitRemaining(`${row.id}:identity`, Date.now());
-  if (wait !== null) {
-    res.status(429).json({ error: { code: ERROR_CODES.RATE_LIMITED, message: `Un lien a déjà été envoyé récemment. Veuillez patienter ${wait} seconde${wait > 1 ? 's' : ''}.` } });
-    return;
-  }
   const sent = await issueAndSendMagicLinkForUser(row);
   if (!sent) {
     res.status(503).json({ error: { code: ERROR_CODES.EMAIL_SERVICE_UNAVAILABLE, message: "Le service d'envoi d'email est temporairement indisponible. Veuillez réessayer plus tard." } });
@@ -695,7 +792,7 @@ const reissueMagicLinkForUserRow = async (
  *
  * @security Pas d'authentification requise (endpoint public)
  * @security Signature du token vérifiée (jwt.verify, expiration tolérée) : seul un token authentique aboutit, d'où un retour générique pour un token forgé (pas d'énumération) mais honnête pour un token valide
- * @security Rate limiting: 1 requête par minute par userId+eventId
+ * @security Rate limiting : 1 requête/60s par compte — clé `identity:${userId}` sur les trois chemins (repli par email si le compte du jeton bootstrap n'existe plus, consommé quand même) → réponse strictement identique (statut + throttle) que la cible existe ou non (F-081/F-084)
  */
 export const resendInvitation = async (req: Request, res: Response): Promise<void> => {
   // Schéma de validation
@@ -718,17 +815,45 @@ export const resendInvitation = async (req: Request, res: Response): Promise<voi
     }
 
     // Token bootstrap (setup déjà fait) : pas de userId, email signé de confiance.
-    // Réémet un lien de connexion normal pour l'admin résolu par email.
+    // Le SELECT précède le throttle pour que la clé soit `identity:${userId}` — le MÊME
+    // bucket que les chemins identité/événement (1 envoi/60 s par compte, quel que soit
+    // le chemin). Aucune requête ajoutée : ce SELECT existait déjà juste après le throttle,
+    // il est seulement remonté, et sa ligne est réutilisée pour la réémission.
     if (decoded.bootstrap && decoded.email) {
+      // `users.email` n'est UNIQUE que de façon SENSIBLE à la casse (et le dédoublonnage de
+      // POST /admin/users compare `email = $1`) → deux lignes homographes sont créables. Sans
+      // départage, `LIMIT 1` rend un tuple arbitraire : la clé de throttle ET le destinataire
+      // du lien basculeraient d'un appel à l'autre. Cf. (bootstrap-l).
       const adminResult = await query(
-        'SELECT id, email, role, first_name, last_name FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1',
+        `SELECT id, email, role, first_name, last_name FROM users
+         WHERE LOWER(email) = LOWER($1)
+         ORDER BY (email = $1) DESC, id
+         LIMIT 1`,
         [decoded.email]
       );
-      if (adminResult.rows.length === 0) {
+      const adminRow = adminResult.rows[0];
+      // Repli `identity:email:` — utile UNIQUEMENT si le compte a été supprimé entre
+      // l'émission du jeton et le renvoi. Ce n'est pas du code mort : sans lui, une cible
+      // inexistante ne serait jamais throttlée et le 429-vs-200 redeviendrait un oracle
+      // d'existence (F-081). Il est donc consommé quand même, avant le 200 générique.
+      const wait = resendRateLimitRemaining(
+        adminRow ? `identity:${adminRow.id}` : `identity:email:${decoded.email.trim().toLowerCase()}`,
+        Date.now(),
+      );
+      if (wait !== null) {
+        res.status(429).json({
+          error: {
+            code: ERROR_CODES.RATE_LIMITED,
+            message: `Un lien a déjà été envoyé récemment. Veuillez patienter ${wait} seconde${wait > 1 ? 's' : ''}.`,
+          },
+        });
+        return;
+      }
+      if (!adminRow) {
         res.status(200).json({ data: { message: 'Un nouveau lien vous a été envoyé par email.' } });
         return;
       }
-      await reissueMagicLinkForUserRow(adminResult.rows[0], res);
+      await reissueMagicLinkForUserRow(adminRow, res);
       return;
     }
 
@@ -738,16 +863,28 @@ export const resendInvitation = async (req: Request, res: Response): Promise<voi
       return;
     }
 
+    // Throttle par identité (userId seul, sans eventId — F-084) AVANT toute recherche
+    // d'existence (F-081) : même bucket, que le token porte un eventId ou non.
+    const wait = resendRateLimitRemaining(`identity:${decoded.userId}`, Date.now());
+    if (wait !== null) {
+      res.status(429).json({
+        error: {
+          code: ERROR_CODES.RATE_LIMITED,
+          message: `Un lien a déjà été envoyé récemment. Veuillez patienter ${wait} seconde${wait > 1 ? 's' : ''}.`,
+        },
+      });
+      return;
+    }
+
     // Chemin « renvoi par identité » : token de connexion SANS eventId (lien admin/user
     // émis par /auth/login). On ne fait JAMAIS confiance au role/redirect du token —
     // issueAndSendMagicLinkForUser re-dérive tout (rôle, redirect, email) depuis la ligne
     // users canonique. Ne JAMAIS router ce cas via invitationsService.resendInvitation.
     if (!decoded.eventId) {
-      const identityUserId = decoded.userId;
-
-      // Valider le format UUID avant toute requête DB : un token authentique porte un
-      // userId UUID ; sinon → succès générique (et on évite une erreur de cast UUID SQL).
-      if (!uuidRegex.test(identityUserId)) {
+      // Format UUID validé ICI seulement : ce chemin fait un SELECT direct sur `users.id`
+      // (cast UUID SQL), contrairement au chemin événement qui délègue à
+      // invitationsService.resendInvitation (userId/eventId opaques pour ce contrôleur).
+      if (!uuidRegex.test(decoded.userId)) {
         res.status(200).json({ data: { message: 'Un nouveau lien vous a été envoyé par email.' } });
         return;
       }
@@ -755,7 +892,7 @@ export const resendInvitation = async (req: Request, res: Response): Promise<voi
       // Charger la ligne users canonique — seule source de vérité (email/rôle/redirect dérivés DB)
       const identityUserResult = await query(
         'SELECT id, email, role, first_name, last_name FROM users WHERE id = $1',
-        [identityUserId]
+        [decoded.userId]
       );
 
       // User introuvable (signature valide mais ligne absente/supprimée) → succès générique
@@ -770,17 +907,6 @@ export const resendInvitation = async (req: Request, res: Response): Promise<voi
     }
 
     const { userId, eventId } = decoded;
-
-    const wait = resendRateLimitRemaining(`${userId}:${eventId}`, Date.now());
-    if (wait !== null) {
-      res.status(429).json({
-        error: {
-          code: ERROR_CODES.RATE_LIMITED,
-          message: `Un lien a déjà été envoyé récemment. Veuillez patienter ${wait} seconde${wait > 1 ? 's' : ''}.`,
-        },
-      });
-      return;
-    }
 
     // Tenter de renvoyer l'invitation
     try {

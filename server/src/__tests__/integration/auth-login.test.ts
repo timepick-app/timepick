@@ -53,11 +53,22 @@ interface MagicLinkTokenPayload {
   exp?: number;
 }
 
+// F-082 : l'émission du magic link est fire-and-forget sur le chemin login (la réponse
+// HTTP ne l'attend plus) — un timer réel (pas de fake timers) est nécessaire ici car on
+// attend la fin d'une VRAIE promesse en tâche de fond (écriture Postgres + envoi mocké),
+// pas un `setTimeout` du code sous test qu'on pourrait avancer artificiellement. Réutilisé
+// par >5 tests (lockstep sur le même délai) — même convention que
+// reservations.test.ts (`await new Promise((r) => setTimeout(r, 150))`) et même forme
+// executor classique que `enforceLoginTimingFloor` (auth.controller.ts) :
+// `Promise.withResolvers` n'est pas dans la lib TS configurée ici (target es2016).
+const waitForBackgroundEmail = () => new Promise<void>((resolve) => setTimeout(resolve, 150));
+
 // Décode le lien magique tel que le membre le REÇOIT, lu dans l'espion d'envoi (armé
 // par le beforeEach du describe). Depuis la migration 043, la base ne porte plus que
 // l'empreinte sha256 du jeton : elle ne peut plus servir de source ici — et le test y
 // gagne, il lit le lien réellement envoyé plutôt qu'une colonne.
-const decodeSentMagicLink = (role: 'admin' | 'user' = 'user'): MagicLinkTokenPayload => {
+const decodeSentMagicLink = async (role: 'admin' | 'user' = 'user'): Promise<MagicLinkTokenPayload> => {
+  await waitForBackgroundEmail();
   const send = (role === 'admin'
     ? emailService.sendAdminMagicLinkEmail
     : emailService.sendUserMagicLinkEmail) as jest.Mock;
@@ -160,6 +171,9 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
       expect(res.status).toBe(200);
       expect(res.body.data.message).toContain('Si cet email est enregistré');
 
+      // Laisser le fire-and-forget se terminer (F-082) avant de lire la DB.
+      await waitForBackgroundEmail();
+
       // Vérifier que l'empreinte du token a été stockée en base
       const dbResult = await pool.query(
         'SELECT token_hash, expires_at FROM magic_link_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
@@ -176,6 +190,8 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
       await request(testServer())
         .post('/api/auth/login')
         .send({ email: user.email });
+
+      await waitForBackgroundEmail();
 
       const result = await pool.query(
         'SELECT expires_at FROM magic_link_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
@@ -197,7 +213,7 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
         .post('/api/auth/login')
         .send({ email: user.email });
 
-      const payload = decodeSentMagicLink();
+      const payload = await decodeSentMagicLink();
 
       expect(payload.redirectAfterLogin).toBe('/me');
       expect(payload.role).toBe('user');
@@ -213,6 +229,8 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
       await request(testServer())
         .post('/api/auth/login')
         .send({ email: adminUser.email });
+
+      await waitForBackgroundEmail();
 
       const result = await pool.query(
         'SELECT expires_at FROM magic_link_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
@@ -232,7 +250,7 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
         .post('/api/auth/login')
         .send({ email: adminUser.email });
 
-      const payload = decodeSentMagicLink('admin');
+      const payload = await decodeSentMagicLink('admin');
 
       expect(payload.redirectAfterLogin).toBe('/admin');
       expect(payload.role).toBe('admin');
@@ -252,7 +270,7 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
           .post('/api/auth/login')
           .send({ email: user.email });
 
-        const payload = decodeSentMagicLink();
+        const payload = await decodeSentMagicLink();
 
         // Un événement publié existe, mais le redirect reste /me (D5).
         expect(payload.redirectAfterLogin).toBe('/me');
@@ -283,6 +301,8 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
       expect(res.status).toBe(200);
 
       // Vérifier que l'empreinte du token a été stockée pour le bon user
+      await waitForBackgroundEmail();
+
       const result2 = await pool.query(
         'SELECT token_hash FROM magic_link_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
         [user.id]
@@ -315,6 +335,8 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
 
       expect(res.status).toBe(200);
 
+      await waitForBackgroundEmail();
+
       const result2 = await pool.query(
         'SELECT token_hash FROM magic_link_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
         [user.id]
@@ -346,23 +368,55 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
     });
   });
 
-  describe('Échec du service email', () => {
-    it('returns 503 EMAIL_SERVICE_UNAVAILABLE when sendMail fails', async () => {
+  describe('Échec du service email (F-082 : fire-and-forget sur le chemin login)', () => {
+    it('renvoie 200 même quand l\'envoi rejette — plus de 503 sur ce chemin', async () => {
       const adminUser = await createTestUser({ role: 'admin' });
 
       const sendAdminSpy = jest
         .spyOn(emailService, 'sendAdminMagicLinkEmail')
-        .mockResolvedValueOnce(false);
+        .mockRejectedValueOnce(new Error('SMTP down'));
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
 
       try {
         const res = await request(testServer())
           .post('/api/auth/login')
           .send({ email: adminUser.email });
 
-        expect(res.status).toBe(503);
-        expect(res.body.error.code).toBe('EMAIL_SERVICE_UNAVAILABLE');
+        expect(res.status).toBe(200);
+        expect(res.body.data.message).toContain('Si cet email est enregistré');
+
+        // L'échec est bien tenté et journalisé en tâche de fond, jamais remonté au client.
+        await waitForBackgroundEmail();
+        expect(sendAdminSpy).toHaveBeenCalled();
+        expect(errorSpy).toHaveBeenCalled();
       } finally {
         sendAdminSpy.mockRestore();
+        errorSpy.mockRestore();
+      }
+    });
+
+    it('renvoie 200 même quand l\'envoi résout à false (échec silencieux SMTP)', async () => {
+      const user = await createTestUser({ role: 'user' });
+
+      const sendUserSpy = jest
+        .spyOn(emailService, 'sendUserMagicLinkEmail')
+        .mockResolvedValueOnce(false);
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      try {
+        const res = await request(testServer())
+          .post('/api/auth/login')
+          .send({ email: user.email });
+
+        expect(res.status).toBe(200);
+        expect(res.body.data.message).toContain('Si cet email est enregistré');
+
+        await waitForBackgroundEmail();
+        expect(sendUserSpy).toHaveBeenCalled();
+        expect(errorSpy).toHaveBeenCalled();
+      } finally {
+        sendUserSpy.mockRestore();
+        errorSpy.mockRestore();
       }
     });
   });
@@ -392,7 +446,7 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
         .post('/api/auth/login')
         .send({ email: user.email, next: `/me/events/${eventUuid}` });
 
-      const payload = decodeSentMagicLink();
+      const payload = await decodeSentMagicLink();
       expect(payload.redirectAfterLogin).toBe(`/me/events/${eventUuid}`);
     });
 
@@ -403,7 +457,7 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
         .post('/api/auth/login')
         .send({ email: user.email, next: 'https://evil.com' });
 
-      const payload = decodeSentMagicLink();
+      const payload = await decodeSentMagicLink();
       expect(payload.redirectAfterLogin).toBe('/me');
     });
 
@@ -414,7 +468,7 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
         .post('/api/auth/login')
         .send({ email: user.email, next: '//evil.com' });
 
-      const payload = decodeSentMagicLink();
+      const payload = await decodeSentMagicLink();
       expect(payload.redirectAfterLogin).toBe('/me');
     });
 
@@ -425,7 +479,7 @@ describe('POST /api/auth/login - Public Magic Link Request', () => {
         .post('/api/auth/login')
         .send({ email: user.email });
 
-      const payload = decodeSentMagicLink();
+      const payload = await decodeSentMagicLink();
       expect(payload.redirectAfterLogin).toBe('/me');
     });
   });

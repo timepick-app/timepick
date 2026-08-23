@@ -12,7 +12,6 @@ import { useFilterParams } from '@/hooks/useFilterParams'
 import { useFilteredSlots } from '@/hooks/useFilteredSlots'
 import { useAuth } from '@/hooks/useAuth'
 import { EventNotFound } from '@/components/EventNotFound'
-import { EventNotPublished } from '@/components/EventNotPublished'
 import { UnauthorizedAccess } from '@/components/UnauthorizedAccess'
 import { EventSkeleton } from '@/components/EventSkeleton'
 import { CalendarView } from './CalendarView'
@@ -98,8 +97,8 @@ export interface EventCalendarContentProps {
  * la carte de pied « Mes réservations » ; la redirection des membres authentifiés
  * vers `/me/events/:uuid` vit dans `PublicCalendar`.
  *
- * Ordre des early-returns préservé : `isLoading` → `404` →
- * `403/EVENT_NOT_PUBLISHED` → `403/autre` → `401` → `!event`.
+ * Ordre des early-returns préservé : `isLoading` → `404` → `403` → `401` →
+ * `!event`.
  *
  * @see Story 1.5 — Vue événement membre (Décision clé — Réutilisation PublicCalendar)
  */
@@ -209,12 +208,9 @@ export function EventCalendarContent({ uuid, renderHeader }: EventCalendarConten
     return <EventNotFound />
   }
 
-  // Erreur 403 - Non publié ou non autorisé
+  // Erreur 403 - Non autorisé (EVENT_NOT_PUBLISHED mort depuis F-001 sur cette route :
+  // le code n'est plus émis ici, seulement par les endpoints booking, contexte différent)
   if (error && (error as ApiError).response?.status === 403) {
-    const code = (error as ApiError).response?.data?.code
-    if (code === 'EVENT_NOT_PUBLISHED') {
-      return <EventNotPublished />
-    }
     return <UnauthorizedAccess eventName={event?.name} />
   }
 

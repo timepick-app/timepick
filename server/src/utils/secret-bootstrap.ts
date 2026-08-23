@@ -25,14 +25,54 @@ export const ENCRYPTION_KEY_SPEC: SecretSpec = {
   trackSource: true,
 }
 
+/**
+ * F-080 (pentest 2026-08-19) : un `JWT_SECRET` court/dictionnaire ("changeme"-style,
+ * jamais tourné) permettait de forger des sessions arbitraires hors-ligne (signature
+ * HS256 rejouée). Deux gardes fail-fast indépendantes — jamais la valeur du secret
+ * dans le message d'erreur, cf. `ensureSecret` ci-dessous :
+ *   1. Longueur minimale 32 caractères SUR LA VALEUR TRIMÉE : un secret HS256 court est
+ *      brute-forçable/dictionnaire-forçable hors-ligne une fois un seul JWT intercepté —
+ *      et le padding par espaces ('x' + 31 espaces = 32 caractères bruts) ne doit pas
+ *      pouvoir contourner cette garde, d'où le trim avant mesure.
+ *   2. Motifs de placeholder connus (famille de `.env.example` : "changeme"/
+ *      "secret"/"password"/…) : filet de sécurité pour un secret qui dépasserait
+ *      32 caractères tout en restant un motif dictionnaire trivial à deviner.
+ * L'auto-génération (CSPRNG 32 octets hex = 64 caractères, cf. plus bas) ne passe
+ * jamais par `validate` : elle n'est appelée que sur une valeur *fournie* (env ou
+ * fichier déjà écrit par ce module), jamais sur la valeur qu'elle vient de générer.
+ */
+const JWT_SECRET_MIN_LENGTH = 32
+
+const KNOWN_WEAK_JWT_SECRET_MARKERS = [
+  'changeme',
+  'change_me',
+  'change-me',
+  'your_super_secret',
+  'your-super-secret',
+  'secret_key',
+  'secretkey',
+  'jwt_secret',
+  'dev_secret',
+  'test_secret',
+  'placeholder',
+  'password',
+  '123456',
+  'qwerty',
+]
+
+const isKnownWeakJwtSecret = (v: string): boolean => {
+  const normalized = v.trim().toLowerCase()
+  return KNOWN_WEAK_JWT_SECRET_MARKERS.some((marker) => normalized.includes(marker))
+}
+
 export const JWT_SECRET_SPEC: SecretSpec = {
   envVar: 'JWT_SECRET',
   fileName: 'jwt.secret',
-  // Deliberately permissive: existing deployments/tests use arbitrary strings
-  // ('dev_secret', 'test_jwt_secret_not_for_production', …). Only generation
-  // produces 64-hex; validating a *provided* value stays non-empty-only.
-  validate: (v) => v.length > 0,
-  invalidMessage: () => 'JWT_SECRET must be a non-empty string',
+  validate: (v) => v.trim().length >= JWT_SECRET_MIN_LENGTH && !isKnownWeakJwtSecret(v),
+  invalidMessage: (v) =>
+    v.trim().length < JWT_SECRET_MIN_LENGTH
+      ? `JWT_SECRET must be at least ${JWT_SECRET_MIN_LENGTH} characters (got ${v.trim().length} after trim). Generate one with: openssl rand -base64 48`
+      : 'JWT_SECRET matches a known weak/placeholder pattern (dictionary word or default-value family). Generate a real secret with: openssl rand -base64 48',
 }
 
 /**

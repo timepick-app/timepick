@@ -350,8 +350,11 @@ describe('POST /api/auth/resend-invitation — renvoi par identité (token sans 
     expect(res2.body.error.code).toBe('RATE_LIMITED');
   });
 
-  // (e) Isolation des clés de rate-limit : bucket identité vs bucket événement, même userId.
-  it('(e) isolation clé rate-limit identité vs événement pour le même userId', async () => {
+  // (e) Unification des clés de rate-limit identité/événement pour le même userId (F-084) :
+  //     l'ancienne clé composite `${userId}:${eventId}` isolait les deux chemins, ce qui
+  //     permettait de contourner le throttle en faisant varier `eventId`. La clé est
+  //     désormais `identity:${userId}` pour les deux chemins : un seul bucket par cible.
+  it('(e) unification clé rate-limit identité/événement pour le même userId (fix F-084)', async () => {
     const admin = await createUser('admin');
     const eventSpy = jest
       .spyOn(invitationsModule.invitationsService, 'resendInvitation')
@@ -359,14 +362,14 @@ describe('POST /api/auth/resend-invitation — renvoi par identité (token sans 
         sent: true, email: admin.email, sentAt: new Date(), userId: admin.id, eventId: 'evt-iso',
       });
 
-    // Renvoi identité → enregistre `${id}:identity`
+    // Renvoi identité → enregistre `identity:${id}`
     const idToken = identityToken(admin.id);
     const r1 = await request(testServer())
       .post('/api/auth/resend-invitation')
       .send({ token: idToken });
     expect(r1.status).toBe(200);
 
-    // Renvoi événement même userId → bucket distinct → PAS rate-limité
+    // Renvoi événement même userId → MÊME bucket `identity:${id}` → 429 (plus de bypass via eventId)
     const evToken = jwt.sign(
       { userId: admin.id, eventId: 'evt-iso', exp: Math.floor(Date.now() / 1000) - 3600 },
       JWT_SECRET
@@ -374,15 +377,9 @@ describe('POST /api/auth/resend-invitation — renvoi par identité (token sans 
     const r2 = await request(testServer())
       .post('/api/auth/resend-invitation')
       .send({ token: evToken });
-    expect(r2.status).toBe(200);
-    expect(eventSpy).toHaveBeenCalledTimes(1);
-
-    // 2e renvoi identité → bucket identité encore actif → 429 (isolation confirmée)
-    const r3 = await request(testServer())
-      .post('/api/auth/resend-invitation')
-      .send({ token: idToken });
-    expect(r3.status).toBe(429);
-    expect(r3.body.error.code).toBe('RATE_LIMITED');
+    expect(r2.status).toBe(429);
+    expect(r2.body.error.code).toBe('RATE_LIMITED');
+    expect(eventSpy).not.toHaveBeenCalled();
   });
 
   // (f) Échec d'envoi email → 503 EMAIL_SERVICE_UNAVAILABLE.
@@ -417,9 +414,12 @@ describe('POST /api/auth/resend-invitation — renvoi par identité (token sans 
 
 describe('POST /api/auth/resend-invitation — renvoi post-setup (token bootstrap)', () => {
   let sendAdminSpy: jest.SpyInstance;
+  // (bootstrap-j) résout une ligne role='user' → l'envoi passe par le canal member.
+  let sendUserSpy: jest.SpyInstance;
 
   beforeEach(() => {
     sendAdminSpy = jest.spyOn(emailService, 'sendAdminMagicLinkEmail').mockResolvedValue(true);
+    sendUserSpy = jest.spyOn(emailService, 'sendUserMagicLinkEmail').mockResolvedValue(true);
   });
 
   afterEach(async () => {
@@ -427,15 +427,15 @@ describe('POST /api/auth/resend-invitation — renvoi post-setup (token bootstra
     await pool.query("DELETE FROM users WHERE email LIKE 'test-bootstrap-%@test.com'");
   });
 
-  /** Crée un admin en base avec email unique — même pattern que le describe identité ci-dessus. */
-  const createBootstrapAdmin = async () => {
+  /** Crée un compte en base avec email unique — même pattern que le describe identité ci-dessus. */
+  const createBootstrapAdmin = async (role: 'admin' | 'user' = 'admin') => {
     const suffix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const email = `test-bootstrap-${suffix}@test.com`;
     const result = await pool.query(
       `INSERT INTO users (email, first_name, last_name, role)
        VALUES ($1, $2, $3, $4)
        RETURNING id, email, role, first_name, last_name`,
-      [email, 'Bootstrap', 'Admin', 'admin']
+      [email, 'Bootstrap', 'Admin', role]
     );
     return result.rows[0];
   };
@@ -463,23 +463,6 @@ describe('POST /api/auth/resend-invitation — renvoi post-setup (token bootstra
     expect(toEmail).toBe(admin.email);
   });
 
-  // (bootstrap-b) deux appels consécutifs (même admin) → 2e appel 429 RATE_LIMITED
-  it('(bootstrap-b) deux appels consécutifs même admin → 2e appel 429 RATE_LIMITED', async () => {
-    const admin = await createBootstrapAdmin();
-    const token = bootstrapToken(admin.email);
-
-    const res1 = await request(testServer())
-      .post('/api/auth/resend-invitation')
-      .send({ token });
-    expect(res1.status).toBe(200);
-
-    const res2 = await request(testServer())
-      .post('/api/auth/resend-invitation')
-      .send({ token });
-    expect(res2.status).toBe(429);
-    expect(res2.body.error.code).toBe('RATE_LIMITED');
-  });
-
   // (bootstrap-c) spy email renvoie false → 503 EMAIL_SERVICE_UNAVAILABLE
   it('(bootstrap-c) envoi email échoue → 503 EMAIL_SERVICE_UNAVAILABLE', async () => {
     const admin = await createBootstrapAdmin();
@@ -505,5 +488,198 @@ describe('POST /api/auth/resend-invitation — renvoi post-setup (token bootstra
     expect(res.status).toBe(200);
     expect(res.body.data.message).toBeDefined();
     expect(sendAdminSpy).not.toHaveBeenCalled();
+  });
+
+  /** Token de connexion « identité » (sans eventId), expiré — même forme que /auth/login. */
+  const identityTokenFor = (userId: string) =>
+    jwt.sign({ userId, exp: Math.floor(Date.now() / 1000) - 3600 }, JWT_SECRET);
+
+  // (bootstrap-e) PREUVE CENTRALE : bucket partagé entre chemins. Le jeton bootstrap et le
+  //     jeton identité du même compte consomment la clé `identity:${userId}` — avant le
+  //     correctif, le bootstrap avait son propre compteur `identity:email:` et autorisait
+  //     2 envois/60 s pour un même compte.
+  it('(bootstrap-e) bootstrap puis identité, même compte → 2e appel 429 (bucket partagé)', async () => {
+    const admin = await createBootstrapAdmin();
+
+    const res1 = await request(testServer())
+      .post('/api/auth/resend-invitation')
+      .send({ token: bootstrapToken(admin.email) });
+    expect(res1.status).toBe(200);
+
+    const res2 = await request(testServer())
+      .post('/api/auth/resend-invitation')
+      .send({ token: identityTokenFor(admin.id) });
+    expect(res2.status).toBe(429);
+    expect(res2.body.error.code).toBe('RATE_LIMITED');
+    expect(sendAdminSpy).toHaveBeenCalledTimes(1);
+  });
+
+  // (bootstrap-f) Ordre inverse : l'unification ne dépend pas de qui passe en premier.
+  it('(bootstrap-f) identité puis bootstrap, même compte → 2e appel 429 (bucket partagé)', async () => {
+    const admin = await createBootstrapAdmin();
+
+    const res1 = await request(testServer())
+      .post('/api/auth/resend-invitation')
+      .send({ token: identityTokenFor(admin.id) });
+    expect(res1.status).toBe(200);
+
+    const res2 = await request(testServer())
+      .post('/api/auth/resend-invitation')
+      .send({ token: bootstrapToken(admin.email) });
+    expect(res2.status).toBe(429);
+    expect(res2.body.error.code).toBe('RATE_LIMITED');
+    expect(sendAdminSpy).toHaveBeenCalledTimes(1);
+  });
+
+  // (bootstrap-h) F-081 sur le chemin bootstrap : le 200 « cible absente » et le 200 de
+  //     reissueMagicLinkForUserRow sont deux `res.json` distincts — seul un toEqual croisé
+  //     interdit qu'un des deux littéraux diverge. Les corps 429 ne sont PAS comparés tels
+  //     quels : leur message embarque un compteur de secondes (60→59 entre deux appels).
+  it('(bootstrap-h) matrice 2×2 bootstrap : corps 200 STRICTEMENT identiques compte réel/absent', async () => {
+    const admin = await createBootstrapAdmin();
+    const ghostEmail = `test-bootstrap-ghost-${Date.now()}-${Math.random().toString(36).slice(2)}@test.com`;
+    const tokenReal = bootstrapToken(admin.email);
+    const tokenGhost = bootstrapToken(ghostEmail);
+
+    const firstReal = await request(testServer())
+      .post('/api/auth/resend-invitation')
+      .send({ token: tokenReal });
+    const firstGhost = await request(testServer())
+      .post('/api/auth/resend-invitation')
+      .send({ token: tokenGhost });
+
+    expect(firstReal.status).toBe(200);
+    expect(firstGhost.status).toBe(200);
+    expect(firstGhost.body).toEqual(firstReal.body);
+
+    const secondReal = await request(testServer())
+      .post('/api/auth/resend-invitation')
+      .send({ token: tokenReal });
+    const secondGhost = await request(testServer())
+      .post('/api/auth/resend-invitation')
+      .send({ token: tokenGhost });
+
+    expect(secondGhost.status).toBe(secondReal.status);
+    expect(secondReal.status).toBe(429);
+    expect(secondGhost.body.error.code).toBe(secondReal.body.error.code);
+    expect(secondGhost.body.error.code).toBe('RATE_LIMITED');
+  });
+
+  // (bootstrap-i) Transition d'existence — le cas d'usage NOMINAL du repli : compte supprimé
+  //     ENTRE deux appels du même jeton. Prouve deux choses d'un coup :
+  //       - invariant « 200 générique sans fuite » après suppression (corps identique au 200
+  //         du compte vivant, aucun envoi supplémentaire) ;
+  //       - invariant « une seule clé consommée par appel » : une implémentation qui aurait
+  //         consommé AUSSI `identity:email:` au 1er appel renverrait ici 429 au lieu de 200.
+  it('(bootstrap-i) compte supprimé entre deux appels → 200 générique identique, sans envoi, puis 429', async () => {
+    const admin = await createBootstrapAdmin();
+    const token = bootstrapToken(admin.email);
+
+    const alive = await request(testServer())
+      .post('/api/auth/resend-invitation')
+      .send({ token });
+    expect(alive.status).toBe(200);
+    expect(sendAdminSpy).toHaveBeenCalledTimes(1);
+
+    await pool.query('DELETE FROM users WHERE id = $1', [admin.id]);
+
+    // Bucket de repli vierge → l'appel passe, mais sans cible : 200 générique, aucun envoi.
+    const afterDelete = await request(testServer())
+      .post('/api/auth/resend-invitation')
+      .send({ token });
+    expect(afterDelete.status).toBe(200);
+    expect(afterDelete.body).toEqual(alive.body);
+    expect(sendAdminSpy).toHaveBeenCalledTimes(1);
+
+    // Le repli vient d'être consommé → l'appel suivant est throttlé comme n'importe quelle cible.
+    const throttled = await request(testServer())
+      .post('/api/auth/resend-invitation')
+      .send({ token });
+    expect(throttled.status).toBe(429);
+    expect(throttled.body.error.code).toBe('RATE_LIMITED');
+  });
+
+  // (bootstrap-j) Rôle/canal/redirect dérivés de la LIGNE DB, jamais du claim du jeton.
+  //     bootstrapToken signe toujours role:'admin' (comme setup.service.ts) ; si le premier
+  //     admin a été rétrogradé depuis, le renvoi doit repartir sur le canal member. Équivalent
+  //     bootstrap du test (b) du describe identité. La ligne résolue par le SELECT remonté est
+  //     celle passée à reissueMagicLinkForUserRow : ce test pinne cette réutilisation.
+  it('(bootstrap-j) claim role=admin mais ligne DB role=user → canal member + redirect /me', async () => {
+    const member = await createBootstrapAdmin('user');
+    const token = bootstrapToken(member.email);
+
+    const res = await request(testServer())
+      .post('/api/auth/resend-invitation')
+      .send({ token });
+
+    expect(res.status).toBe(200);
+    expect(sendAdminSpy).not.toHaveBeenCalled();
+    expect(sendUserSpy).toHaveBeenCalledTimes(1);
+    const [toEmail, magicLink] = sendUserSpy.mock.calls[0];
+    expect(toEmail).toBe(member.email);
+
+    const fresh = jwt.verify(
+      new URL(magicLink as string).searchParams.get('token') || '',
+      JWT_SECRET
+    ) as { userId: string; role: string; redirectAfterLogin: string };
+    expect(fresh.userId).toBe(member.id);
+    expect(fresh.role).toBe('user');
+    expect(fresh.redirectAfterLogin).toBe('/me');
+  });
+
+  // (bootstrap-k) Casse de l'email du jeton : la résolution est insensible à la casse
+  //     (LOWER(email) = LOWER($1)), donc la clé reste `identity:${row.id}` — c'est ce qui
+  //     empêche un jeton en casse différente de ré-ouvrir un bucket `identity:email:` parallèle.
+  it('(bootstrap-k) jeton en casse différente → résolu, et bucket toujours partagé avec le chemin identité', async () => {
+    const admin = await createBootstrapAdmin();
+
+    const res1 = await request(testServer())
+      .post('/api/auth/resend-invitation')
+      .send({ token: bootstrapToken(admin.email.toUpperCase()) });
+    expect(res1.status).toBe(200);
+    expect(sendAdminSpy).toHaveBeenCalledTimes(1);
+    // Destinataire = email de la LIGNE DB (casse stockée), pas la chaîne du jeton.
+    expect(sendAdminSpy.mock.calls[0][0]).toBe(admin.email);
+
+    const res2 = await request(testServer())
+      .post('/api/auth/resend-invitation')
+      .send({ token: identityTokenFor(admin.id) });
+    expect(res2.status).toBe(429);
+    expect(res2.body.error.code).toBe('RATE_LIMITED');
+    expect(sendAdminSpy).toHaveBeenCalledTimes(1);
+  });
+
+  // (bootstrap-l) Deux lignes homographes par la casse sont créables : `users.email` n'est
+  //     UNIQUE que de façon SENSIBLE à la casse, et le dédoublonnage de POST /admin/users
+  //     compare `email = $1`. Le SELECT du chemin bootstrap étant insensible à la casse, il
+  //     doit départager de façon DÉTERMINISTE (casse exacte d'abord) — sans `ORDER BY`, le
+  //     tuple rendu dépendrait de l'ordre du tas, donc la clé de throttle et le destinataire
+  //     du lien basculeraient d'un appel à l'autre.
+  it('(bootstrap-l) deux lignes homographes par la casse → chaque jeton résout SA casse exacte', async () => {
+    const stamp = Date.now();
+    const lowerEmail = `test-bootstrap-case-${stamp}@test.com`;
+    const upperEmail = `test-bootstrap-CASE-${stamp}@test.com`;
+    // lowerEmail insérée EN PREMIER : c'est elle que rendrait un LIMIT 1 non départagé.
+    await pool.query(
+      `INSERT INTO users (email, first_name, last_name, role)
+       VALUES ($1, 'Bootstrap', 'Homograph', 'admin'), ($2, 'Bootstrap', 'Homograph', 'admin')`,
+      [lowerEmail, upperEmail]
+    );
+
+    // Jeton en casse HAUTE → doit résoudre la ligne haute, pas la première du tas.
+    const resUpper = await request(testServer())
+      .post('/api/auth/resend-invitation')
+      .send({ token: bootstrapToken(upperEmail) });
+    expect(resUpper.status).toBe(200);
+    expect(sendAdminSpy).toHaveBeenCalledTimes(1);
+    expect(sendAdminSpy.mock.calls[0][0]).toBe(upperEmail);
+
+    // Jeton en casse BASSE → autre ligne, donc autre bucket : passe malgré l'appel précédent.
+    const resLower = await request(testServer())
+      .post('/api/auth/resend-invitation')
+      .send({ token: bootstrapToken(lowerEmail) });
+    expect(resLower.status).toBe(200);
+    expect(sendAdminSpy).toHaveBeenCalledTimes(2);
+    expect(sendAdminSpy.mock.calls[1][0]).toBe(lowerEmail);
   });
 });

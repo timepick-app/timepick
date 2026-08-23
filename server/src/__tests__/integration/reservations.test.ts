@@ -6,6 +6,22 @@ import * as emailService from '../../services/email-send.service'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret'
 
+/**
+ * Rattache une liste d'utilisateurs à un événement (`event_users`) — nécessaire
+ * depuis le fix F-021 : `createReservation` vérifie désormais l'appartenance
+ * event_users (sauf admin) avant d'insérer la réservation.
+ */
+async function attachUsersToEvent(eventId: string, userIds: string[]): Promise<void> {
+  await Promise.all(
+    userIds.map(userId =>
+      pool.query(
+        `INSERT INTO event_users (event_id, user_id) VALUES ($1, $2) ON CONFLICT (event_id, user_id) DO NOTHING`,
+        [eventId, userId]
+      )
+    )
+  )
+}
+
 // Mocke les emails transactionnels au niveau fichier : les routes /api/public/reservations
 // passent par reservation.service, qui émet sendReservationEmail (création) et
 // sendUnregistrationEmail (désinscription) en fire-and-forget. Sans mock, ces envois
@@ -82,6 +98,7 @@ describe('POST /api/public/reservations - Create Reservation', () => {
       RETURNING id
     `)
     testEventId = eventResult.rows[0].id
+    await attachUsersToEvent(testEventId, [testUserId, testUserId2])
 
     // Create a test slot with capacity 2
     const slotResult = await pool.query(`
@@ -172,6 +189,7 @@ describe('POST /api/public/reservations - Create Reservation', () => {
         pool.query(`INSERT INTO users (email, first_name, role) VALUES ('race1@test.com', 'Race 1', 'user') ON CONFLICT (email) DO UPDATE SET role = 'user' RETURNING id`),
         pool.query(`INSERT INTO users (email, first_name, role) VALUES ('race2@test.com', 'Race 2', 'user') ON CONFLICT (email) DO UPDATE SET role = 'user' RETURNING id`),
       ])
+      await attachUsersToEvent(testEventId, users.map(u => u.rows[0].id))
 
       const userTokens = users.map(u => jwt.sign({ userId: u.rows[0].id, role: 'user' }, JWT_SECRET, { expiresIn: '1h' }))
 
@@ -224,6 +242,7 @@ describe('POST /api/public/reservations - Create Reservation', () => {
         )
         userIds.push(result.rows[0].id)
       }
+      await attachUsersToEvent(testEventId, userIds)
 
       const tokens = userIds.map(id => jwt.sign({ userId: id, role: 'user' }, JWT_SECRET, { expiresIn: '1h' }))
 
@@ -275,6 +294,7 @@ describe('POST /api/public/reservations - Create Reservation', () => {
         )
         userIds.push(result.rows[0].id)
       }
+      await attachUsersToEvent(testEventId, userIds)
 
       const tokens = userIds.map(id => jwt.sign({ userId: id, role: 'user' }, JWT_SECRET, { expiresIn: '1h' }))
 
@@ -330,6 +350,7 @@ describe('POST /api/public/reservations - Create Reservation', () => {
         )
         userIds.push(result.rows[0].id)
       }
+      await attachUsersToEvent(testEventId, userIds)
 
       const tokens = userIds.map(id => jwt.sign({ userId: id, role: 'user' }, JWT_SECRET, { expiresIn: '1h' }))
 

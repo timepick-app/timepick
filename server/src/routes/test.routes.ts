@@ -125,7 +125,7 @@ router.post('/login', async (req, res) => {
     // Récupérer l'utilisateur (hasMemberAccess recalculé à la volée, comme le flux normal —
     // jamais stocké en colonne, cf. auth.controller.ts / auth.middleware.ts)
     const result = await pool.query(
-      `SELECT id, email, first_name, last_name, role,
+      `SELECT id, email, first_name, last_name, role, token_version,
               EXISTS(SELECT 1 FROM event_users WHERE user_id = users.id) AS has_member_access
        FROM users WHERE email = $1`,
       [email]
@@ -142,11 +142,12 @@ router.post('/login', async (req, res) => {
     const JWT_SECRET = process.env.JWT_SECRET!;
     const exp = Math.floor(Date.now() / 1000) + 7200; // 2 heures
 
-    // role/hasMemberAccess ajoutés par parité avec le payload du token de session réel
-    // (verifyMagicLink/refreshSession) — rien ne décode ce payload aujourd'hui côté client
-    // ou serveur, mais requireAuth recalcule de toute façon ces champs depuis la DB.
+    // role/hasMemberAccess/tv ajoutés par parité avec le payload du token de session réel
+    // (verifyMagicLink/refreshSession) — requireAuth recalcule role/hasMemberAccess depuis la
+    // DB, mais `tv` (F-085, token_version) DOIT matcher : sans lui, un logout révoquerait
+    // silencieusement tout token minté ici (tv absent traité comme 0, cf. auth.middleware.ts).
     const token = jwt.sign(
-      { userId: user.id, role: user.role, hasMemberAccess, exp },
+      { userId: user.id, role: user.role, hasMemberAccess, tv: user.token_version, exp },
       JWT_SECRET
     );
 

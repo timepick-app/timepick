@@ -7,6 +7,7 @@ import { NotFoundError } from '../errors/NotFoundError'
 import { ValidationError } from '../errors/ValidationError'
 import { NotPublishedError } from '../errors/NotPublishedError'
 import { UUID_RE } from '../lib/constants'
+import { isEventOpen } from '../utils/eventAccess'
 import { ERROR_CODES } from '@timepick/shared'
 
 /**
@@ -176,12 +177,11 @@ export const getPublicEvent = async (req: Request, res: Response): Promise<void>
     const event = await eventService.getPublicEvent(req.params.id)
     res.json({ data: event })
   } catch (error) {
-    if (error instanceof NotPublishedError) {
-      res.status(404).json({ error: 'Événement non trouvé ou non publié', code: ERROR_CODES.EVENT_NOT_PUBLISHED })
-      return
-    }
-    if (error instanceof NotFoundError) {
-      res.status(404).json({ error: error.message, code: error.code })
+    // F-001 : un événement inexistant et un brouillon existant doivent être
+    // indiscernables (même message, même code) — sinon le `code` de la réponse
+    // devient un oracle d'existence exploitable sans authentification.
+    if (error instanceof NotPublishedError || error instanceof NotFoundError) {
+      res.status(404).json({ error: 'Événement non trouvé ou non publié', code: ERROR_CODES.EVENT_NOT_FOUND })
       return
     }
     console.error('Error fetching public event:', error)
@@ -234,54 +234,49 @@ export const setOpeningDate = async (req: Request, res: Response): Promise<void>
  * GET /api/public/events/:uuid
  *
  * Vérifications :
- * - L'événement doit être publié (404 sinon)
- * - Si authentifié avec rôle admin: accès autorisé (bypass event_users)
- * - Si authentifié sans rôle admin: vérifier que l'utilisateur est dans event_users (403 sinon)
- * - Si non authentifié: mode consultation (slots vides, canReserve=false)
+ * - Admin authentifié : bypass total (y compris preview d'un brouillon, Story 11.5) —
+ *   évalué AVANT toute levée d'exception liée à la publication (F-001 : l'ancien ordre
+ *   laissait `NotPublishedError` couper le chemin avant le contrôle de rôle, l'admin
+ *   n'atteignait donc jamais son bypass sur un brouillon).
+ * - Non-admin (authentifié ou non) : événement inexistant OU non publié → 404
+ *   `EVENT_NOT_FOUND` identique dans les deux cas (F-001 : un statut différencié
+ *   servait d'oracle d'existence de brouillon sans authentification).
+ * - Non-admin authentifié sur événement publié : appartenance `event_users` requise
+ *   (403 `EVENT_ACCESS_DENIED` sinon).
+ * - Non authentifié sur événement publié : mode consultation (slots vides, canReserve=false).
  */
 export const getPublicEventWithAuth = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { uuid } = req.params
-    const userId = req.user?.userId
+  const { uuid } = req.params
+  const userId = req.user?.userId
+  const userRole = req.user?.role
 
-    // Récupérer l'événement (doit être publié)
+  if (userRole === 'admin') {
+    try {
+      const event = await eventService.getEventById(uuid)
+      const canReserve = isEventOpen(event.opensAt)
+      res.json({ data: { ...event, slots: [], canReserve } })
+    } catch (error) {
+      if (error instanceof NotFoundError) {
+        res.status(404).json({ error: 'Événement non trouvé', code: ERROR_CODES.EVENT_NOT_FOUND })
+        return
+      }
+      console.error('Error fetching public event (admin preview):', error)
+      res.status(500).json({ error: 'Erreur lors de la récupération de l\'événement' })
+    }
+    return
+  }
+
+  try {
+    // Récupérer l'événement (doit être publié) — lève NotPublishedError/NotFoundError sinon
     const event = await eventService.getPublicEventByUuid(uuid)
 
     // Mode consultation si non authentifié
     if (!userId) {
-      // Utilisateur non connecté: mode lecture seule
-      const canReserve = false
-      const slots: unknown[] = []
-
-      res.json({
-        data: {
-          ...event,
-          slots,
-          canReserve
-        }
-      })
+      res.json({ data: { ...event, slots: [], canReserve: false } })
       return
     }
 
-    // Story 11.5: Admin bypass l'autorisation event_users pour les événements publiés
-    // Les admins peuvent prévisualiser la page publique sans être dans event_users
-    const userRole = req.user?.role
-    if (userRole === 'admin') {
-      // Vérifier si l'événement est ouvert (réservations)
-      const canReserve = isEventOpen(event.opensAt)
-      const slots: unknown[] = []
-
-      res.json({
-        data: {
-          ...event,
-          slots,
-          canReserve
-        }
-      })
-      return
-    }
-
-    // Utilisateur authentifié: vérifier l'autorisation
+    // Utilisateur authentifié non-admin : vérifier l'autorisation event_users
     const isAuthorized = await eventUsersService.isUserAuthorizedForEvent(event.id, userId)
 
     if (!isAuthorized) {
@@ -292,47 +287,21 @@ export const getPublicEventWithAuth = async (req: Request, res: Response): Promi
       return
     }
 
-    // Vérifier si l'événement est ouvert (réservations)
     const canReserve = isEventOpen(event.opensAt)
 
     // Récupérer les slots de l'événement (pour l'instant vide - Epic 4/6)
-    const slots: unknown[] = []
-
-    res.json({
-      data: {
-        ...event,
-        slots,
-        canReserve
-      }
-    })
+    res.json({ data: { ...event, slots: [], canReserve } })
   } catch (error) {
-    // TODO(security): NotPublishedError → 403 leaks draft existence to authenticated probes
-    // (NotFoundError → 404 returns when UUID does not exist). The two responses are distinguishable.
-    // Story 11.5 admin draft preview is also blocked here because getPublicEventByUuid throws
-    // before the admin role check (line 309). Future story should either (a) move the admin
-    // bypass into the service, or (b) collapse 403/404 into a single 404 to avoid the leak.
-    // See findings F1+F2 from pre-E4 cleanup adversarial review (2026-05-02).
-    if (error instanceof NotPublishedError) {
-      res.status(403).json({ error: error.message, code: ERROR_CODES.EVENT_NOT_PUBLISHED })
-      return
-    }
-    if (error instanceof NotFoundError) {
+    // F-001 : NotPublishedError et NotFoundError doivent être indiscernables pour un
+    // non-admin (même statut, même code) — sinon le différentiel devient un oracle
+    // d'existence de brouillon accessible sans authentification.
+    if (error instanceof NotPublishedError || error instanceof NotFoundError) {
       res.status(404).json({ error: 'Événement non trouvé', code: ERROR_CODES.EVENT_NOT_FOUND })
       return
     }
     console.error('Error fetching public event:', error)
     res.status(500).json({ error: 'Erreur lors de la récupération de l\'événement' })
   }
-}
-
-/**
- * Vérifie si l'événement est ouvert aux réservations
- * @param opensAt - Date d'ouverture ou null
- * @returns true si ouvert, false si dans le futur
- */
-function isEventOpen(opensAt: string | null | undefined): boolean {
-  if (!opensAt) return true
-  return new Date() >= new Date(opensAt)
 }
 
 /**

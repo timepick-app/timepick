@@ -63,6 +63,14 @@ describe('Booking Integration - Zero-Surbooking Protection', () => {
     `)
     testEventId = eventResult.rows[0].id
 
+    // F-021 fix : bookSlot vérifie désormais l'appartenance event_users (sauf admin).
+    // Les utilisateurs de test doivent être rattachés à l'événement pour que les
+    // scénarios de surbooking restent des bookings légitimes.
+    await pool.query(`
+      INSERT INTO event_users (event_id, user_id) VALUES ($1, $2), ($1, $3)
+      ON CONFLICT (event_id, user_id) DO NOTHING
+    `, [testEventId, testUserId, testUserId2])
+
     // Create a test slot with capacity 2, linked to the event
     const slotResult = await pool.query(`
       INSERT INTO slots (event_id, start_time, end_time, capacity)
@@ -149,6 +157,13 @@ describe('Booking Integration - Zero-Surbooking Protection', () => {
         pool.query(`INSERT INTO users (email, first_name, role) VALUES ('concurrent2@test.com', 'User 2', 'user') ON CONFLICT (email) DO UPDATE SET role = 'user' RETURNING id`),
         pool.query(`INSERT INTO users (email, first_name, role) VALUES ('concurrent3@test.com', 'User 3', 'user') ON CONFLICT (email) DO UPDATE SET role = 'user' RETURNING id`),
       ])
+
+      // F-021 fix : attacher ces 3 utilisateurs à event_users pour rester des bookings légitimes
+      await pool.query(`
+        INSERT INTO event_users (event_id, user_id)
+        VALUES ($1, $2), ($1, $3), ($1, $4)
+        ON CONFLICT (event_id, user_id) DO NOTHING
+      `, [testEventId, users[0].rows[0].id, users[1].rows[0].id, users[2].rows[0].id])
 
       const userTokens = users.map(u => jwt.sign({ userId: u.rows[0].id, role: 'user' }, JWT_SECRET, { expiresIn: '1h' }))
 

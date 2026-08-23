@@ -2,6 +2,8 @@ import { Request, Response } from 'express'
 import { reservationService } from '../services/reservation.service'
 import { NotFoundError } from '../errors/NotFoundError'
 import { ConflictError } from '../errors/ConflictError'
+import { NotPublishedError } from '../errors/NotPublishedError'
+import { ForbiddenError } from '../errors/ForbiddenError'
 import { createReservationSchema } from '../validators/reservation.validator'
 import { ERROR_CODES } from '@timepick/shared'
 
@@ -28,6 +30,8 @@ import { ERROR_CODES } from '@timepick/shared'
  * - 201: Réservation créée avec succès
  * - 400: Erreur de validation (slotId manquant ou invalide)
  * - 401: Non authentifié
+ * - 403: Événement non publié (F-021), inscriptions pas encore ouvertes (F-020) ou
+ *   utilisateur non autorisé sur cet événement (F-021)
  * - 404: Créneau non trouvé
  * - 409: Conflit (créneau complet ou déjà réservé)
  */
@@ -53,7 +57,7 @@ export const createReservation = async (req: Request, res: Response): Promise<vo
     const { slotId } = validationResult.data
 
     // Créer la réservation via le service
-    const booking = await reservationService.createReservation(slotId, userId)
+    const booking = await reservationService.createReservation(slotId, userId, req.user?.role)
 
     res.status(201).json({
       data: booking,
@@ -62,6 +66,10 @@ export const createReservation = async (req: Request, res: Response): Promise<vo
   } catch (error) {
     if (error instanceof NotFoundError) {
       res.status(404).json({ error: error.message, code: error.code })
+      return
+    }
+    if (error instanceof NotPublishedError || error instanceof ForbiddenError) {
+      res.status(error.statusCode).json({ error: error.message, code: error.code })
       return
     }
     if (error instanceof ConflictError) {

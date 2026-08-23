@@ -34,6 +34,7 @@ export const USER_FACING_ERROR_CODES = {
   [ERROR_CODES.SLOT_CANCELLED]: 'Créneau annulé — explique pourquoi la modification est refusée',
   [ERROR_CODES.SLOT_ALREADY_CANCELLED]: 'Créneau déjà annulé — état, pas jargon',
   [ERROR_CODES.ALREADY_BOOKED]: 'Réservation déjà posée — état, pas jargon',
+  [ERROR_CODES.BOOKING_NOT_OPEN]: "Inscriptions pas encore ouvertes — dit pourquoi le refus, le serveur porte la date d'ouverture",
 
   // Conflits d'administration — la cause exacte du refus n'est connue que du
   // serveur, et c'est elle qui dit à l'admin quoi faire. Sans ces codes, quatre

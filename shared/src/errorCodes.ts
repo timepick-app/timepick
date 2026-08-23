@@ -33,6 +33,8 @@ export const ERROR_CODES = {
   SLOT_ALREADY_CANCELLED: 'SLOT_ALREADY_CANCELLED',
   /** L'utilisateur a déjà une réservation sur ce créneau. */
   ALREADY_BOOKED: 'ALREADY_BOOKED',
+  /** Réservation tentée avant `events.opens_at` (F-020) : fenêtre pas encore ouverte. */
+  BOOKING_NOT_OPEN: 'BOOKING_NOT_OPEN',
   /** Défaut de `ConflictError` quand l'appelant n'a pas nommé son conflit. */
   CONFLICT: 'CONFLICT',
 
