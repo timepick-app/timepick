@@ -150,7 +150,7 @@ des commandes :
 # Vérifier avec `heroku config -a <app>` avant de la reposer manuellement.
 
 heroku config:set -a <app> \
-  JWT_SECRET="<valeur non vide, générée ex. openssl rand -hex 32>" \
+  JWT_SECRET="<≥32 caractères, non dictionnaire, générée ex. openssl rand -hex 32>" \
   ENCRYPTION_KEY="<64 caractères hexadécimaux, ex. openssl rand -hex 32>" \
   APP_URL="https://<app>.herokuapp.com" \
   NODE_ENV=production \
