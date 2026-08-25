@@ -1,7 +1,12 @@
 import { render, screen } from '@testing-library/react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { ReactNode } from 'react'
 import { NavUser } from '../NavUser'
+
+// Stub global de fetch — F-085 utilise `fetch(..., { keepalive: true })` (et
+// non `api.post`) pour survivre à la navigation qui suit immédiatement le
+// clic sur Déconnexion (cf. auth.service.ts).
+const mockFetch = vi.fn()
 
 const { mockNavigate, blocker, mockClearSessionData, authUser } = vi.hoisted(() => ({
   mockNavigate: vi.fn(),
@@ -69,11 +74,23 @@ Object.defineProperty(window, 'location', { value: mockLocation, writable: true 
 describe('NavUser', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockFetch.mockReset()
+    mockFetch.mockResolvedValue(new Response(null, { status: 200 }))
+    vi.stubGlobal('fetch', mockFetch)
+    // Jeton par défaut : la plupart des tests déclenchent la révocation
+    // serveur (F-085). Le test « sans jeton » l'écrase avec `null`.
+    localStorageMock.getItem.mockImplementation((key: string) =>
+      key === 'auth_token' ? 'jeton-test' : null,
+    )
     blocker.isBlocked = false
     mockLocation.href = ''
     // Réinitialiser l'utilisateur entre les tests (bascule D7 story 1.4).
     authUser.role = 'admin'
     authUser.hasMemberAccess = false
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   it('affiche nom, email et initiales depuis useAuth', () => {
@@ -120,6 +137,59 @@ describe('NavUser', () => {
     expect(localStorageMock.removeItem).toHaveBeenCalledWith('auth_user')
     expect(mockClearSessionData).toHaveBeenCalledTimes(1)
     expect(mockLocation.href).toBe('/login')
+  })
+
+  describe('AC5 / F-085 : révocation serveur au logout', () => {
+    it('appelle fetch exactement une fois avec URL, méthode, keepalive et Authorization corrects', () => {
+      render(<NavUser />)
+      screen.getByText('Déconnexion').click()
+
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3000/api/auth/logout',
+        {
+          method: 'POST',
+          keepalive: true,
+          headers: { Authorization: 'Bearer jeton-test' },
+        },
+      )
+    })
+
+    it('révoque la session serveur avant de purger le token local (ordre)', () => {
+      render(<NavUser />)
+      screen.getByText('Déconnexion').click()
+
+      const fetchOrder = mockFetch.mock.invocationCallOrder[0]
+      const removeOrder = localStorageMock.removeItem.mock.invocationCallOrder[0]
+      expect(fetchOrder).toBeLessThan(removeOrder)
+    })
+
+    it('ne bloque jamais la déconnexion locale sur la requête serveur', () => {
+      const enVol = new Promise<Response>(() => {})
+      mockFetch.mockReturnValueOnce(enVol)
+
+      render(<NavUser />)
+      screen.getByText('Déconnexion').click()
+
+      // aucune attente : purge et redirection sont déjà faites
+      expect(localStorageMock.removeItem).toHaveBeenCalledWith('auth_token')
+      expect(localStorageMock.removeItem).toHaveBeenCalledWith('auth_user')
+      expect(mockClearSessionData).toHaveBeenCalledTimes(1)
+      expect(mockLocation.href).toBe('/login')
+    })
+
+    it("n'appelle pas fetch si aucun jeton n'est présent en localStorage (nettoyage et redirection quand même)", () => {
+      localStorageMock.getItem.mockImplementation(() => null)
+
+      render(<NavUser />)
+      screen.getByText('Déconnexion').click()
+
+      expect(mockFetch).not.toHaveBeenCalled()
+      expect(localStorageMock.removeItem).toHaveBeenCalledWith('auth_token')
+      expect(localStorageMock.removeItem).toHaveBeenCalledWith('auth_user')
+      expect(mockClearSessionData).toHaveBeenCalledTimes(1)
+      expect(mockLocation.href).toBe('/login')
+    })
   })
 
   describe('bascule admin↔membre (D7 story 1.4)', () => {

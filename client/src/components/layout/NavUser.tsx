@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { ChevronsUpDown, LogOut, UserRound, CalendarClock, LayoutDashboard, BookOpen, ExternalLink } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
+import { revokeSessionOnServer } from '@/services/auth.service'
 import { useNavigationBlocker } from '@/contexts/NavigationBlockerContext'
 import { clearSessionData } from '@/hooks/useSessionTimeout'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -64,6 +65,8 @@ export function NavUser({ onNavigate, profilePath = '/admin/profile', shell = 'a
   }
 
   const handleLogout = () => {
+    // F-085 : révocation serveur avant le nettoyage local (le Bearer est lu depuis localStorage).
+    revokeSessionOnServer()
     localStorage.removeItem('auth_token')
     localStorage.removeItem('auth_user')
     clearSessionData()

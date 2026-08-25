@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { clearSessionData } from '@/hooks/useSessionTimeout'
+import { revokeSessionOnServer } from '@/services/auth.service'
 import { getInitials } from '@/lib/getInitials'
 import { formatFullName } from '@/lib/formatFullName'
 
@@ -60,6 +61,8 @@ export function PublicUserMenu() {
   const [{ firstName, lastName, email }] = useState(() => readStoredUser())
 
   const handleLogout = () => {
+    // F-085 : révocation serveur avant le nettoyage local (le Bearer est lu depuis localStorage).
+    revokeSessionOnServer()
     // Clear storage keys (consistent with AdminLayout)
     localStorage.removeItem('auth_token')
     localStorage.removeItem('auth_user')

@@ -1,11 +1,21 @@
 import { renderHook, act, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { AuthProvider, useAuth } from '../useAuth';
+import api from '@/services/api';
 
 // Note: localStorage.clear() is called in src/test/setup.ts before each test
 // No need to call it here
 
 describe('useAuth Hook', () => {
+  // Réarme les mocks (api, fetch) après chaque test. Sans ce filet, un
+  // mockRejectedValue* ou un vi.stubGlobal('fetch', ...) posé dans un test
+  // continue de s'appliquer aux suivants si une assertion échoue avant
+  // d'atteindre le nettoyage en fin de corps de test — un échec réel se
+  // transforme alors en cascade de faux échecs.
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
 
   it('fournit le contexte d\'authentification', () => {
     const { result } = renderHook(() => useAuth(), {
@@ -81,6 +91,51 @@ describe('useAuth Hook', () => {
     // Vérifier localStorage est vidé
     expect(localStorage.getItem('auth_token')).toBeNull();
     expect(localStorage.getItem('auth_user')).toBeNull();
+  });
+
+  it('refreshSession en échec déconnecte localement sans appeler /auth/logout', async () => {
+    vi.mocked(api.post).mockRejectedValueOnce(new Error('network'));
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useAuth(), {
+      wrapper: AuthProvider,
+    });
+
+    const mockUser = {
+      id: '123',
+      email: 'test@example.com',
+      firstName: 'Test',
+      lastName: 'User',
+      phone: '1234567890',
+      role: 'user' as const,
+      hasMemberAccess: false,
+    };
+
+    act(() => {
+      result.current.login('test-token', mockUser);
+    });
+
+    expect(result.current.isAuthenticated).toBe(true);
+
+    await act(async () => {
+      await expect(result.current.refreshSession()).rejects.toThrow();
+    });
+
+    // Déconnexion locale déclenchée par l'échec du refresh
+    expect(result.current.token).toBeNull();
+    expect(result.current.user).toBeNull();
+    expect(result.current.isAuthenticated).toBe(false);
+    expect(localStorage.getItem('auth_token')).toBeNull();
+    expect(localStorage.getItem('auth_user')).toBeNull();
+
+    // Déconnexion automatique (échec technique) : jamais de révocation serveur F-085,
+    // réservée aux gestes de déconnexion initiés par l'utilisateur (voir @/services/auth.service).
+    // Assertion suivante en apparence tautologique (le helper n'utilise plus axios) : c'est un
+    // garde-fou contre un retour à l'implémentation `api.post('/auth/logout')` du plan initial.
+    expect(api.post).toHaveBeenCalledWith('/auth/refresh');
+    expect(api.post).not.toHaveBeenCalledWith('/auth/logout');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('récupère l\'utilisateur au montage si token et user sont valides', async () => {

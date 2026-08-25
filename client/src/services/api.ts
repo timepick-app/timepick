@@ -60,6 +60,9 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
+      // Pas d'appel à revokeSessionOnServer() ici : un 401 prouve que le serveur a déjà
+      // invalidé ce jeton (session révoquée ou expirée) — révoquer de nouveau serait un
+      // appel stérile. Seuls les gestes de déconnexion initiés par l'utilisateur révoquent.
       // On ne déclenche le teardown global que pour un utilisateur qui se croyait
       // authentifié (token présent), HORS flux magic-link (/auth/*, géré localement
       // par Login et refreshSession) et HORS page de login. La présence du token

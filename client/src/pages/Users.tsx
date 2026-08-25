@@ -11,6 +11,7 @@ import { useDebounce } from '@/hooks/useDebounce'
 import { toast } from 'sonner'
 import { useAdminAuth } from '@/hooks/useAdminAuth'
 import { useAuth } from '@/hooks/useAuth'
+import { revokeSessionOnServer } from '@/services/auth.service'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { Button } from '@/components/ui/button'
 import { Typography } from '@/components/ui/typography'
@@ -88,6 +89,8 @@ export default function Users() {
       toast.success('Votre rôle a été modifié. Vous allez être déconnecté...')
       // Small delay to let the toast be seen before logout
       setTimeout(() => {
+        // F-085 : révocation serveur avant le nettoyage local (auto-démotion).
+        revokeSessionOnServer()
         logout()
         navigate('/', { replace: true })
       }, 1500)
