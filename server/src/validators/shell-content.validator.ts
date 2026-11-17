@@ -44,7 +44,8 @@ import {
   endsWithGenericFamily,
   FONT_FAMILY_MAX_LEN,
   FONT_STACK_RE,
-  HEX_COLOR_RE,
+  isShellBorderSide,
+  isShellColor,
   IMAGE_ALT_MAX_LEN,
   IMAGE_WIDTH_MAX,
   isAcceptableContentHref,
@@ -156,7 +157,9 @@ export function validateShellContent(contentMjml: string): ValidationResult {
 // Zod sub-types for shell-content whitelist values (color/font/pixel/radius formats)
 // ---------------------------------------------------------------------------
 
-const HexColor = z.string().regex(HEX_COLOR_RE, 'must be a #RRGGBB hex color')
+const ShellColor = z
+  .string()
+  .refine(isShellColor, 'must be a #RRGGBB hex color or a CSS color name (no transparency)')
 
 const FontStack = z
   .string()
@@ -201,17 +204,17 @@ const BorderRadiusShell = z
   )
 
 // Bordure par côté. Le composite GrapesJS par côté émet le shorthand CSS
-// "<largeur>px <style> <#hex>" (ordre largeur/style/couleur). Outlook ignore
+// "<largeur>px <style> <couleur>" (ordre largeur/style/couleur). Outlook ignore
 // les bordures portées par un <div> (dégradation acceptée — cf. la règle de
-// dégradation des bordures pour les composants de la coque email). Couleur hex obligatoire (GrapesJS est
-// contraint côté éditeur à émettre du hex, cf. Phase 3).
+// dégradation des bordures pour les composants de la coque email). Couleur :
+// `#RRGGBB` ou nom CSS, comme `ShellColor`.
 const BorderSide = z
   .string()
   .min(1, 'must not be empty')
   .refine((s) => s.trim().length > 0, 'must not be whitespace-only')
   .refine(
-    (s) => /^\d+px\s+(solid|dashed|dotted|double)\s+#[0-9a-fA-F]{6}$/.test(s.trim()),
-    'border-<side> must be "<width>px <style> #RRGGBB" (e.g. "1px solid #18181b")',
+    isShellBorderSide,
+    'border-<side> must be "<width>px <style> <color>" (e.g. "1px solid #18181b")',
   )
 
 const SectionWidth = z
@@ -295,7 +298,7 @@ const SectionAttrs = z
   .object({
     ...universalAttrs,
     ...longhandPaddingAttrs,
-    'background-color': HexColor.optional(),
+    'background-color': ShellColor.optional(),
     padding: PxValue.optional(),
     'border-radius': BorderRadiusShell.optional(),
     'border-top': BorderSide.optional(),
@@ -317,7 +320,7 @@ const ColumnAttrs = z
   .object({
     ...universalAttrs,
     ...longhandPaddingAttrs,
-    'background-color': HexColor.optional(),
+    'background-color': ShellColor.optional(),
     padding: PxValue.optional(),
     width: ColumnWidth.optional(),
     'vertical-align': VerticalAlign.optional(),
@@ -328,7 +331,7 @@ const TextAttrs = z
   .object({
     ...universalAttrs,
     ...longhandPaddingAttrs,
-    color: HexColor.optional(),
+    color: ShellColor.optional(),
     'font-family': FontStack.optional(),
     'font-size': PxValue.optional(),
     'font-weight': FontWeight.optional(),
@@ -342,8 +345,8 @@ const ButtonAttrs = z
   .object({
     ...universalAttrs,
     ...longhandPaddingAttrs,
-    'background-color': HexColor.optional(),
-    color: HexColor.optional(),
+    'background-color': ShellColor.optional(),
+    color: ShellColor.optional(),
     'font-family': FontStack.optional(),
     'font-size': PxValue.optional(),
     'font-weight': FontWeight.optional(),
@@ -369,7 +372,7 @@ const DividerAttrs = z
   .object({
     ...universalAttrs,
     ...longhandPaddingAttrs,
-    'border-color': HexColor.optional(),
+    'border-color': ShellColor.optional(),
     'border-width': DividerBorderWidth.optional(),
     padding: PxValue.optional(),
   })
@@ -396,7 +399,7 @@ const SpacerAttrs = z
 
 const ContentWrapperAttrs = z
   .object({
-    'background-color': HexColor.optional(),
+    'background-color': ShellColor.optional(),
     padding: PxValue.optional(),
     'padding-top': PxValue.optional(),
     'padding-bottom': PxValue.optional(),
@@ -437,7 +440,7 @@ const MjBodyPadding = z
 
 const MjBodyAttrs = z
   .object({
-    'background-color': HexColor.optional(),
+    'background-color': ShellColor.optional(),
     'padding-top': MjBodyPadding.optional(),
     'padding-bottom': MjBodyPadding.optional(),
   })

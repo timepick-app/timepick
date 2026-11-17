@@ -11,6 +11,14 @@
  * racine, résolus via la même cascade. La projection JSON reste tel-quel
  * (spread complet de `resolvedShell`) ; les clients qui n'ont pas connaissance
  * de `mjBody` ignorent simplement la clé.
+ *
+ * Surcharge paresseuse (2026-11-14) — pour `ownerKind=event`, la réponse porte
+ * aussi `parent: { header, footer, mjBody }` : la cascade résolue SANS le niveau
+ * événement (`template > brand > hardcoded`). L'éditeur compare le canvas à ce
+ * parent au save pour décider s'il écrit une surcharge (divergence) ou supprime
+ * celle qui existe (retour au parent). Même résolveur, même `brand.logoUrl` :
+ * le re-couplage du logo d'en-tête est identique des deux côtés, sinon la
+ * comparaison serait toujours fausse et chaque save créerait une surcharge.
  */
 
 import { ERROR_CODES } from '@timepick/shared'
@@ -41,13 +49,23 @@ export const getEditorContextHandler = async (
 
     const brand = await getEmailBrandSettingsCached()
 
-    const resolved = await resolveShellParts({
-      templateKey: query.templateKey,
-      eventId: query.ownerKind === 'event' ? query.ownerId : undefined,
-      brand: { logoUrl: brand.logoUrl },
-    })
+    const isEvent = query.ownerKind === 'event'
+    const [resolved, parent] = await Promise.all([
+      resolveShellParts({
+        templateKey: query.templateKey,
+        eventId: isEvent ? query.ownerId : undefined,
+        brand: { logoUrl: brand.logoUrl },
+      }),
+      isEvent
+        ? resolveShellParts({ templateKey: query.templateKey, brand: { logoUrl: brand.logoUrl } })
+        : null,
+    ])
 
-    res.json({ data: resolved })
+    res.json({
+      data: parent
+        ? { ...resolved, parent: { header: parent.header, footer: parent.footer, mjBody: parent.mjBody } }
+        : resolved,
+    })
   } catch (error) {
     if (error instanceof NotFoundError) {
       res.status(404).json({

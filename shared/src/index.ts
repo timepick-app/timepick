@@ -15,6 +15,7 @@ export * from './types/invitation'
 export * from './types/event'
 
 // Phase 2 — constantes runtime cross-boundary.
+export * from './constants/cssNamedColors'
 export * from './constants/email'
 
 // Contrat d'erreur — source unique des codes portés par les réponses d'API.

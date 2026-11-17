@@ -12,7 +12,10 @@ import {
 } from './helpers/email-editor'
 
 /**
- * Story 26-2d — runtime smokes A-E for the locked-shell inheritance panel.
+ * Story 26-2d — runtime smokes A, C, D, E for the locked-shell inheritance panel.
+ * Smoke B (toast d'erreur du PUT au clic « Personnaliser ce bloc ») supprimé le
+ * 2026-11-14 : depuis la surcharge paresseuse, le clic n'émet plus de requête.
+ * L'échec du PUT au save est couvert par `__tests__/MjmlEditorOverlay.test.tsx`.
  *
  * Cible la mémoire `feedback_grapesjs_runtime_smoke_required` — les tests
  * vitest mocknet `initEmailEditor` et passent même quand le mauvais nom d'event
@@ -255,28 +258,18 @@ test.describe("Story 26-2d — Smoke A (panneau d'héritage niveau event)", () =
     expect(await canvasPseudo(page, 'header', '::after')).toMatch(/Hérité|Contenu d'origine/)
     expect(await canvasPseudo(page, 'content-wrapper', '::before')).toContain('Corps')
 
-    // STEP 2 — « Personnaliser ce bloc » : PUT shell-parts → refetch du
-    // contexte → panneau refermé.
-    const putPromise = page.waitForResponse(
-      (r) =>
-        r.url().includes(`/api/admin/shell-parts/event/${eventId}/header`) &&
-        r.request().method() === 'PUT',
-    )
-    const refetchPromise = page.waitForResponse(
-      (r) => r.url().includes('/api/admin/editor-context') && r.request().method() === 'GET',
-    )
+    // STEP 2 — « Personnaliser ce bloc » : SURCHARGE PARESSEUSE, aucune requête
+    // shell-parts ni refetch — le clic ne fait que déverrouiller le bloc pour
+    // la session. Toute requête ici recréerait la ligne fantôme qui figeait
+    // l'événement (incident du 2026-05-18).
+    const shellPartsCalls: string[] = []
+    const contextRefetches: string[] = []
+    page.on('request', (r) => {
+      if (r.url().includes('/api/admin/shell-parts/')) shellPartsCalls.push(`${r.method()} ${r.url()}`)
+      if (r.url().includes('/api/admin/editor-context')) contextRefetches.push(r.url())
+    })
     await page.getByTestId('locked-shell-customize-btn-header').click()
-
-    const putResp = await putPromise
-    expect(putResp.status()).toBe(200)
-    const putBody = (await putResp.json()) as {
-      data: { ownerKind: string; partKind: string }
-    }
-    expect(putBody.data.ownerKind).toBe('event')
-    expect(putBody.data.partKind).toBe('header')
-
     await expect(panel).toBeHidden({ timeout: 5000 })
-    await refetchPromise
 
     // STEP 3 — LE CŒUR DU SMOKE : le bloc est devenu ÉDITABLE dans le même
     // écran. La version de ce test antérieure à juin se contentait de « le
@@ -320,10 +313,65 @@ test.describe("Story 26-2d — Smoke A (panneau d'héritage niveau event)", () =
     // Le pied, lui, n'a pas été personnalisé : il porte toujours sa pastille.
     expect(await canvasPseudo(page, 'footer', '::after')).toMatch(/Hérité|Contenu d'origine/)
 
-    // STEP 4 — « Enregistrer » ne doit PAS s'être activé tout seul : on a
-    // persisté le résolu courant à l'identique, les ancres de coque restent
-    // valides. S'il s'active, c'est un faux positif du suivi de modifications.
+    // STEP 4 — « Enregistrer » ne doit PAS s'être activé tout seul (rien n'a
+    // été modifié), et rien n'est parti vers le serveur.
     await expect(page.getByTestId('mjml-editor-save-btn')).toBeDisabled()
+    expect(shellPartsCalls).toEqual([])
+    expect(contextRefetches).toEqual([])
+
+    // STEP 5 — divergence réelle + Enregistrer → la surcharge naît (PUT).
+    const setHeaderBackground = (color: string) =>
+      page.evaluate((c) => {
+        type Comp = {
+          getAttributes: () => Record<string, string>
+          addAttributes: (a: Record<string, string>) => void
+          removeAttributes: (names: string[]) => void
+        }
+        const win = window as unknown as {
+          __grapesEditor?: { getWrapper: () => { find: (sel: string) => Comp[] } }
+        }
+        const section = win
+          .__grapesEditor!.getWrapper()
+          .find('[css-class~="locked-shell"]')
+          .find((s) => s.getAttributes()['data-part-kind'] === 'header')!
+        const previous = section.getAttributes()['background-color'] ?? ''
+        // Attribut absent au départ → le retirer, pas poser `background-color=""`
+        // (qui ne serait plus égal au parent et produirait un PUT).
+        if (c === '') section.removeAttributes(['background-color'])
+        else section.addAttributes({ 'background-color': c })
+        return previous
+      }, color)
+    const parentBackground = await setHeaderBackground('#ab1234')
+    const saveBtn = page.getByTestId('mjml-editor-save-btn')
+    await expect(saveBtn).toBeEnabled()
+    const putPromise = page.waitForResponse(
+      (r) =>
+        r.url().includes(`/api/admin/shell-parts/event/${eventId}/header`) &&
+        r.request().method() === 'PUT',
+    )
+    await saveBtn.click()
+    expect((await putPromise).status()).toBe(200)
+    // `data-dirty` et non `toBeDisabled` : le bouton est aussi désactivé pendant
+    // l'enregistrement, ce qui rendrait l'assertion vraie à tort.
+    await expect(saveBtn).toHaveAttribute('data-dirty', 'false')
+
+    // STEP 6 — retour à la valeur du parent + Enregistrer → la surcharge
+    // disparaît (DELETE) et l'événement suit de nouveau le modèle.
+    await setHeaderBackground(parentBackground)
+    await expect(saveBtn).toBeEnabled()
+    const deletePromise = page.waitForResponse(
+      (r) =>
+        r.url().includes(`/api/admin/shell-parts/event/${eventId}/header`) &&
+        r.request().method() === 'DELETE',
+    )
+    await saveBtn.click()
+    expect((await deletePromise).status()).toBe(204)
+    // Rien ne reste à enregistrer : sinon la garde « Quitter sans enregistrer ? »
+    // se déclencherait après un save réussi. Le revert part sans attendre le
+    // rafraîchissement de l'origine : c'est le cas que le routage événement
+    // couvre (DELETE même si l'origine dit encore « modèle »).
+    await expect(saveBtn).toHaveAttribute('data-dirty', 'false')
+    expect(shellPartsCalls.filter((c) => c.startsWith('PUT'))).toHaveLength(1)
   })
 
   test("bloc déjà surchargé au niveau event → le panneau d'héritage ne s'ouvre pas", async ({
@@ -350,73 +398,6 @@ test.describe("Story 26-2d — Smoke A (panneau d'héritage niveau event)", () =
     await expect(page.getByTestId('mjml-editor-structural-badge-overlay')).toBeVisible()
     await expect(page.getByTestId('locked-shell-info-panel-header')).toHaveCount(0)
     await expect(page.getByTestId('mjml-editor-locked-panel-overlay')).toHaveCount(0)
-  })
-})
-
-// ============================================================================
-// Smoke B — Toast d'erreur (chemin résilience). Restauré le 2026-07-30 avec le
-// bouton « Personnaliser ce bloc » : son unique déclencheur client était ce
-// bouton, retiré du produit en juin, ce qui avait rendu ce smoke inerte.
-// ============================================================================
-
-test.describe('Story 26-2d — Smoke B (toast.error on server 400)', () => {
-  let token: string
-  let eventId: string
-
-  test.beforeAll(async ({ request }) => {
-    token = await fetchAdminToken(request)
-    eventId = await createTestEvent(request, token, 'Smoke B — 26-2d')
-  })
-
-  test.afterAll(async ({ request }) => {
-    await deleteShellParts(request, 'event', eventId)
-    await deleteTestEvent(request, token, eventId)
-  })
-
-  test.beforeEach(async ({ page, request }) => {
-    await deleteShellParts(request, 'event', eventId)
-    await loginAsAdmin(page)
-  })
-
-  test('une erreur serveur 400 remonte un toast et ne casse pas l\'éditeur', async ({ page }) => {
-    test.setTimeout(60000)
-    await page.route('**/api/admin/shell-parts/**', (route) => {
-      if (route.request().method() === 'PUT') {
-        return route.fulfill({
-          status: 400,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            error: { code: 'VALIDATION_ERROR', message: 'Contenu MJML invalide (test injection)' },
-          }),
-        })
-      }
-      return route.continue()
-    })
-
-    await page.goto(`/admin/events/${eventId}/edit#template`)
-    await page.getByTestId('event-invitation-preview-iframe').waitFor()
-    await page.getByTestId('event-invitation-open-editor-btn').click()
-    await page.getByTestId('mjml-editor-inner').waitFor()
-    await waitForGrapesEditorReady(page)
-
-    await selectLockedShellDescendant(page, 'header')
-    await expect(page.getByTestId('mjml-editor-locked-panel-overlay')).toBeVisible()
-    await page.getByTestId('locked-shell-customize-btn-header').click()
-
-    // Sonner pose `data-sonner-toast`. Le message du serveur porte un code hors
-    // liste blanche : il n'atteint donc PAS l'écran — c'est la phrase de
-    // l'appelant qui s'affiche, et elle dit que le contenu reste à l'écran.
-    const toast = page.locator('[data-sonner-toast]').filter({
-      hasText: 'La personnalisation de ce bloc a échoué',
-    })
-    await expect(toast).toBeVisible({ timeout: 10000 })
-
-    // Pas d'écran blanc : l'éditeur est toujours monté…
-    await expect(page.getByTestId('mjml-editor-inner')).toBeVisible()
-    // …et le bloc est resté VERROUILLÉ : un PUT refusé ne doit pas déverrouiller
-    // un bloc qui n'a aucune cible de sauvegarde. Sans cette assertion, un
-    // re-push optimiste du canvas passerait inaperçu.
-    expect(await canvasPseudo(page, 'header', '::after')).toMatch(/Hérité|Contenu d'origine/)
   })
 })
 

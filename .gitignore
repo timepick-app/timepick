@@ -37,7 +37,8 @@ client/.vite/
 *.rsls
 *.rslsc
 
-# CLAUDE.md files — agent context, never published
+# Agent context files — never published
+**/AGENTS.md
 **/CLAUDE.md
 
 # Moat task system

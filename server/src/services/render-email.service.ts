@@ -155,6 +155,8 @@ import {
   FONT_FAMILY_MAX_LEN,
   FONT_STACK_RE,
   HEX_COLOR_RE,
+  isShellBorderSide,
+  isShellColor,
   isAcceptableContentHref,
   RADIUS_MAX_BRAND,
   RADIUS_MIN_BRAND,
@@ -338,9 +340,9 @@ function startsWithMjSection(block: string): boolean {
 // la cascade contient une valeur compromise (raw SQL hors validator), on retombe
 // sur le fallback brand fourni en paramètre plutôt que d'interpoler une chaîne
 // arbitraire dans l'attribut MJML. Le validator côté écriture impose déjà
-// `HexColor` mais cette ligne défensive supplémentaire n'a aucun coût runtime.
+// `ShellColor` (hex ou nom CSS) mais cette ligne défensive supplémentaire n'a aucun coût runtime.
 function safeBackgroundColor(value: string, fallback: string): string {
-  return HEX_COLOR_RE.test(value) ? value : fallback
+  return isShellColor(value) ? value : fallback
 }
 
 // ---------------------------------------------------------------------------
@@ -509,13 +511,13 @@ function normalizeContentWrapperBorderRadius(raw: string): string {
 
 // Plan carte-éditable (2026-06-08) — bordure par côté du content-wrapper,
 // portée par <mj-wrapper>. Même contrat que le sous-type `BorderSide` du
-// validator (shell-content.validator.ts) : "<width>px <style> #hex". Retourne
-// '' si invalide (defense-in-depth read, miroir des autres normaliseurs).
-const CONTENT_WRAPPER_BORDER_SIDE_RE = /^\d+px\s+(solid|dashed|dotted|double)\s+#[0-9a-fA-F]{6}$/
+// validator (shell-content.validator.ts) : "<width>px <style> <couleur>", couleur
+// hex ou nom CSS. Retourne '' si invalide (defense-in-depth read, miroir des
+// autres normaliseurs).
 function normalizeContentWrapperBorderSide(name: string, raw: string): string {
   if (!raw) return ''
   const trimmed = raw.trim()
-  if (!CONTENT_WRAPPER_BORDER_SIDE_RE.test(trimmed)) {
+  if (!isShellBorderSide(trimmed)) {
     warnContentWrapperStrip(name, raw)
     return ''
   }
@@ -530,7 +532,7 @@ function normalizeContentWrapperBackgroundColor(raw: string): string {
   // `  #aaa  `) soit ré-émise en forme canonique lowercase et nettoyée du
   // whitespace, plutôt que de slip verbatim dans l'attribut MJML.
   const trimmed = raw.trim()
-  if (!HEX_COLOR_RE.test(trimmed)) {
+  if (!isShellColor(trimmed)) {
     warnContentWrapperStrip('background-color', raw)
     return ''
   }

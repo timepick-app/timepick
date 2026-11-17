@@ -702,7 +702,10 @@ describe('__testing__.buildShell() — mj-body padding wrapping', () => {
     const { safeBackgroundColor } = __testing__
     expect(safeBackgroundColor('#ffffff', '#fafafa')).toBe('#ffffff')
     expect(safeBackgroundColor('#fff" onerror="x', '#fafafa')).toBe('#fafafa')
-    expect(safeBackgroundColor('red', '#fafafa')).toBe('#fafafa')
+    // Noms CSS admis depuis le 2026-11-14 ; la transparence reste refusée.
+    expect(safeBackgroundColor('red', '#fafafa')).toBe('red')
+    expect(safeBackgroundColor('transparent', '#fafafa')).toBe('#fafafa')
+    expect(safeBackgroundColor('rgba(0,0,0,0.5)', '#fafafa')).toBe('#fafafa')
     expect(safeBackgroundColor('', '#fafafa')).toBe('#fafafa')
   })
 
@@ -1054,8 +1057,8 @@ describe('__testing__ — content-wrapper consumption — L3 render', () => {
       expect(out).not.toContain('border-top="1px')
     })
 
-    it('strippe une bordure invalide (couleur non-hex) — defense-in-depth', () => {
-      const raw = extractContentWrapperAttrs('<mj-section border-top="1px solid black"></mj-section>')
+    it('strippe une bordure invalide (couleur transparente) — defense-in-depth', () => {
+      const raw = extractContentWrapperAttrs('<mj-section border-top="1px solid transparent"></mj-section>')
       const out = formatContentWrapperAttrs(raw)
       expect(out).not.toContain('border-top')
     })

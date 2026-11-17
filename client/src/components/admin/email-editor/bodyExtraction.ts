@@ -12,7 +12,7 @@
  * (`<mj-image ...></mj-image>`). See memory `feedback_grapesjs_mjml_self_closing.md`.
  */
 
-import { MJ_BODY_BACKGROUND_COLOR } from '@timepick/shared'
+import { CSS_NAMED_COLORS, MJ_BODY_BACKGROUND_COLOR } from '@timepick/shared'
 
 const BODY_MARKER_RE = /<!-- BODY:START -->([\s\S]*?)<!-- BODY:END -->/
 const MJ_BUTTON_OPEN_TAG_RE = /<mj-button\b([^>]*)>/g
@@ -31,6 +31,30 @@ const DATA_INHERITED_LABEL_ATTR_RE = /\s*data-inherited-label="[^"]*"/
 const MJ_BODY_OPEN_TAG_RE = /<mj-body\b([^>]*)>/
 const ATTR_MATCH_ALL_RE = /([\w-]+)="([^"]*)"/g
 const MJ_SECTION_OPEN_TAG_RE_G = /<mj-section\b([^>]*)>/g
+// Attributs couleur (valeur seule) et bordures shorthand (couleur en dernier).
+const COLOR_ATTR_RE = /\b((?:background-|border-|container-background-)?color)="([a-zA-Z]+)"/g
+const BORDER_SHORTHAND_ATTR_RE =
+  /\b(border(?:-top|-right|-bottom|-left)?)="(\d+px\s+\w+\s+)([a-zA-Z]+)"/g
+
+/**
+ * Ramène un nom de couleur CSS (`black`, `Navy`) à sa forme `#rrggbb` ;
+ * renvoie la valeur inchangée sinon. Le sélecteur de couleur de GrapesJS émet
+ * des noms (`#000000` saisi devient `black`) : sans cette étape, un bloc ramené
+ * à une valeur héritée noire ne serait jamais reconnu comme égal au modèle, et
+ * son enregistrement créerait une surcharge visuellement identique.
+ */
+function canonicalColor(value: string): string {
+  return CSS_NAMED_COLORS[value.toLowerCase()] ?? value
+}
+
+function canonicalizeNamedColors(fragment: string): string {
+  return fragment
+    .replace(COLOR_ATTR_RE, (_m, attr: string, value: string) => `${attr}="${canonicalColor(value)}"`)
+    .replace(
+      BORDER_SHORTHAND_ATTR_RE,
+      (_m, attr: string, head: string, value: string) => `${attr}="${head}${canonicalColor(value)}"`,
+    )
+}
 const MJ_BODY_OPEN_RE = /<mj-body\b[^>]*>/
 const BODY_START_RE = /<!--\s*BODY:START\s*-->/
 const BODY_END_RE = /<!--\s*BODY:END\s*-->/
@@ -226,8 +250,10 @@ export function addInheritedAttr(fragment: string, isInherited: boolean): string
  *
  * `hardcoded` ne dit PAS « hérité » : la même policy pose que le filet de
  * sécurité livré avec l'application n'est pas un niveau de cascade et n'est
- * « jamais considéré comme hérité au sens utilisateur ». Le libellé nomme donc
- * ce qu'il est — le contenu d'origine — sans mentir sur une provenance.
+ * jamais PRÉSENTÉ comme hérité. Le libellé nomme donc ce qu'il est — le
+ * contenu d'origine. Son verrouillage, lui, suit la règle commune
+ * (`isShellBlockInherited`) : verrouillé au niveau événement et en système,
+ * éditable dans l'onglet Invitation.
  */
 export const INHERITED_ORIGIN_LABEL: Record<string, string> = {
   template: 'Hérité du modèle',
@@ -352,7 +378,7 @@ export function extractMjBodyAttrs(fullMjml: string): ResolvedMjBodyAttrsForCanv
   if (!match) throw new Error('<mj-body> opening tag missing')
   const attrs: ResolvedMjBodyAttrsForCanvas = { ...HARDCODED_MJ_BODY_ATTRS_CANVAS }
   for (const [, key, value] of match[1].matchAll(ATTR_MATCH_ALL_RE)) {
-    if (key === 'background-color') attrs.backgroundColor = value
+    if (key === 'background-color') attrs.backgroundColor = canonicalColor(value)
     else if (key === 'padding-top') attrs.paddingTop = value
     else if (key === 'padding-bottom') attrs.paddingBottom = value
   }
@@ -389,14 +415,32 @@ export function mjBodyAttrsEqual(
  * s'ouvrait alors sur une coque parfaitement éditable. Or l'onglet Invitation
  * écrit le propriétaire commun `template[invitation]` quelle que soit l'origine
  * résolue : c'est une SOURCE de la cascade, pas un niveau qui hérite.
+ *
+ * Surcharge paresseuse (2026-11-14) — au niveau événement, un bloc déverrouillé
+ * par « Personnaliser ce bloc » (`shellLock.unlockedParts`) a une cible de
+ * sauvegarde ici SANS qu'aucune ligne n'existe encore en base : la surcharge
+ * ne sera écrite qu'au save, et seulement si le bloc diverge du parent. Tous
+ * les re-wraps du canvas doivent recevoir le même ensemble, sinon le bloc se
+ * re-verrouille en pleine édition (perte silencieuse des éditions en cours).
  */
+export type ShellLock = {
+  ownerKind?: 'brand' | 'template' | 'event'
+  isSystem?: boolean
+  unlockedParts?: ReadonlySet<'header' | 'footer'>
+}
+
 export function isShellBlockInherited(
   blockOrigin: string | undefined,
-  shellLock?: { ownerKind?: 'brand' | 'template' | 'event'; isSystem?: boolean },
+  shellLock?: ShellLock,
+  partKind?: 'header' | 'footer',
 ): boolean {
-  // Seul le niveau événement hérite bloc par bloc : une surcharge event est
-  // éditable, tout le reste de la cascade ne l'est pas depuis cet écran.
-  if (shellLock?.ownerKind === 'event') return blockOrigin !== 'event'
+  // Seul le niveau événement hérite bloc par bloc : une surcharge event (en
+  // base, ou déverrouillée pour la session) est éditable, tout le reste de la
+  // cascade ne l'est pas depuis cet écran.
+  if (shellLock?.ownerKind === 'event') {
+    if (partKind && shellLock.unlockedParts?.has(partKind)) return false
+    return blockOrigin !== 'event'
+  }
   // Ailleurs, l'éditabilité ne dépend pas de l'origine : seul l'onglet
   // Invitation (template, non système) porte la coque commune.
   return !(shellLock?.ownerKind === 'template' && !shellLock?.isSystem)
@@ -406,7 +450,7 @@ export function wrapBodyForEditing(
   bodyFragment: string,
   brand: BrandShellTokens,
   resolvedShell?: ResolvedShellForCanvas,
-  shellLock?: { ownerKind?: 'brand' | 'template' | 'event'; isSystem?: boolean },
+  shellLock?: ShellLock,
 ): string {
   // <img> is a void HTML element rendered inside <mj-text> (which accepts raw
   // HTML), so the self-closing form is correct here. The self-closing ban
@@ -433,8 +477,8 @@ export function wrapBodyForEditing(
   // verrouillée (header/footer hérités → deep-lock). Niveau événement : seules
   // les sections d'origine non-événement sont héritées. Param optionnel → les
   // call-sites non mis à jour restent verrouillés (fallbackInherited=true).
-  const headerInherited = isShellBlockInherited(resolvedShell?.header.origin, shellLock)
-  const footerInherited = isShellBlockInherited(resolvedShell?.footer.origin, shellLock)
+  const headerInherited = isShellBlockInherited(resolvedShell?.header.origin, shellLock, 'header')
+  const footerInherited = isShellBlockInherited(resolvedShell?.footer.origin, shellLock, 'footer')
   const fallbackInherited = isShellBlockInherited(undefined, shellLock)
   // Libellé de provenance affiché par la pastille ambre du canvas. `null` quand
   // le bloc a une cible de sauvegarde ici : pas d'héritage à signaler.
@@ -665,14 +709,17 @@ export function extractContentWrapperFromCanvas(fullMjml: string): string {
   for (const [, key, value] of m[1].matchAll(ATTR_MATCH_ALL_RE)) {
     if (CARD_ATTR_WHITELIST.has(key)) kept.push(`${key}="${escapeAttribute(value)}"`)
   }
-  return kept.length ? `<mj-section ${kept.join(' ')}></mj-section>` : '<mj-section></mj-section>'
+  return canonicalizeNamedColors(
+    kept.length ? `<mj-section ${kept.join(' ')}></mj-section>` : '<mj-section></mj-section>',
+  )
 }
 
 /**
  * Plan `2026-05-17-shell-parts-persistance-save` — strip les marqueurs éditeur
  * (`css-class="locked-shell"`, `data-locked-label`, `data-part-kind`,
  * `data-inherited`, `data-inherited-label`) absents du résolu serveur, trim, collapse whitespace
- * inter-balises. Idempotente : `normalize(normalize(x)) === normalize(x)`.
+ * inter-balises, et ramène les noms de couleur CSS à `#rrggbb` (le sélecteur de
+ * couleur émet `black` pour `#000000`). Idempotente : `normalize(normalize(x)) === normalize(x)`.
  * Utilisée à la fois pour hydrater les ancres locales depuis le canvas et pour
  * comparer le canvas vs les ancres / vs le résolu cascade.
  *
@@ -707,7 +754,7 @@ export function normalizeShellFragment(fragment: string): string {
     .trim()
   // Collapse whitespace entre balises (`>   <` → `><`) pour rendre la
   // comparaison robuste aux différences d'indentation entre canvas et serveur.
-  return stripped.replace(/>\s+</g, '><')
+  return canonicalizeNamedColors(stripped.replace(/>\s+</g, '><'))
 }
 
 /**

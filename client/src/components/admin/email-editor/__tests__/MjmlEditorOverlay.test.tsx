@@ -1,5 +1,5 @@
 import { render, screen, waitFor, act } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import userEvent, { type UserEvent } from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
@@ -152,6 +152,15 @@ let editorContextValue: {
       origin: string
     }
     contentWrapper: { contentMjml: string; origin: string } | null
+    // Niveau événement — cascade sans le niveau événement (surcharge paresseuse).
+    parent?: {
+      header: { contentMjml: string; origin: string }
+      footer: { contentMjml: string; origin: string }
+      mjBody: {
+        attrs: { backgroundColor: string; paddingTop: string; paddingBottom: string }
+        origin: string
+      }
+    }
   } | undefined
   isLoading: boolean
   error: unknown
@@ -1775,5 +1784,340 @@ describe('MjmlEditorOverlay — Lot 2 condition éditabilité coque (data-inheri
     await renderAndWaitForInner(makeSystemProps())
     // editableShell = false (isSystem) → header/footer hérités (deep-lock).
     expect(capturedInitialMjml).toContain('data-inherited')
+  })
+})
+
+// ============================================================================
+// Surcharge paresseuse (2026-11-14) — « Personnaliser ce bloc » n'écrit rien ;
+// la surcharge event naît au save si le bloc diverge du PARENT, et meurt au
+// save s'il y revient.
+// ============================================================================
+
+const PARENT_HEADER =
+  '<mj-section background-color="#123456"><mj-column><mj-text>P</mj-text></mj-column></mj-section>'
+
+/** Balise ouvrante de la section d'en-tête du canvas (attrs éditeur compris). */
+function headerOpenTag(mjml: string | null | undefined): string {
+  return /<mj-section[^>]*data-part-kind="header"[^>]*>/.exec(mjml ?? '')?.[0] ?? ''
+}
+
+function lastPushedMjml(): string {
+  const calls = editorStub.setMjmlSilently.mock.calls
+  return calls[calls.length - 1]?.[0] ?? ''
+}
+
+function makeEventContext(headerOrigin: 'event' | 'template') {
+  const ctx = makeFullContext(headerOrigin)
+  return {
+    ...ctx,
+    data: {
+      ...ctx.data!,
+      parent: {
+        header: { contentMjml: headerOrigin === 'event' ? PARENT_HEADER : HEADER_RESOLVED, origin: 'template' },
+        footer: ctx.data!.footer,
+        mjBody: ctx.data!.mjBody,
+      },
+    },
+  }
+}
+
+async function customizeHeader(user: UserEvent) {
+  act(() => {
+    registeredOnLockedShellSelection?.({ partKind: 'header' })
+  })
+  await user.click(await screen.findByTestId('locked-shell-customize-btn-header'))
+}
+
+describe('MjmlEditorOverlay — surcharge paresseuse (niveau événement)', () => {
+  it('« Personnaliser ce bloc » déverrouille le bloc sans aucune écriture serveur', async () => {
+    editorContextValue = makeEventContext('template')
+    currentHeader = HEADER_RESOLVED
+    currentFooter = FOOTER_RESOLVED
+    const user = userEvent.setup()
+    await renderAndWaitForInner(makeProps({ ownerKind: 'event', ownerId: 'evt-1' }))
+    expect(headerOpenTag(capturedInitialMjml)).toContain('data-inherited="true"')
+
+    await customizeHeader(user)
+
+    expect(upsertMutateAsync).not.toHaveBeenCalled()
+    expect(deleteMutateAsync).not.toHaveBeenCalled()
+    expect(headerOpenTag(lastPushedMjml())).not.toContain('data-inherited')
+    // Seul le bloc choisi est déverrouillé : le pied reste hérité.
+    expect(lastPushedMjml()).toMatch(/data-part-kind="footer"[^>]*data-inherited="true"/)
+    await waitFor(() => {
+      expect(screen.queryByTestId('mjml-editor-locked-panel-overlay')).toBeNull()
+    })
+    expect(toastMock.error).not.toHaveBeenCalled()
+  })
+
+  // Le piège du chantier : un re-wrap qui ignorerait le déverrouillage de
+  // session re-verrouillerait le bloc en pleine édition.
+  it("le bloc reste déverrouillé quand l'aperçu de l'identité visuelle re-pousse le canvas", async () => {
+    editorContextValue = makeEventContext('template')
+    currentHeader = HEADER_RESOLVED
+    currentFooter = FOOTER_RESOLVED
+    const user = userEvent.setup()
+    await renderAndWaitForInner(makeProps({ ownerKind: 'event', ownerId: 'evt-1' }))
+    await customizeHeader(user)
+    const pushesAfterCustomize = editorStub.setMjmlSilently.mock.calls.length
+
+    currentBody = 'B'
+    await user.click(screen.getByTestId('stub-identity-preview'))
+
+    await waitFor(() => {
+      expect(editorStub.setMjmlSilently.mock.calls.length).toBeGreaterThan(pushesAfterCustomize)
+    })
+    expect(headerOpenTag(lastPushedMjml())).not.toContain('data-inherited')
+  })
+
+  it('« Revenir au modèle par défaut » re-verrouille un bloc déverrouillé', async () => {
+    editorContextValue = makeEventContext('template')
+    currentHeader = HEADER_RESOLVED
+    currentFooter = FOOTER_RESOLVED
+    const onReset = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    await renderAndWaitForInner(makeProps({ ownerKind: 'event', ownerId: 'evt-1', onReset }))
+    await customizeHeader(user)
+    expect(headerOpenTag(lastPushedMjml())).not.toContain('data-inherited')
+
+    await user.click(screen.getByTestId('mjml-editor-reset-btn'))
+    await screen.findByTestId('mjml-editor-reset-confirm')
+    await user.click(screen.getByText('Restaurer'))
+
+    await waitFor(() => expect(onReset).toHaveBeenCalledTimes(1))
+    await waitFor(() => {
+      expect(headerOpenTag(lastPushedMjml())).toContain('data-inherited="true"')
+    })
+  })
+
+  it('bloc déverrouillé puis modifié → PUT de la surcharge event au save', async () => {
+    editorContextValue = makeEventContext('template')
+    currentBody = 'B-INITIAL'
+    currentHeader = HEADER_RESOLVED
+    currentFooter = FOOTER_RESOLVED
+    const user = userEvent.setup()
+    await renderAndWaitForInner(
+      makeProps({ initialBodyMjml: 'B-INITIAL', ownerKind: 'event', ownerId: 'evt-1' }),
+    )
+    await customizeHeader(user)
+
+    currentBody = 'B-INITIAL'
+    currentHeader =
+      '<mj-section background-color="#ff0000"><mj-column><mj-text>H</mj-text></mj-column></mj-section>'
+    act(() => {
+      registeredOnUpdate?.()
+    })
+    const saveBtn = await screen.findByTestId('mjml-editor-save-btn')
+    await waitFor(() => expect(saveBtn).not.toBeDisabled())
+    await user.click(saveBtn)
+
+    await waitFor(() => expect(upsertMutateAsync).toHaveBeenCalledTimes(1))
+    expect(upsertMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ ownerKind: 'event', ownerId: 'evt-1', partKind: 'header' }),
+    )
+    expect(deleteMutateAsync).not.toHaveBeenCalled()
+  })
+
+  it('surcharge event ramenée au parent → DELETE au save, aucun PUT', async () => {
+    editorContextValue = makeEventContext('event')
+    currentBody = 'B-INITIAL'
+    currentHeader = HEADER_RESOLVED
+    currentFooter = FOOTER_RESOLVED
+    const user = userEvent.setup()
+    await renderAndWaitForInner(
+      makeProps({ initialBodyMjml: 'B-INITIAL', ownerKind: 'event', ownerId: 'evt-1' }),
+    )
+
+    currentHeader = PARENT_HEADER
+    act(() => {
+      registeredOnUpdate?.()
+    })
+    const saveBtn = await screen.findByTestId('mjml-editor-save-btn')
+    await waitFor(() => expect(saveBtn).not.toBeDisabled())
+    await user.click(saveBtn)
+
+    await waitFor(() => expect(deleteMutateAsync).toHaveBeenCalledTimes(1))
+    expect(deleteMutateAsync).toHaveBeenCalledWith({
+      ownerKind: 'event',
+      ownerId: 'evt-1',
+      partKind: 'header',
+    })
+    expect(upsertMutateAsync).not.toHaveBeenCalled()
+    // L'ancre suit le canvas (= parent) : rien ne reste à enregistrer. Avec
+    // l'ancre « résolu pré-mutation », elle valait la surcharge supprimée et
+    // le bouton restait actif après un save réussi.
+    await waitFor(() => expect(saveBtn).toBeDisabled())
+    // Enregistrement de la coque seule : le seul toast de succès venait du leg
+    // corps, la suppression était muette.
+    expect(toastMock.success).toHaveBeenCalledWith('Modifications enregistrées.')
+  })
+
+  it('surcharge event modifiée hors parent → PUT, pas de DELETE', async () => {
+    editorContextValue = makeEventContext('event')
+    currentBody = 'B-INITIAL'
+    currentHeader = HEADER_RESOLVED
+    currentFooter = FOOTER_RESOLVED
+    const user = userEvent.setup()
+    await renderAndWaitForInner(
+      makeProps({ initialBodyMjml: 'B-INITIAL', ownerKind: 'event', ownerId: 'evt-1' }),
+    )
+
+    currentHeader =
+      '<mj-section background-color="#00ff00"><mj-column><mj-text>H</mj-text></mj-column></mj-section>'
+    act(() => {
+      registeredOnUpdate?.()
+    })
+    const saveBtn = await screen.findByTestId('mjml-editor-save-btn')
+    await waitFor(() => expect(saveBtn).not.toBeDisabled())
+    await user.click(saveBtn)
+
+    await waitFor(() => expect(upsertMutateAsync).toHaveBeenCalledTimes(1))
+    expect(deleteMutateAsync).not.toHaveBeenCalled()
+  })
+
+  it('déverrouiller un second bloc conserve les modifications non enregistrées du premier', async () => {
+    editorContextValue = makeEventContext('template')
+    currentHeader = HEADER_RESOLVED
+    currentFooter = FOOTER_RESOLVED
+    const user = userEvent.setup()
+    await renderAndWaitForInner(makeProps({ ownerKind: 'event', ownerId: 'evt-1' }))
+    await customizeHeader(user)
+
+    // Modification de l'en-tête dans le canvas, non enregistrée.
+    currentBody = 'B'
+    currentHeader =
+      '<mj-section background-color="#abcdef"><mj-column><mj-text>EDITED</mj-text></mj-column></mj-section>'
+    act(() => {
+      registeredOnLockedShellSelection?.({ partKind: 'footer' })
+    })
+    await user.click(await screen.findByTestId('locked-shell-customize-btn-footer'))
+
+    expect(headerOpenTag(lastPushedMjml())).toContain('background-color="#abcdef"')
+    expect(lastPushedMjml()).toContain('EDITED')
+    expect(headerOpenTag(lastPushedMjml())).not.toContain('data-inherited')
+  })
+
+  it('bloc déverrouillé non modifié + corps modifié → seul le corps part, aucune écriture de coque', async () => {
+    editorContextValue = makeEventContext('template')
+    currentBody = 'B-INITIAL'
+    currentHeader = HEADER_RESOLVED
+    currentFooter = FOOTER_RESOLVED
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    await renderAndWaitForInner(
+      makeProps({ initialBodyMjml: 'B-INITIAL', onSave, ownerKind: 'event', ownerId: 'evt-1' }),
+    )
+    await customizeHeader(user)
+
+    currentBody = 'B-EDITED'
+    currentHeader = HEADER_RESOLVED
+    act(() => {
+      registeredOnUpdate?.()
+    })
+    const saveBtn = await screen.findByTestId('mjml-editor-save-btn')
+    await waitFor(() => expect(saveBtn).not.toBeDisabled())
+    await user.click(saveBtn)
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(upsertMutateAsync).not.toHaveBeenCalled()
+    expect(deleteMutateAsync).not.toHaveBeenCalled()
+  })
+
+  // L'origine vient d'un `editorContext` rafraîchi après coup : juste après un
+  // PUT elle dit encore « modèle ». Le retour au parent doit supprimer quand même.
+  it('PUT puis retour au parent avant rafraîchissement de l’origine → DELETE', async () => {
+    editorContextValue = makeEventContext('template')
+    currentBody = 'B-INITIAL'
+    currentHeader = HEADER_RESOLVED
+    currentFooter = FOOTER_RESOLVED
+    const user = userEvent.setup()
+    await renderAndWaitForInner(
+      makeProps({ initialBodyMjml: 'B-INITIAL', ownerKind: 'event', ownerId: 'evt-1' }),
+    )
+    await customizeHeader(user)
+    const saveBtn = await screen.findByTestId('mjml-editor-save-btn')
+
+    currentBody = 'B-INITIAL'
+    currentHeader =
+      '<mj-section background-color="#ff0000"><mj-column><mj-text>H</mj-text></mj-column></mj-section>'
+    act(() => {
+      registeredOnUpdate?.()
+    })
+    await waitFor(() => expect(saveBtn).not.toBeDisabled())
+    await user.click(saveBtn)
+    await waitFor(() => expect(upsertMutateAsync).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(saveBtn).toBeDisabled())
+
+    currentHeader = HEADER_RESOLVED // = parent ; origine du mock toujours « template »
+    act(() => {
+      registeredOnUpdate?.()
+    })
+    await waitFor(() => expect(saveBtn).not.toBeDisabled())
+    await user.click(saveBtn)
+
+    await waitFor(() => expect(deleteMutateAsync).toHaveBeenCalledTimes(1))
+    expect(deleteMutateAsync).toHaveBeenCalledWith({ ownerKind: 'event', ownerId: 'evt-1', partKind: 'header' })
+  })
+
+  it('surcharge fantôme (ligne event identique au parent) supprimée au premier enregistrement, même non touchée', async () => {
+    const ctx = makeEventContext('event')
+    editorContextValue = {
+      ...ctx,
+      data: { ...ctx.data, parent: { ...ctx.data.parent, header: { contentMjml: HEADER_RESOLVED, origin: 'template' } } },
+    }
+    currentBody = 'B-INITIAL'
+    currentHeader = HEADER_RESOLVED
+    currentFooter = FOOTER_RESOLVED
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    await renderAndWaitForInner(
+      makeProps({ initialBodyMjml: 'B-INITIAL', onSave, ownerKind: 'event', ownerId: 'evt-1' }),
+    )
+
+    currentBody = 'B-EDITED'
+    act(() => {
+      registeredOnUpdate?.()
+    })
+    const saveBtn = await screen.findByTestId('mjml-editor-save-btn')
+    await waitFor(() => expect(saveBtn).not.toBeDisabled())
+    await user.click(saveBtn)
+
+    await waitFor(() => expect(deleteMutateAsync).toHaveBeenCalledTimes(1))
+    expect(deleteMutateAsync).toHaveBeenCalledWith({ ownerKind: 'event', ownerId: 'evt-1', partKind: 'header' })
+    expect(onSave).toHaveBeenCalledTimes(1)
+    expect(upsertMutateAsync).not.toHaveBeenCalled()
+  })
+
+  it('pied : comparé à SON parent, pas au résolu (surcharge pied ramenée au modèle → DELETE)', async () => {
+    const PARENT_FOOTER =
+      '<mj-section padding="0px"><mj-column><mj-text>PF</mj-text></mj-column></mj-section>'
+    const ctx = makeEventContext('template')
+    editorContextValue = {
+      ...ctx,
+      data: {
+        ...ctx.data,
+        footer: { contentMjml: FOOTER_RESOLVED, origin: 'event' },
+        parent: { ...ctx.data.parent, footer: { contentMjml: PARENT_FOOTER, origin: 'template' } },
+      },
+    }
+    currentBody = 'B-INITIAL'
+    currentHeader = HEADER_RESOLVED
+    currentFooter = FOOTER_RESOLVED
+    const user = userEvent.setup()
+    await renderAndWaitForInner(
+      makeProps({ initialBodyMjml: 'B-INITIAL', ownerKind: 'event', ownerId: 'evt-1' }),
+    )
+
+    currentFooter = PARENT_FOOTER
+    act(() => {
+      registeredOnUpdate?.()
+    })
+    const saveBtn = await screen.findByTestId('mjml-editor-save-btn')
+    await waitFor(() => expect(saveBtn).not.toBeDisabled())
+    await user.click(saveBtn)
+
+    await waitFor(() => expect(deleteMutateAsync).toHaveBeenCalledTimes(1))
+    expect(deleteMutateAsync).toHaveBeenCalledWith({ ownerKind: 'event', ownerId: 'evt-1', partKind: 'footer' })
+    expect(upsertMutateAsync).not.toHaveBeenCalled()
   })
 })

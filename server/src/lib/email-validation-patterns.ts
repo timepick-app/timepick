@@ -1,3 +1,5 @@
+import { CSS_NAMED_COLORS } from '@timepick/shared'
+
 /**
  * Shared validation patterns for the email pipeline (brand singleton +
  * shell parts content). Single source of truth so `render-email.service.ts`
@@ -14,6 +16,24 @@
 
 /** Hex color: `#RRGGBB` — 6 chars, no shorthand, no alpha. */
 export const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/
+
+/**
+ * Couleur admise dans la COQUE des e-mails : `#RRGGBB` ou l'un des 148 noms
+ * CSS (`black`, `navy`…), tous rendus par Outlook. Refusés : `transparent`,
+ * `rgb()`/`rgba()`, `hsl()` — l'opacité n'est pas fiable dans Outlook 2016+.
+ * Les noms sont admis parce que le sélecteur de couleur de GrapesJS en émet
+ * (`#000000` saisi y devient `black`, mesuré le 2026-11-14).
+ * Le singleton de marque, lui, reste en `#RRGGBB` strict (`HEX_COLOR_RE`).
+ */
+export function isShellColor(value: string): boolean {
+  return HEX_COLOR_RE.test(value) || Object.prototype.hasOwnProperty.call(CSS_NAMED_COLORS, value.toLowerCase())
+}
+
+/** Bordure par côté de la coque : `<largeur>px <style> <couleur de coque>`. */
+export function isShellBorderSide(value: string): boolean {
+  const m = /^\d+px\s+(?:solid|dashed|dotted|double)\s+(\S+)$/.exec(value.trim())
+  return m !== null && isShellColor(m[1])
+}
 
 /**
  * Font stack: letters, digits, spaces, hyphens, commas, dots, underscores,

@@ -42,6 +42,16 @@ export interface ResolvedShell {
   footer: ResolvedBlock
   mjBody: ResolvedMjBody
   contentWrapper: ResolvedContentWrapper | null
+  /**
+   * Niveau événement uniquement : la cascade SANS le niveau événement. L'éditeur
+   * compare le canvas à ce parent au save (surcharge paresseuse) — divergence →
+   * PUT de la surcharge, retour au parent → DELETE. Absent aux autres niveaux.
+   */
+  parent?: {
+    header: ResolvedBlock
+    footer: ResolvedBlock
+    mjBody: ResolvedMjBody
+  }
 }
 
 export type EditorOwnerKind = 'brand' | 'template' | 'event'

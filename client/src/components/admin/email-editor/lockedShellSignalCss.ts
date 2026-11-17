@@ -89,8 +89,9 @@ export const LOCKED_SHELL_LABEL_CSS = `[data-locked-label] {
  *  2. CONTENU HÉRITÉ — ambre, UNIQUEMENT sous `[data-inherited="true"]`.
  *     Liseré ambre + pastille « Hérité du modèle / de la marque / Contenu
  *     d'origine » (`data-inherited-label`) + contenu estompé. Signifie : ce
- *     bloc n'a pas encore de cible de sauvegarde ici, il faut d'abord créer la
- *     surcharge (bouton « Personnaliser ce bloc »).
+ *     bloc n'est pas modifiable ici tant qu'il n'a pas été ouvert par
+ *     « Personnaliser ce bloc » (qui ne crée rien en base : la surcharge naît
+ *     à l'enregistrement, si le bloc diffère du modèle).
  *
  * Historique — pourquoi ces deux signaux sont désormais distincts : jusqu'au
  * 2026-07-30 un unique badge ambre au cadenas coiffait les 2 blocs de coque ET

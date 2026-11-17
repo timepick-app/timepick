@@ -69,12 +69,29 @@ describe('shell-content.validator', () => {
     })
 
     it('rejects a gradient passed where a hex color is expected', () => {
-      // linear-gradient cannot match HexColor regex
+      // linear-gradient n'est ni un #RRGGBB ni un nom de couleur CSS
       const fragment = `<mj-section background-color="linear-gradient(#fff,#000)"><mj-column><mj-text>x</mj-text></mj-column></mj-section>`
       const result = validateShellContent(fragment)
       expect(result.ok).toBe(false)
       if (!result.ok) expect(result.error).toMatch(/background-color/)
     })
+
+    // Le sélecteur de couleur de GrapesJS rend `#000000` sous la forme `black` :
+    // les noms CSS sont admis, la transparence reste refusée (Outlook 2016+).
+    it('accepts CSS color names, case-insensitively', () => {
+      const fragment = `<mj-section background-color="Navy"><mj-column><mj-text color="black">x</mj-text></mj-column></mj-section>`
+      expect(validateShellContent(fragment)).toEqual({ ok: true })
+    })
+
+    it.each(['transparent', 'rgba(0,0,0,0.5)', 'rgb(0,0,0)', 'notacolor'])(
+      'rejects %s as a shell color',
+      (value) => {
+        const fragment = `<mj-section><mj-column><mj-text color="${value}">x</mj-text></mj-column></mj-section>`
+        const result = validateShellContent(fragment)
+        expect(result.ok).toBe(false)
+        if (!result.ok) expect(result.error).toMatch(/color/)
+      },
+    )
 
     it('rejects box-shadow as an unknown attribute on mj-text', () => {
       const fragment = `<mj-section><mj-column><mj-text box-shadow="0 0 10px #000">x</mj-text></mj-column></mj-section>`
@@ -194,8 +211,13 @@ describe('shell-content.validator', () => {
       expect(validateShellContent(fragment).ok).toBe(true)
     })
 
-    it('rejects a per-side border with a non-hex color (e.g. "black")', () => {
+    it('accepts a per-side border with a CSS color name', () => {
       const fragment = `<mj-section border-top="1px solid black"><mj-column><mj-text>x</mj-text></mj-column></mj-section>`
+      expect(validateShellContent(fragment)).toEqual({ ok: true })
+    })
+
+    it('rejects a per-side border with a transparent color', () => {
+      const fragment = `<mj-section border-top="1px solid transparent"><mj-column><mj-text>x</mj-text></mj-column></mj-section>`
       const result = validateShellContent(fragment)
       expect(result.ok).toBe(false)
       if (!result.ok) expect(result.error).toMatch(/border-top/)
@@ -430,8 +452,8 @@ describe('shell-content.validator', () => {
         expect(validateShellContentPart(fragment, 'content-wrapper').ok).toBe(true)
       })
 
-      it('rejects a per-side border with a non-hex color', () => {
-        const fragment = `<mj-section border-top="1px solid black"></mj-section>`
+      it('rejects a per-side border with a non-color value', () => {
+        const fragment = `<mj-section border-top="1px solid rgba(0,0,0,0.5)"></mj-section>`
         const result = validateShellContentPart(fragment, 'content-wrapper')
         expect(result.ok).toBe(false)
         if (!result.ok) expect(result.error).toMatch(/border-top/)

@@ -142,6 +142,52 @@ describe('GET /api/admin/editor-context', () => {
       expect(res.body.data.footer).toMatchObject({ origin: 'brand' })
       expect(res.body.data.body.origin).toBe('template') // body cascade is gel — events.invitation_mjml is NULL
     })
+
+    // Surcharge paresseuse — l'éditeur décide PUT/DELETE au save en comparant
+    // le canvas au parent. Un parent qui renverrait la ligne event elle-même
+    // rendrait le retour au modèle impossible (toujours « différent »).
+    it('exposes parent = cascade without the event level for ownerKind=event', async () => {
+      // Pas de ligne modèle : le parent remonte au filet d'usine, dont l'en-tête
+      // porte le logo de la marque — c'est là que le re-couplage s'exerce.
+      await query(`UPDATE email_brand_settings SET logo_url = 'https://example.com/logo.png' WHERE id = 1`)
+      invalidateEmailBrandCache()
+      await seedShellPart({
+        ownerKind: 'event',
+        ownerId: TEST_EVENT_ID,
+        partKind: 'header',
+        contentMjml: '<mj-section><mj-column><mj-text>EVENT HEADER</mj-text></mj-column></mj-section>',
+      })
+
+      const asEvent = await request(testServer())
+        .get('/api/admin/editor-context')
+        .query({ ownerKind: 'event', ownerId: TEST_EVENT_ID, templateKey: 'invitation' })
+        .set('Authorization', `Bearer ${adminToken}`)
+      const asTemplate = await request(testServer())
+        .get('/api/admin/editor-context')
+        .query({ ownerKind: 'template', ownerId: 'invitation', templateKey: 'invitation' })
+        .set('Authorization', `Bearer ${adminToken}`)
+
+      expect(asEvent.status).toBe(200)
+      expect(asEvent.body.data.header.origin).toBe('event')
+      // Parent byte-identique à la résolution niveau modèle, logo re-couplé compris.
+      expect(asEvent.body.data.parent).toEqual({
+        header: asTemplate.body.data.header,
+        footer: asTemplate.body.data.footer,
+        mjBody: asTemplate.body.data.mjBody,
+      })
+      expect(asEvent.body.data.parent.header.origin).toBe('hardcoded')
+      expect(asEvent.body.data.parent.header.contentMjml).toContain('https://example.com/logo.png')
+    })
+
+    it('omits parent outside ownerKind=event', async () => {
+      const res = await request(testServer())
+        .get('/api/admin/editor-context')
+        .query({ ownerKind: 'template', ownerId: 'invitation', templateKey: 'invitation' })
+        .set('Authorization', `Bearer ${adminToken}`)
+
+      expect(res.status).toBe(200)
+      expect(res.body.data).not.toHaveProperty('parent')
+    })
   })
 
   describe('400 — validation errors', () => {

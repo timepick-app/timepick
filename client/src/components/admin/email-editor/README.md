@@ -76,8 +76,9 @@ Attendre `event-invitation-preview-iframe`, puis cliquer `event-invitation-open-
 
 | # | Surface | Attendu |
 |---|---|---|
-| 1 | **bloc hérité** (aucune ligne `shell_parts` pour cet événement) | en-tête et pied : pastille ambre + estompage ; clic sur le bloc → panneau d'héritage (`mjml-editor-locked-panel-overlay`) ; badge « hérité, pas encore personnalisé ici » ; « Enregistrer » désactivé |
+| 1 | **bloc hérité** (aucune ligne `shell_parts` pour cet événement) | en-tête et pied : pastille ambre + estompage ; clic sur le bloc → panneau d'héritage (`mjml-editor-locked-panel-overlay`) ; badge « hérité, pas encore personnalisé ici » ; « Enregistrer » désactivé. Après « Personnaliser ce bloc » : pastille ambre et estompage disparaissent, **aucune requête `shell-parts` ni `editor-context`** (onglet Réseau), toujours **aucune ligne** en base ; « Enregistrer » reste désactivé tant que rien n'est modifié ; fermer puis rouvrir → bloc de nouveau hérité. Modifier ce bloc puis déverrouiller l'autre ne doit **pas** effacer la modification. (L'aperçu d'identité visuelle n'existe pas à ce niveau : son re-wrap est gardé en unitaire.) |
 | 2 | **bloc déjà surchargé** (`shell_parts` @ `owner_kind='event'`) | ce bloc : pastille de structure **seule**, pas d'estompage ; clic → **aucun** panneau ; badge « modifiable, non supprimable » ; l'autre bloc reste hérité |
+| 1→2 | **naissance / mort d'une surcharge** (surcharge paresseuse) | bloc déverrouillé **modifié** + Enregistrer → `PUT shell-parts/event/…` et une ligne en base ; bloc surchargé ramené à la valeur du modèle + Enregistrer → `DELETE` et plus de ligne ; une modification du modèle général parvient de nouveau à l'événement |
 
 C'est **la seule surface** où le panneau d'héritage existe. Ailleurs, son absence est le comportement
 correct, pas un bug.
@@ -126,7 +127,7 @@ des signaux de coque une fois l'éditeur ouvert.
 
 | Surface | L'éditeur ouvert est-il gardé ? |
 |---|---|
-| 1 — événement, bloc hérité | Oui — `tests/e2e/email-shell-parts-26-2d.spec.ts` Smoke A (panneau, pastilles, recouvrement, bascule vers éditable dans le même écran) |
+| 1 — événement, bloc hérité | Oui — `tests/e2e/email-shell-parts-26-2d.spec.ts` Smoke A (panneau, pastilles, recouvrement, bascule vers éditable dans le même écran **sans requête**, puis PUT au save d'une divergence et DELETE au retour au modèle) + `__tests__/MjmlEditorOverlay.test.tsx` « surcharge paresseuse » (re-wrap d'aperçu qui ne re-verrouille pas, reset qui re-verrouille) |
 | 2 — événement, bloc surchargé | Oui — `tests/e2e/email-shell-parts-26-2d.spec.ts` Smoke A, 2ᵉ cas + `__tests__/MjmlEditorOverlay.test.tsx` |
 | 3 — onglet Invitation | Oui — `tests/e2e/email-shell-parts-26-2d.spec.ts` Smoke D + `__tests__/MjmlEditorOverlay.test.tsx` (routage du panneau) |
 | 4 — Connexion (`magic_link_login`) | Oui, et c'est **la seule surface système** dans ce cas : `tests/e2e/email-shell-locked-structure.spec.ts` (en-tête ET pied hérités → deep-lock sur la section et tous ses descendants) et `tests/e2e/email-system-cta-lock.spec.ts` (CTA figé, zones accroche/signature éditables). Plus `__tests__/MjmlEditorOverlay.test.tsx` en unitaire, seule clé montée en `mode: 'system'`. |

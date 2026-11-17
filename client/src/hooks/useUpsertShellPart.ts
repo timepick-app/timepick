@@ -8,7 +8,7 @@
  * `(ownerKind, ownerId)` tuples coexist in memory (e.g. across tabs).
  *
  * No global `onError` — the consuming component owns the user-facing toast
- * (cf. `MjmlEditorOverlayInner.handleCustomizeLockedPart` for the pattern).
+ * (cf. `MjmlEditorOverlayInner.handleSave` for the pattern).
  *
  * Plan `2026-05-17-shell-parts-persistance-save` — `skipInvalidate` option
  * neutralises the `onSuccess` invalidation when the orchestrator (`handleSave`

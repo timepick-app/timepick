@@ -49,8 +49,9 @@ import {
   type BrandShellTokens,
   type ResolvedMjBodyAttrsForCanvas,
   type ResolvedShellForCanvas,
+  type ShellLock,
 } from './bodyExtraction'
-import { COMMON_SHELL_OWNER, routeShellLegAction } from './shellLegRouting'
+import { COMMON_SHELL_OWNER, routeEventShellLegAction, routeShellLegAction } from './shellLegRouting'
 import type { MjmlEditorMode, MjmlEditorOwnerKind, TemplateSwitcherProps } from './MjmlEditorOverlay'
 import {
   EmailIdentityMenu,
@@ -147,6 +148,29 @@ function toCanvasShell(resolved: ResolvedShell | undefined): ResolvedShellForCan
   }
 }
 
+// Coque à re-pousser quand le canvas est reconstruit EN COURS D'ÉDITION : les
+// sections telles qu'elles sont à l'écran, pas le résolu serveur. Sans cela,
+// déverrouiller un second bloc effaçait les modifications non enregistrées du
+// premier (en-tête, pied, fond, carte). Les blocs encore verrouillés ne peuvent
+// pas avoir divergé du résolu, donc les lire dans le canvas est sans effet pour
+// eux. Canvas sans carte (cascade content-wrapper vide) → résolu serveur.
+function canvasShellFromCanvas(
+  fullMjml: string,
+  resolved: ResolvedShell | undefined,
+): ResolvedShellForCanvas | undefined {
+  const base = toCanvasShell(resolved)
+  if (!base || !isShellMarkersIntact(fullMjml)) return base
+  const sections = extractShellSections(fullMjml)
+  return {
+    header: { contentMjml: sections.header, origin: base.header.origin },
+    footer: { contentMjml: sections.footer, origin: base.footer.origin },
+    mjBody: extractMjBodyAttrs(fullMjml),
+    contentWrapper: base.contentWrapper
+      ? { contentMjml: extractContentWrapperFromCanvas(fullMjml), origin: base.contentWrapper.origin }
+      : null,
+  }
+}
+
 function brandTokensFromSettings(settings: ReturnType<typeof useEmailBrandSettings>['data']): BrandShellTokens {
   if (!settings) {
     return {
@@ -190,9 +214,11 @@ function serializeMjBodyContent(attrs: ResolvedMjBodyAttrsForCanvas): string {
 }
 
 // Resolve les attrs <mj-body> depuis la cascade serveur (défauts hardcodés si
-// la cascade est absente). Consommé par le routage du leg mj-body et par
-// l'hydratation de l'ancre locale.
-function resolveMjBodyAttrs(resolved: ResolvedShell | undefined): ResolvedMjBodyAttrsForCanvas {
+// la cascade est absente). Consommé par le routage du leg mj-body (résolu ou
+// parent) et par l'hydratation de l'ancre locale.
+function resolveMjBodyAttrs(
+  resolved: Pick<ResolvedShell, 'mjBody'> | undefined,
+): ResolvedMjBodyAttrsForCanvas {
   return {
     backgroundColor: resolved?.mjBody.attrs.backgroundColor ?? HARDCODED_MJ_BODY_ATTRS_CANVAS.backgroundColor,
     paddingTop: resolved?.mjBody.attrs.paddingTop ?? HARDCODED_MJ_BODY_ATTRS_CANVAS.paddingTop,
@@ -293,11 +319,25 @@ export default function MjmlEditorOverlayInner({
   const [isDirty, setIsDirtyState] = useState(false)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [selectedLockedPart, setSelectedLockedPart] = useState<LockedShellPartKind | null>(null)
-  // PUT « Personnaliser ce bloc » en cours. État dédié, PAS
-  // `upsertShellPart.isPending` : l'instance de mutation est partagée avec
-  // l'orchestrateur de save, son `isPending` serait aussi vrai pendant un
-  // Enregistrer et désactiverait le bouton du panneau sans raison.
-  const [customizing, setCustomizing] = useState(false)
+  // Surcharge paresseuse — blocs de coque déverrouillés par « Personnaliser ce
+  // bloc » pour CETTE session d'édition, sans écriture serveur. État pour le
+  // rendu (garde du panneau, badge) + ref pour les re-wraps lancés depuis des
+  // effets à deps volontairement figées (init, live-preview) : un re-wrap qui
+  // lirait un ensemble périmé re-verrouillerait le bloc en pleine édition.
+  const [unlockedParts, setUnlockedParts] = useState<ReadonlySet<LockedShellPartKind>>(
+    () => new Set(),
+  )
+  const unlockedPartsRef = useRef<ReadonlySet<LockedShellPartKind>>(unlockedParts)
+  const updateUnlockedParts = useCallback((next: ReadonlySet<LockedShellPartKind>) => {
+    unlockedPartsRef.current = next
+    setUnlockedParts(next)
+  }, [])
+  // Verrou passé à TOUS les `wrapBodyForEditing` : lit la ref, jamais une
+  // closure, pour la raison ci-dessus.
+  const shellLock = useCallback(
+    (): ShellLock => ({ ownerKind, isSystem, unlockedParts: unlockedPartsRef.current }),
+    [ownerKind, isSystem],
+  )
   const [previewOverrides, setPreviewOverrides] = useState<BrandPreviewOverrides | null>(null)
   // Plan 4a — dirty de l'identité visuelle, combiné au dirty du corps dans la
   // disabled-rule du master Save (le menu gère son propre snapshot).
@@ -418,7 +458,7 @@ export default function MjmlEditorOverlayInner({
     const bodyForCanvas = isSystem
       ? composeSystemCanvasBody(templateKey as SystemTemplateKey, systemIntroText, systemSignatureText)
       : initialBodyMjml
-    const fullMjml = wrapBodyForEditing(bodyForCanvas, brand, canvasShell, { ownerKind, isSystem })
+    const fullMjml = wrapBodyForEditing(bodyForCanvas, brand, canvasShell, shellLock())
     const wrapper = initEmailEditor(containerRef.current, fullMjml, {
       variables,
       brand,
@@ -498,7 +538,7 @@ export default function MjmlEditorOverlayInner({
         zones.introText,
         zones.signatureText,
       )
-      wrapper.setMjmlSilently(wrapBodyForEditing(bodyForCanvas, brand, canvasShell, { ownerKind, isSystem }))
+      wrapper.setMjmlSilently(wrapBodyForEditing(bodyForCanvas, brand, canvasShell, shellLock()))
       return
     }
     const fullMjml = wrapper.getMjml()
@@ -512,7 +552,7 @@ export default function MjmlEditorOverlayInner({
       }
       return
     }
-    wrapper.setMjmlSilently(wrapBodyForEditing(currentBody, brand, canvasShell, { ownerKind, isSystem }))
+    wrapper.setMjmlSilently(wrapBodyForEditing(currentBody, brand, canvasShell, shellLock()))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewOverrides])
 
@@ -704,28 +744,38 @@ export default function MjmlEditorOverlayInner({
     const bodyRoute: Action = dirtyBody || subjectDirty ? 'patch' : 'skip'
 
     // Header/footer/mj-body : double comparaison (vs ancre pour le dirty, vs
-    // résolu cascade pour décider PUT vs DELETE vs skip). Owner = ownerKind/
-    // ownerId courant (= COMMON_SHELL_OWNER pour l'éditeur Invitation).
-    const headerRoute: Action = routeShellLegAction({
-      dirty: dirtyHeader,
-      canvasMatchesCascade:
-        canvasHeader === normalizeShellFragment(editorContext?.header.contentMjml ?? ''),
-      origin: editorContext?.header.origin,
-      ownerKind,
-    })
-    const footerRoute: Action = routeShellLegAction({
-      dirty: dirtyFooter,
-      canvasMatchesCascade:
-        canvasFooter === normalizeShellFragment(editorContext?.footer.contentMjml ?? ''),
-      origin: editorContext?.footer.origin,
-      ownerKind,
-    })
-    const mjBodyRoute: Action = routeShellLegAction({
-      dirty: dirtyMjBody,
-      canvasMatchesCascade: mjBodyAttrsEqual(canvasMjBodyAttrs, resolveMjBodyAttrs(editorContext)),
-      origin: editorContext?.mjBody.origin,
-      ownerKind,
-    })
+    // cascade pour décider PUT vs DELETE vs skip). Owner = ownerKind/ownerId
+    // courant (= COMMON_SHELL_OWNER pour l'éditeur Invitation).
+    //
+    // Surcharge paresseuse — au niveau événement, la référence est le PARENT
+    // (cascade sans le niveau événement), pas le résolu : quand une surcharge
+    // event existe, le résolu EST cette surcharge, et ramener le bloc au modèle
+    // produirait un PUT au lieu de la supprimer. Routage dédié
+    // (`routeEventShellLegAction`) : il ne lit pas l'origine pour décider d'un
+    // DELETE après modification, l'origine pouvant être périmée juste après un
+    // PUT. Sans `parent` (réponse serveur incomplète), on garde l'ancien
+    // routage : un DELETE fondé sur le résolu supprimerait de vraies surcharges.
+    const parent = ownerKind === 'event' ? editorContext?.parent : undefined
+    const ref = parent ?? editorContext
+    const routeLeg = (dirty: boolean, matches: boolean, origin: string | undefined): Action =>
+      parent
+        ? routeEventShellLegAction({ dirty, canvasMatchesParent: matches, hasEventRow: origin === 'event' })
+        : routeShellLegAction({ dirty, canvasMatchesCascade: matches, origin, ownerKind })
+    const headerRoute = routeLeg(
+      dirtyHeader,
+      canvasHeader === normalizeShellFragment(ref?.header.contentMjml ?? ''),
+      editorContext?.header.origin,
+    )
+    const footerRoute = routeLeg(
+      dirtyFooter,
+      canvasFooter === normalizeShellFragment(ref?.footer.contentMjml ?? ''),
+      editorContext?.footer.origin,
+    )
+    const mjBodyRoute = routeLeg(
+      dirtyMjBody,
+      mjBodyAttrsEqual(canvasMjBodyAttrs, resolveMjBodyAttrs(ref)),
+      editorContext?.mjBody.origin,
+    )
     // Carte content-wrapper γ → toujours COMMON_SHELL_OWNER (template[invitation],
     // propriétaire commun inter-modèles), JAMAIS owner-spécifique.
     const cardRoute: Action = routeShellLegAction({
@@ -905,30 +955,25 @@ export default function MjmlEditorOverlayInner({
           isNotFoundError(result.reason)
         if (result.status !== 'fulfilled' && !isDeleteGone) return
         legResults[leg] = 'ok'
-        // Avance l'ancre per-leg sur la valeur canvas (PUT) ou le résolu
-        // cascade pré-mutation (DELETE — l'invalidation finale re-hydratera).
+        // Avance l'ancre per-leg sur la valeur canvas, PUT comme DELETE. Au
+        // niveau événement, un DELETE n'est routé que si le canvas égale le
+        // parent, c'est-à-dire ce que le serveur résout désormais. Au niveau
+        // modèle, le DELETE est routé quand le canvas égale le résolu (la ligne
+        // supprimée) : l'ancre reste celle d'avant, comme jusqu'ici — l'écran
+        // n'est pas re-poussé, la valeur à l'écran reste la référence de saisie.
+        // L'ancre « résolu pré-mutation » utilisée jusqu'au 2026-11-14 valait,
+        // au niveau événement, la surcharge qu'on venait de supprimer :
+        // « Enregistrer » restait actif après un save réussi.
         if (leg === 'body') {
           initialBodyRef.current = canvasBody
         } else if (leg === 'header') {
-          initialHeaderRef.current =
-            action === 'delete'
-              ? normalizeShellFragment(editorContext?.header.contentMjml ?? '')
-              : canvasHeader
+          initialHeaderRef.current = canvasHeader
         } else if (leg === 'footer') {
-          initialFooterRef.current =
-            action === 'delete'
-              ? normalizeShellFragment(editorContext?.footer.contentMjml ?? '')
-              : canvasFooter
+          initialFooterRef.current = canvasFooter
         } else if (leg === 'mjBody') {
-          initialMjBodyAttrsRef.current =
-            action === 'delete' ? resolveMjBodyAttrs(editorContext) : canvasMjBodyAttrs
+          initialMjBodyAttrsRef.current = canvasMjBodyAttrs
         } else if (leg === 'contentWrapper') {
-          initialContentWrapperRef.current =
-            action === 'delete'
-              ? normalizeShellFragment(
-                  editorContext?.contentWrapper?.contentMjml ?? CARD_DEFAULT_STORAGE,
-                )
-              : canvasCard
+          initialContentWrapperRef.current = canvasCard
         }
       })
 
@@ -975,6 +1020,12 @@ export default function MjmlEditorOverlayInner({
         )
       } else if (shellBrandFailed) {
         toast.error("Certaines modifications n'ont pas pu être enregistrées")
+      } else if (bodyRoute === 'skip' && Object.values(legResults).some((r) => r === 'ok')) {
+        // Le toast de succès vient du conducteur via `onSave`, donc du seul leg
+        // corps. Un enregistrement de la coque seule (en-tête, pied, fond,
+        // carte) ou de l'identité seule restait muet — y compris la suppression
+        // automatique d'une surcharge revenue au modèle.
+        toast.success('Modifications enregistrées.')
       }
 
       // Invalidation unique (les hooks ont skipInvalidate:true) — un leg shell
@@ -1040,11 +1091,15 @@ export default function MjmlEditorOverlayInner({
       // coque event périmée capturée dans la closure.
       const refreshed = await refetchEditorContext()
       const freshContext = refreshed?.data ?? editorContext
+      // Le reset relâche toute la coque event vers la cascade : les blocs
+      // déverrouillés pour la session redeviennent hérités, donc verrouillés —
+      // même si le canvas ne peut pas être re-poussé ci-dessous.
+      updateUnlockedParts(new Set())
       const wrapper = editorRef.current
       if (wrapper && brandSettings) {
         const brand = brandTokensFromSettings(brandSettings)
         const canvasShell = toCanvasShell(freshContext)
-        const fullMjml = wrapBodyForEditing(defaultBodyMjml, brand, canvasShell, { ownerKind, isSystem })
+        const fullMjml = wrapBodyForEditing(defaultBodyMjml, brand, canvasShell, shellLock())
         wrapper.setMjmlSilently(fullMjml)
       }
       initialBodyRef.current = defaultBodyMjml
@@ -1082,118 +1137,65 @@ export default function MjmlEditorOverlayInner({
     } finally {
       setResetting(false)
     }
-  }, [brandSettings, defaultBodyMjml, editorContext, isSystem, onReset, ownerKind, refetchEditorContext, setDirty])
+  }, [brandSettings, defaultBodyMjml, editorContext, onReset, refetchEditorContext, setDirty, shellLock, updateUnlockedParts])
 
-  // Crée la surcharge de coque au niveau événement — le geste que propose le
-  // panneau d'héritage (« Personnaliser ce bloc »).
+  // « Personnaliser ce bloc » (panneau d'héritage, niveau événement) —
+  // SURCHARGE PARESSEUSE : le clic déverrouille le bloc pour la session et
+  // n'écrit RIEN en base. La ligne `shell_parts(event, …)` n'est créée qu'au
+  // save, et seulement si le bloc diverge du résolu parent (cf. `handleSave`).
+  // Jusqu'au 2026-11-14 le clic PUTait le résolu courant : l'événement était
+  // figé pour ce bloc sans aucune divergence visible, et les modifications du
+  // modèle général ne lui parvenaient plus.
   //
-  // Le PUT seul NE SUFFIT PAS. L'effet d'init du canvas dépend de
-  // `[editorReady]` seul, délibérément (préserver les éditions en cours à
-  // travers les refetches) : un refetch de contexte ne re-pousse donc jamais le
-  // canvas. Sans le re-push ci-dessous, la surcharge serait bien créée en base
-  // mais le bloc resterait verrouillé à l'écran jusqu'à réouverture de
-  // l'éditeur — c'était le trou de la première version de ce bouton
-  // (`5eebca2e^`), dont le `onSuccess` ne faisait que refermer le panneau.
-  const handleCustomizeLockedPart = useCallback(async () => {
+  // Le re-push du canvas reste indispensable : l'effet d'init dépend de
+  // `[editorReady]` seul, et c'est le rejeu de `applyShellLocks` par
+  // `setMjmlSilently` qui retire le deep-lock (`data-inherited`). Pas de toast
+  // de succès : la pastille ambre et l'estompage qui disparaissent sont
+  // l'accusé de réception, dans le même écran.
+  const handleCustomizeLockedPart = useCallback(() => {
     const partKind = selectedLockedPart
     // La surcharge bloc par bloc n'existe qu'au niveau événement — cf. la
     // politique de personnalisation de la coque email, section « Portée du
     // panneau d'héritage ». Le bouton n'est rendu que sous ces conditions ; la
     // garde ferme le contrat côté handler.
-    if (!partKind || ownerKind !== 'event' || !ownerId || !editorContext) return
-    setCustomizing(true)
-    try {
-      // On PUT le résolu COURANT tel quel : la personnalisation matérialise ce
-      // que l'admin voit déjà, elle ne change rien visuellement. Conséquence
-      // voulue sur le dirty tracker — `normalizeShellFragment` strippe
-      // `data-part-kind`, donc les ancres de coque restent valides et
-      // « Enregistrer » ne doit PAS s'activer après ce clic.
-      await upsertShellPart.mutateAsync({
-        ownerKind,
-        ownerId,
-        partKind,
-        contentMjml: tagSectionWithPartKind(
-          editorContext[partKind].contentMjml,
-          partKind,
-        ),
-      })
-      // Instance `skipInvalidate: true` partagée avec l'orchestrateur de save :
-      // le refetch est explicite, unique, et séquencé après le PUT — même
-      // discipline que `handleResetConfirmed`, pas de course d'invalidation.
-      const refreshed = await refetchEditorContext()
-      const freshContext = refreshed?.data ?? editorContext
-      const wrapper = editorRef.current
-      let canvasRefreshed = false
-      if (wrapper && brandSettings && !refreshed.error) {
-        // Pattern du live-preview de la marque : extraire le corps courant puis
-        // re-wrapper — les éditions en cours du corps sont PRÉSERVÉES (le reset,
-        // lui, re-pousse `defaultBodyMjml` et les écrase). `setMjmlSilently`
-        // rejoue `applyShellLocks` : c'est ce rejeu qui rend le bloc éditable,
-        // `origin` valant désormais `'event'`.
-        //
-        // `getMjml()` est DANS le try : à ce point le PUT a déjà réussi, donc tout
-        // échec en aval doit retomber sur le message honnête ci-dessous, jamais
-        // sur « Erreur lors de la création de la surcharge » — qui ferait croire à
-        // un échec alors que la surcharge existe en base.
-        try {
-          const fullMjml = wrapper.getMjml()
-          if (isBodyMarkerIntact(fullMjml)) {
-            const currentBody = extractBodyFragment(fullMjml)
-            const brand = brandTokensFromSettings(
-              previewOverrides ? { ...brandSettings, ...previewOverrides } : brandSettings,
-            )
-            const canvasShell = toCanvasShell(freshContext)
-            wrapper.setMjmlSilently(
-              wrapBodyForEditing(currentBody, brand, canvasShell, { ownerKind, isSystem }),
-            )
-            canvasRefreshed = true
-          }
-        } catch (err) {
-          if (import.meta.env.DEV) {
-            console.warn('[MjmlEditorOverlay] customize re-push failed:', err)
-          }
+    if (!partKind || ownerKind !== 'event' || !editorContext) return
+    const previous = unlockedPartsRef.current
+    const next = new Set(previous).add(partKind)
+    const wrapper = editorRef.current
+    let canvasRefreshed = false
+    if (wrapper && brandSettings) {
+      // Pattern du live-preview de la marque : extraire le corps courant puis
+      // re-wrapper — les éditions en cours du corps sont PRÉSERVÉES.
+      try {
+        const fullMjml = wrapper.getMjml()
+        if (isBodyMarkerIntact(fullMjml)) {
+          const currentBody = extractBodyFragment(fullMjml)
+          const brand = brandTokensFromSettings(
+            previewOverrides ? { ...brandSettings, ...previewOverrides } : brandSettings,
+          )
+          // La ref AVANT le wrap : `shellLock()` la lit.
+          unlockedPartsRef.current = next
+          wrapper.setMjmlSilently(
+            wrapBodyForEditing(currentBody, brand, canvasShellFromCanvas(fullMjml, editorContext), shellLock()),
+          )
+          canvasRefreshed = true
+        }
+      } catch (err) {
+        if (import.meta.env.DEV) {
+          console.warn('[MjmlEditorOverlay] customize re-push failed:', err)
         }
       }
-      // Review R-P6 — l'admin peut fermer l'overlay pendant l'attente réseau ;
-      // les états et les toasts ne concernent plus personne. Même discipline que
-      // `handleSave`, qui garde tous ses setState post-await.
-      if (!mountedRef.current) return
-      setSelectedLockedPart(null)
-      // Accusé de réception émis EN DERNIER, une fois le canvas effectivement
-      // re-poussé — même raison que `handleResetConfirmed` : émis plus haut, un
-      // échec du re-push ferait cohabiter succès et erreur sur un seul clic.
-      if (canvasRefreshed) {
-        toast.success("Bloc personnalisé à ce niveau — vous pouvez désormais l'éditer.")
-      } else {
-        // La surcharge EXISTE en base ; seul l'affichage n'a pas suivi. Message
-        // honnête plutôt qu'un succès muet sur un bloc resté verrouillé.
-        toast.error(
-          "Bloc personnalisé, mais l'éditeur n'a pas pu être actualisé. Rouvrez-le pour modifier ce bloc.",
-        )
-      }
-    } catch (err) {
-      if (mountedRef.current) {
-        toast.error(
-          userFacingErrorMessage(
-            err,
-            "La personnalisation de ce bloc a échoué. Le bloc n'a pas été modifié, réessayez.",
-          ),
-        )
-      }
-    } finally {
-      if (mountedRef.current) setCustomizing(false)
     }
-  }, [
-    brandSettings,
-    editorContext,
-    isSystem,
-    ownerId,
-    ownerKind,
-    previewOverrides,
-    refetchEditorContext,
-    selectedLockedPart,
-    upsertShellPart,
-  ])
+    if (!canvasRefreshed) {
+      // Rien n'a changé à l'écran : on ne garde pas un état « déverrouillé »
+      // que le canvas ne reflète pas.
+      unlockedPartsRef.current = previous
+      toast.error("Ce bloc n'a pas pu être rendu modifiable. Rouvrez l'éditeur et réessayez.")
+      return
+    }
+    updateUnlockedParts(next)
+    setSelectedLockedPart(null)
+  }, [brandSettings, editorContext, ownerKind, previewOverrides, selectedLockedPart, shellLock, updateUnlockedParts])
 
   // Le titre affiché dans la barre d'outils. Au niveau événement c'est le NOM
   // DE L'ÉVÉNEMENT — du texte libre borné à 200 caractères par le formulaire,
@@ -1211,10 +1213,11 @@ export default function MjmlEditorOverlayInner({
   const badgeInherited =
     !!selectedLockedPart &&
     !!editorContext &&
-    isShellBlockInherited(editorContext[selectedLockedPart].origin, {
-      ownerKind,
-      isSystem,
-    })
+    isShellBlockInherited(
+      editorContext[selectedLockedPart].origin,
+      { ownerKind, isSystem, unlockedParts },
+      selectedLockedPart,
+    )
 
   // Palier de la barre d'outils : le plus lisible qui TIENT, mesuré à chaque
   // changement de largeur ou de contenu. Aucun seuil en pixels — voir
@@ -1660,7 +1663,7 @@ export default function MjmlEditorOverlayInner({
             restent séparées : 32 px de côté, 4 px entre elles, aucun
             chevauchement. */}
         <div className="ml-auto flex items-center gap-2 group-data-[toolbar-tier=icones]/toolbar:gap-1">
-          {/* Gate capability : le reset n'apparaît que là où onReset est câblé. handleResetConfirmed hot-patch le canvas via wrapBodyForEditing(defaultBodyMjml, ..., { ownerKind, isSystem }) — tout futur appelant câblant onReset hors événement doit garantir des defaultBodyMjml/ownerKind cohérents. */}
+          {/* Gate capability : le reset n'apparaît que là où onReset est câblé. handleResetConfirmed hot-patch le canvas via wrapBodyForEditing(defaultBodyMjml, ..., shellLock()) — tout futur appelant câblant onReset hors événement doit garantir des defaultBodyMjml/ownerKind cohérents. */}
           {onReset && (
             <Button
               type="button"
@@ -1911,10 +1914,11 @@ export default function MjmlEditorOverlayInner({
           // « faut-il proposer une surcharge à ce niveau ? », qui est propre à
           // l'événement.
           ownerKind === 'event' &&
-          isShellBlockInherited(editorContext[selectedLockedPart].origin, {
-            ownerKind,
-            isSystem,
-          }) && (
+          isShellBlockInherited(
+            editorContext[selectedLockedPart].origin,
+            { ownerKind, isSystem, unlockedParts },
+            selectedLockedPart,
+          ) && (
             // `z-20` OBLIGATOIRE, mesuré dans l'éditeur réel le 2026-07-30 :
             // sans z-index, ce panneau est intégralement enterré et son bouton
             // ne reçoit aucun clic souris. GrapesJS empile son conteneur de
@@ -1966,7 +1970,6 @@ export default function MjmlEditorOverlayInner({
                 origin={editorContext[selectedLockedPart].origin}
                 partKind={selectedLockedPart}
                 onCustomize={handleCustomizeLockedPart}
-                isCustomizing={customizing}
               />
             </div>
           )}

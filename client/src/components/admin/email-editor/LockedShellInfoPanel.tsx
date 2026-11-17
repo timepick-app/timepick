@@ -1,5 +1,5 @@
 import type { HTMLAttributes } from 'react'
-import { Loader2, Pencil } from 'lucide-react'
+import { Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { BlockOrigin } from '@/services/editor-context.service'
 
@@ -8,14 +8,13 @@ export type LockedShellPartKind = 'header' | 'footer'
 interface LockedShellInfoPanelProps extends HTMLAttributes<HTMLDivElement> {
   origin: BlockOrigin
   partKind: LockedShellPartKind
-  /** Crée la surcharge de coque au niveau courant. Le handler vit dans
-   *  l'overlay hôte, pas ici : matérialiser la surcharge exige de re-pousser le
-   *  canvas GrapesJS (rejeu de la passe de verrous) pour que le bloc devienne
-   *  éditable dans le même écran, et le canvas n'est pas accessible d'ici. Ce
-   *  panneau est purement présentationnel. */
+  /** Déverrouille le bloc pour la session d'édition. Le handler vit dans
+   *  l'overlay hôte, pas ici : rendre le bloc éditable exige de re-pousser le
+   *  canvas GrapesJS (rejeu de la passe de verrous), et le canvas n'est pas
+   *  accessible d'ici. Aucune écriture serveur : la surcharge n'est créée qu'à
+   *  l'enregistrement, si le bloc diverge du niveau supérieur. Ce panneau est
+   *  purement présentationnel. */
   onCustomize: () => void
-  /** PUT en cours — désactive le bouton et bascule son icône. */
-  isCustomizing: boolean
 }
 
 const ORIGIN_DESCRIPTION: Record<BlockOrigin, string> = {
@@ -34,7 +33,6 @@ export const LockedShellInfoPanel = ({
   origin,
   partKind,
   onCustomize,
-  isCustomizing,
   ...rest
 }: LockedShellInfoPanelProps) => {
   const description = ORIGIN_DESCRIPTION[origin]
@@ -58,6 +56,8 @@ export const LockedShellInfoPanel = ({
           section « Indicateurs de contenu hérité ». */}
       <p className="text-sm text-muted-foreground">
         Cliquez sur «&nbsp;Personnaliser ce bloc&nbsp;» pour le modifier ici.
+        Il ne deviendra propre à cet événement que si vous l&apos;enregistrez
+        modifié&nbsp;; sinon il continue de suivre le niveau supérieur.
       </p>
       {/* Action primaire ET unique du panneau : size/variant `default` (h-9).
           `w-full` = dérogation D1 du système de design (contexte étroit) : un CTA
@@ -73,20 +73,10 @@ export const LockedShellInfoPanel = ({
         size="default"
         variant="default"
         className="w-full"
-        disabled={isCustomizing}
-        // R10 bis exempte du libellé dynamique le bouton dont l'ICÔNE porte
-        // l'information transitoire — mais cette icône est `aria-hidden`, donc
-        // muette pour un lecteur d'écran, à qui il ne resterait que `disabled`.
-        // `aria-busy` rétablit l'information sur ce canal sans changer le patron.
-        aria-busy={isCustomizing}
         onClick={onCustomize}
         data-testid={`locked-shell-customize-btn-${partKind}`}
       >
-        {isCustomizing ? (
-          <Loader2 className="animate-spin" aria-hidden="true" />
-        ) : (
-          <Pencil aria-hidden="true" />
-        )}
+        <Pencil aria-hidden="true" />
         Personnaliser ce bloc
       </Button>
     </div>

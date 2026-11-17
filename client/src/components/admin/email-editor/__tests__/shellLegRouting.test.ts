@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { COMMON_SHELL_OWNER, routeShellLegAction } from '../shellLegRouting'
+import { COMMON_SHELL_OWNER, routeEventShellLegAction, routeShellLegAction } from '../shellLegRouting'
 
 describe('shellLegRouting — routeShellLegAction (décision pure PUT/DELETE/skip)', () => {
   it('!dirty → skip (quels que soient les autres champs)', () => {
@@ -58,6 +58,24 @@ describe('shellLegRouting — routeShellLegAction (décision pure PUT/DELETE/ski
         ownerKind: 'template',
       }),
     ).toBe('skip')
+  })
+})
+
+describe('shellLegRouting — routeEventShellLegAction (niveau événement, référence = parent)', () => {
+  it.each([
+    // [dirty, canvas = parent, ligne event, attendu, pourquoi]
+    [true, false, false, 'put', 'bloc déverrouillé puis modifié : la surcharge naît'],
+    [true, false, true, 'put', 'surcharge existante modifiée'],
+    [false, false, true, 'skip', 'surcharge existante intacte : rien à écrire'],
+    [false, false, false, 'skip', 'rien de modifié, rien en base'],
+    [false, true, false, 'skip', 'bloc déverrouillé non modifié : aucune écriture'],
+    // Origine périmée juste après un PUT : la ligne existe mais `editorContext`
+    // dit encore « modèle ». Le retour au parent doit quand même supprimer.
+    [true, true, false, 'delete', 'retour au parent avec origine périmée'],
+    [true, true, true, 'delete', 'retour au parent : la surcharge meurt'],
+    [false, true, true, 'delete', 'surcharge fantôme (identique au parent) supprimée au save'],
+  ] as const)('dirty=%s, =parent=%s, ligne=%s → %s (%s)', (dirty, canvasMatchesParent, hasEventRow, expected, _why) => {
+    expect(routeEventShellLegAction({ dirty, canvasMatchesParent, hasEventRow })).toBe(expected)
   })
 })
 

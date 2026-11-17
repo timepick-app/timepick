@@ -48,6 +48,34 @@ export function routeShellLegAction(args: {
 }
 
 /**
+ * Routage d'un leg de coque au NIVEAU ÉVÉNEMENT (surcharge paresseuse), où la
+ * référence est le parent (cascade sans le niveau événement) :
+ * - canvas ≠ parent : `put` si modifié, sinon `skip` (surcharge existante intacte) ;
+ * - canvas = parent : `delete` dès que le bloc est modifié OU qu'une ligne event
+ *   existe, sinon `skip`.
+ *
+ * Pourquoi ne pas réutiliser `routeShellLegAction` : son `delete` dépend de
+ * l'origine résolue, lue dans un `editorContext` rafraîchi de façon asynchrone.
+ * Après un PUT, tant que le refetch n'est pas revenu, l'origine dit encore
+ * « modèle » : ramener le bloc au parent aurait été routé `skip`, laissant la
+ * surcharge en base sans aucun signal. Le DELETE serveur étant idempotent (204
+ * sans ligne), le router dès que le bloc modifié égale le parent est sûr.
+ * Le cas « non modifié, ligne event = parent » supprime les surcharges
+ * fantômes héritées du PUT-au-clic d'avant le 2026-11-14 au premier
+ * enregistrement de l'éditeur de l'événement.
+ */
+export function routeEventShellLegAction(args: {
+  dirty: boolean
+  /** canvas (normalisé) === parent (normalisé). */
+  canvasMatchesParent: boolean
+  /** Une ligne `shell_parts` @ event existe pour ce bloc (origine résolue `event`). */
+  hasEventRow: boolean
+}): ShellLegAction {
+  if (!args.canvasMatchesParent) return args.dirty ? 'put' : 'skip'
+  return args.dirty || args.hasEventRow ? 'delete' : 'skip'
+}
+
+/**
  * D8 — owner partagé des parts γ éditables au canvas (`header` + `mj-body`).
  * Le bloc `template[invitation]` est la source inter-modèles (promotion γ,
  * cf. la politique de structure verrouillée des emails, section « Promotion γ »). Cet owner n'est écrit QUE

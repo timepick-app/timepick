@@ -842,6 +842,23 @@ describe('extractShellSections', () => {
 })
 
 describe('normalizeShellFragment', () => {
+  // Le sélecteur de couleur rend `#000000` en `black` : sans canonicalisation,
+  // un bloc ramené à une valeur héritée noire serait vu comme différent du
+  // modèle et son enregistrement créerait une surcharge identique.
+  it('maps CSS color names to #rrggbb in color attributes and border shorthands, anywhere in the fragment', () => {
+    const fragment =
+      '<mj-section background-color="White" border-top="1px solid black"><mj-column><mj-text color="black">x</mj-text></mj-column></mj-section>'
+    expect(normalizeShellFragment(fragment)).toBe(
+      '<mj-section background-color="#ffffff" border-top="1px solid #000000"><mj-column><mj-text color="#000000">x</mj-text></mj-column></mj-section>',
+    )
+  })
+
+  it('leaves non-name color values untouched (transparent, rgba, hex)', () => {
+    const fragment =
+      '<mj-section background-color="transparent"><mj-column><mj-text color="rgba(0,0,0,0.5)">x</mj-text><mj-text color="#AbCdEf">y</mj-text></mj-column></mj-section>'
+    expect(normalizeShellFragment(fragment)).toBe(fragment)
+  })
+
   it('strips css-class=locked-shell, data-locked-label, data-part-kind, data-inherited AND data-inherited-label', () => {
     const fragment =
       '<mj-section css-class="locked-shell" data-locked-label="En-tête" data-part-kind="header" data-inherited="true" data-inherited-label="Hérité du modèle" padding="20px"><mj-column></mj-column></mj-section>'

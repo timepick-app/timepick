@@ -266,8 +266,8 @@ describe('validateShellContentPart — branche mj-body', () => {
       if (!result.ok) expect(result.error).toMatch(/Invalid attribute on <mj-body>/)
     })
 
-    it('rejects a non-hex background-color', () => {
-      const fragment = `<mj-body background-color="red"></mj-body>`
+    it('rejects a transparent background-color (CSS names are accepted, transparency is not)', () => {
+      const fragment = `<mj-body background-color="transparent"></mj-body>`
       const result = validateShellContentPart(fragment, 'mj-body')
       expect(result.ok).toBe(false)
       if (!result.ok) expect(result.error).toMatch(/hex color/i)
@@ -396,8 +396,8 @@ describe('validateShellContentPart — branche content-wrapper', () => {
       if (!result.ok) expect(result.error).toMatch(/Invalid attribute on <mj-section> for content-wrapper/)
     })
 
-    it('rejects a non-hex background-color', () => {
-      const fragment = `<mj-section background-color="red"></mj-section>`
+    it('rejects a transparent background-color (CSS names are accepted, transparency is not)', () => {
+      const fragment = `<mj-section background-color="rgba(255,255,255,0.5)"></mj-section>`
       const result = validateShellContentPart(fragment, 'content-wrapper')
       expect(result.ok).toBe(false)
       if (!result.ok) expect(result.error).toMatch(/hex color/i)
